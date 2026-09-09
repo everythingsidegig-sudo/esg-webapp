@@ -1,36 +1,71 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ESG — MVP Web App
 
-## Getting Started
+Everything SideGig (ESG): a peer-to-peer gig marketplace. This is the core-loop MVP —
+Sign In/Register, Post a Gig, Browse/Claim, Select Provider, Start handshake, Chat,
+Complete/Incomplete + payment amounts, and WOM/Lemon feedback. See
+`../CONSOLIDATED_SPEC.md` for the full functional spec this was scoped down from.
 
-First, run the development server:
+Stack: Next.js (App Router) + Tailwind, Supabase (Postgres + Auth + Storage + Realtime).
+
+## 1. Create a free Supabase project
+
+1. Go to https://supabase.com and create a free account/project (you'll need to do this
+   yourself — account creation isn't something I can do on your behalf).
+2. In the new project, open **SQL Editor** and run the contents of
+   `supabase/migrations/0001_init.sql` once. This creates every table, RLS policy, and
+   the RPC functions the app calls (claim, select, start, complete/incomplete, payment,
+   feedback).
+3. Under **Project Settings → Data API**, confirm the Realtime toggle is on for the
+   `public` schema (default is on).
+4. Under **Authentication → URL Configuration**, add your local dev URL
+   (`http://localhost:3000/auth/callback`) and, once deployed, your Vercel URL
+   (`https://your-app.vercel.app/auth/callback`) to the Redirect URLs allowlist.
+5. Under **Project Settings → API**, copy the **Project URL** and the **anon public key**.
+
+## 2. Configure environment variables
+
+Copy `.env.local.example` to `.env.local` and fill in the two values from step 1.5:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cp .env.local.example .env.local
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## 3. Run locally
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm install
+npm run dev
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Open http://localhost:3000. Test the full core loop with two accounts (e.g. two browser
+profiles or one regular + one incognito window): sign up as both, post a gig as one,
+claim it as the other, select the provider, start → approve start, chat, mark
+complete/incomplete, enter payment amounts, and leave feedback.
 
-## Learn More
+## 4. Deploy for free (Vercel)
 
-To learn more about Next.js, take a look at the following resources:
+1. Push this repo to GitHub.
+2. Go to https://vercel.com, sign in (or create a free account), and "Import Project"
+   from that GitHub repo, pointing the root directory at `webapp/`.
+3. Add the same two environment variables (`NEXT_PUBLIC_SUPABASE_URL`,
+   `NEXT_PUBLIC_SUPABASE_ANON_KEY`) in the Vercel project's Environment Variables
+   settings.
+4. Deploy. Then go back to Supabase's Authentication → URL Configuration and add the
+   resulting `https://<your-app>.vercel.app/auth/callback` URL.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Both Vercel's Hobby tier and Supabase's Free tier cover this app's expected traffic at
+no cost.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## What's simplified vs. the full spec (see CONSOLIDATED_SPEC.md)
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Fixed-price gigs only for now — Price Negotiation (3-round) isn't built yet.
+- Direct Gig Request, Repost, Report/Block/Safety, and Dispute *adjudication* aren't
+  built — a mismatch (completion status, pay type, or payment amount) flips a gig to
+  "Disputed" and stops there with a static message, per the spec's own note that
+  adjudication rules were never defined.
+- Delay/no-response escalation on the Start handshake isn't built — it's a simple
+  Start → Approve exchange for now.
+- Sign-up uses Supabase's built-in email confirmation link instead of a custom OTP
+  screen, and profile photo is optional at signup (add it afterward on /profile) rather
+  than mandatory during registration.
+- Sign-in is email + password only (no username/phone identifier) for MVP.
