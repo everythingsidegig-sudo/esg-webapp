@@ -7,7 +7,7 @@ export function safeNext(value: string | null | undefined): string {
     if (/[\\\u0000-\u001f\u007f]/.test(decoded) || decoded.startsWith("//")) return "/";
     const url = new URL(value, "https://esg.invalid");
     if (url.origin !== "https://esg.invalid") return "/";
-    if (!/^\/(?:post|browse|location|my-gigs|profile)?$/.test(url.pathname)
+    if (!/^\/(?:post|browse|location|my-gigs|profile|need-help)?$/.test(url.pathname)
         && !/^\/gigs\/[0-9a-f-]{36}$/i.test(url.pathname)
         && !/^\/profile\/[A-Za-z0-9_]+$/.test(url.pathname)) return "/";
     return url.pathname + url.search + url.hash;
@@ -18,12 +18,16 @@ export function setupDestination(next: string | null | undefined) {
   return `/onboarding?next=${encodeURIComponent(safeNext(next))}`;
 }
 
-export function registrationError(username: string, password: string, confirm: string): string | null {
-  if (!/^[A-Za-z0-9]{6,40}$/.test(username)) return "Username must be 6–40 letters/numbers, with no spaces or symbols.";
+export function passwordError(password: string, confirm: string): string | null {
   if (password.length < 10 || !/[A-Za-z]/.test(password) || !/[0-9]/.test(password) || !/[^A-Za-z0-9]/.test(password)) {
     return "Password must be at least 10 characters with a letter, a number, and a symbol.";
   }
   return password === confirm ? null : "Passwords don't match.";
+}
+
+export function registrationError(username: string, password: string, confirm: string): string | null {
+  if (!/^[A-Za-z0-9]{6,40}$/.test(username)) return "Username must be 6–40 letters/numbers, with no spaces or symbols.";
+  return passwordError(password, confirm);
 }
 
 export function approximateCoordinates(lat: number | null, lng: number | null) {

@@ -1,18 +1,20 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { safeNext, setupDestination, registrationError, approximateCoordinates, gigInputError, friendlyError } from "../src/lib/journey.ts";
+import { safeNext, setupDestination, registrationError, passwordError, approximateCoordinates, gigInputError, friendlyError } from "../src/lib/journey.ts";
 import { SERVICE_TYPES } from "../src/lib/services.ts";
 
 for (const value of [null, "https://evil.invalid", "//evil.invalid", "javascript:alert(1)", "/\\evil.invalid", "/%2f/evil.invalid", "/%255c%255cevil.invalid", "/post\n", "/auth/callback", "/onboarding", "/unknown", "/post?x=%0aevil", "/post?x=%ZZ"]) {
   test(`unsafe or cyclic destination rejected: ${JSON.stringify(value)}`, () => assert.equal(safeNext(value), "/"));
 }
-for (const value of ["/", "/post", "/post?loc=New%20York", "/my-gigs", "/location?journey=need_help", "/browse?lat=0&lng=0", "/profile", "/gigs/12345678-1234-1234-1234-123456789012"]) {
+for (const value of ["/", "/post", "/post?loc=New%20York", "/my-gigs", "/need-help", "/location?journey=need_help", "/browse?lat=0&lng=0", "/profile", "/gigs/12345678-1234-1234-1234-123456789012"]) {
   test(`safe destination preserved: ${value}`, () => assert.equal(safeNext(value), value));
 }
 test("setup preserves intended post destination", () => assert.equal(setupDestination("/post?loc=Test"), "/onboarding?next=%2Fpost%3Floc%3DTest"));
 test("setup sanitizes external next", () => assert.equal(setupDestination("https://evil.invalid"), "/onboarding?next=%2F"));
 test("valid registration", () => assert.equal(registrationError("Tester123", "Password1!", "Password1!"), null));
+test("valid replacement password", () => assert.equal(passwordError("Replacement1!", "Replacement1!"), null));
+test("replacement passwords must match", () => assert.match(passwordError("Replacement1!", "Different1!") ?? "", /match/));
 for (const [username, password, confirm] of [["short", "Password1!", "Password1!"], ["has spaces", "Password1!", "Password1!"], ["Tester123", "short1!", "short1!"], ["Tester123", "Password!!", "Password!!"], ["Tester123", "Password12", "Password12"], ["Tester123", "Password1!", "different"]]) {
   test(`registration validation ${username}/${password.length}/${confirm.length}`, () => assert.ok(registrationError(username, password, confirm)));
 }

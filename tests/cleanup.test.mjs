@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
-import { approximateCoordinates, gigInputError, friendlyError, setupDestination } from "../src/lib/journey.ts";
+import { approximateCoordinates, gigInputError, friendlyError, passwordError, safeNext, setupDestination } from "../src/lib/journey.ts";
 
 // Execute the actual client components with controlled hooks and Supabase responses.
 // This is a small unit harness, not a browser or hosted-Auth verification.
@@ -46,7 +46,7 @@ async function component(path, name, overrides = {}) {
     "@/lib/auth-context": { useAuth: () => auth },
     "@/lib/supabase/client": { createClient: () => overrides.client },
     "@/lib/services": { SERVICE_TYPES: ["Cleaning", "Other"] },
-    "@/lib/journey": { friendlyError, setupDestination, approximateCoordinates, gigInputError },
+    "@/lib/journey": { friendlyError, passwordError, safeNext, setupDestination, approximateCoordinates, gigInputError },
     "@/components/AuthGuard": { default: "guard" },
     "@/components/StatusBadge": { default: "badge" },
     ...overrides.mocks,
@@ -175,20 +175,119 @@ for (const status of ["active", "draft"]) {
   });
 }
 
-for (const journey of ["need_help", "earn_money"]) {
-  test(`Location continues ${journey} without an intermediate screen`, async () => {
-    const destinations = [], locations = [];
-    const app = await component("src/app/location/page.tsx", "LocationEntryInner", {
-      storage: { setItem: (_key, value) => locations.push(JSON.parse(value)) },
-      mocks: {
-        "@/lib/location": { LOCATION_KEY: "esg:general-area" },
-        "next/navigation": { useSearchParams: () => new URLSearchParams({ journey }), useRouter: () => ({ push: (url) => destinations.push(url) }) },
-      },
+test("Location is confirmed before either journey choice appears", async () => {
+  const destinations = [], locations = [];
+  const app = await component("src/app/location/page.tsx", "LocationEntryInner", {
+    storage: { setItem: (_key, value) => locations.push(JSON.parse(value)) },
+    mocks: {
+      "@/lib/location": { LOCATION_KEY: "esg:general-area" },
+      "next/navigation": { useRouter: () => ({ push: (url) => destinations.push(url) }) },
+    },
+  });
+  let tree = app.render();
+  assert.equal(nodes(tree, (node) => node.props.href === "/need-help").length, 0);
+  assert.equal(nodes(tree, (node) => node.props["aria-label"] === "Help & Earn Money").length, 0);
+  nodes(tree, (node) => node.type === "input")[0].props.onChange({ target: { value: "Test city" } });
+  tree = app.render(); button(tree, "Continue").props.onClick();
+  tree = app.render();
+  assert.equal(nodes(tree, (node) => node.props.href === "/need-help").length, 1);
+  assert.equal(nodes(tree, (node) => node.props["aria-label"] === "Help & Earn Money").length, 1);
+  assert.deepEqual(destinations, []);
+  assert.equal(locations[0].text, "Test city");
+});
+
+test("I Need Help offers Post a Gig and a non-navigating Coming soon helper choice", async () => {
+  const app = await component("src/app/need-help/page.tsx", "NeedHelp");
+  const tree = app.render();
+  const links = nodes(tree, (node) => node.type === "a");
+  assert.deepEqual(links.map((link) => link.props.href), ["/post"]);
+  assert.equal(nodes(tree, (node) => node.props.children === "Find a Helper").length, 1);
+  assert.equal(nodes(tree, (node) => node.props.children === "Coming soon").length, 1);
+  assert.equal(nodes(tree, (node) => node.props.href === "/browse").length, 0);
+});
+
+test("Help & Earn Money passes rounded current coordinates to Browse", async () => {
+  const destinations = [], locations = [];
+  const app = await component("src/app/location/page.tsx", "LocationEntryInner", {
+    storage: { setItem: (_key, value) => locations.push(JSON.parse(value)) },
+    globals: { navigator: { geolocation: { getCurrentPosition: (success) => success({ coords: { latitude: 12.345, longitude: -45.678 } }) } } },
+    mocks: {
+      "@/lib/location": { LOCATION_KEY: "esg:general-area" },
+      "next/navigation": { useSearchParams: () => new URLSearchParams({ journey: "earn_money" }), useRouter: () => ({ push: (url) => destinations.push(url) }) },
+    },
+  });
+  let tree = app.render();
+  button(tree, "📍 Use My Location").props.onClick();
+  tree = app.render(); button(tree, "Continue").props.onClick();
+  tree = app.render(); nodes(tree, (node) => node.props["aria-label"] === "Help & Earn Money")[0].props.onClick();
+  assert.deepEqual(destinations, ["/browse?lat=12.35&lng=-45.68"]);
+  assert.deepEqual(locations, [{ text: "Current location", lat: 12.35, lng: -45.68 }]);
+});
+
+test("logged-out Home contains only authentication entry links", async () => {
+  const app = await component("src/app/page.tsx", "Home");
+  app.auth.user = null; app.auth.profile = null;
+  const tree = app.render();
+  assert.deepEqual(nodes(tree, (node) => node.type === "a").map((node) => node.props.href), ["/auth/sign-in", "/auth/sign-up"]);
+  assert.equal(nodes(tree, (node) => node.props.children === "I Need Help").length, 0);
+  assert.equal(nodes(tree, (node) => node.props.children === "Help & Earn Money").length, 0);
+  assert.equal(nodes(tree, (node) => String(node.props.children).includes("guest")).length, 0);
+});
+
+for (const completed of [false, true]) {
+  test(`authenticated Home routes ${completed ? "completed" : "incomplete"} profile toward Location`, async () => {
+    const destinations = [];
+    const app = await component("src/app/page.tsx", "Home", {
+      mocks: { "next/navigation": { useRouter: () => ({ replace: (url) => destinations.push(url) }) } },
     });
-    let tree = app.render();
-    nodes(tree, (node) => node.type === "input")[0].props.onChange({ target: { value: "Test city" } });
-    tree = app.render(); button(tree, "Continue").props.onClick();
-    assert.deepEqual(destinations, [journey === "earn_money" ? "/browse?" : "/post"]);
-    assert.equal(locations[0].text, "Test city");
+    app.auth.profile = { ...profile, onboarding_completed_at: completed ? "2026-01-01" : null };
+    app.render();
+    assert.deepEqual(destinations, [completed ? "/location" : "/onboarding?next=%2Flocation"]);
   });
 }
+
+test("Sign In exposes the password-recovery route", async () => {
+  const app = await component("src/app/auth/sign-in/page.tsx", "SignInInner", { client: { auth: {} } });
+  const tree = app.render();
+  assert.equal(nodes(tree, (node) => node.props.href === "/auth/forgot-password").length, 1);
+});
+
+test("forgot-password requests a recovery link without exposing account existence", async () => {
+  const requests = [];
+  const app = await component("src/app/auth/forgot-password/page.tsx", "ForgotPassword", {
+    client: { auth: { resetPasswordForEmail: async (email, options) => { requests.push({ email, options }); return { error: null }; } } },
+    globals: { window: { location: { origin: "http://localhost:3001" } } },
+  });
+  let tree = app.render();
+  nodes(tree, (node) => node.props.id === "recovery-email")[0].props.onChange({ target: { value: "person@example.com" } });
+  tree = app.render();
+  await nodes(tree, (node) => node.type === "form")[0].props.onSubmit({ preventDefault() {} });
+  tree = app.render();
+  assert.deepEqual(JSON.parse(JSON.stringify(requests)), [{ email: "person@example.com", options: { redirectTo: "http://localhost:3001/auth/reset-password" } }]);
+  assert.equal(nodes(tree, (node) => String(node.props.children).includes("If an ESG account uses that email")).length, 1);
+});
+
+test("reset-password exchanges the recovery code before updating the password", async () => {
+  const calls = [], destinations = [];
+  const app = await component("src/app/auth/reset-password/page.tsx", "ResetPassword", {
+    client: { auth: {
+      exchangeCodeForSession: async (code) => { calls.push(["exchange", code]); return { error: null }; },
+      getSession: async () => ({ data: { session: { user: { id: "test-user" } } }, error: null }),
+      updateUser: async ({ password }) => { calls.push(["update", password]); return { error: null }; },
+    } },
+    globals: { window: {
+      location: { href: "http://localhost:3001/auth/reset-password?code=recovery-code" },
+      history: { replaceState: (_state, _title, url) => calls.push(["clean", url]) },
+    } },
+    mocks: { "next/navigation": { useRouter: () => ({ replace: (url) => destinations.push(url) }) } },
+  });
+  app.render(); await flush();
+  let tree = app.render();
+  const inputs = nodes(tree, (node) => node.type === "input");
+  inputs[0].props.onChange({ target: { value: "Replacement1!" } });
+  inputs[1].props.onChange({ target: { value: "Replacement1!" } });
+  tree = app.render();
+  await nodes(tree, (node) => node.type === "form")[0].props.onSubmit({ preventDefault() {} });
+  assert.deepEqual(calls, [["exchange", "recovery-code"], ["clean", "/auth/reset-password"], ["update", "Replacement1!"]]);
+  assert.deepEqual(destinations, ["/"]);
+});

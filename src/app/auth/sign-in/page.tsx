@@ -55,7 +55,10 @@ function SignInInner() {
       </div>
 
       <div>
-        <label htmlFor="signin-password" className="mb-1 block text-sm font-medium">Password</label>
+        <div className="mb-1 flex items-center justify-between gap-3">
+          <label htmlFor="signin-password" className="text-sm font-medium">Password</label>
+          <Link href="/auth/forgot-password" className="text-sm font-medium text-emerald-700">Forgot password?</Link>
+        </div>
         <input
           id="signin-password"
           autoComplete="current-password"

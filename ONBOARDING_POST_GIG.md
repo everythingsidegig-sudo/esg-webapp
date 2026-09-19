@@ -20,8 +20,11 @@ shown as empty lists; exact geolocation coordinates passed through URLs.
 The journey now uses registration -> Supabase email link -> callback -> basic
 profile -> private address/location -> skills/services -> safe intended page.
 Already-onboarded users skip setup after login; posting still requires completed
-setup in the database. Home retains its original journey cards without a setup
-prompt. I Need Help continues from Location directly to Post a Gig. Routine Profile
+setup in the database. Signed-out Home offers only Sign In and Create Account.
+Authentication and any required setup lead to Location, which reveals the I Need
+Help and Help & Earn Money choices only after location confirmation. I Need Help
+continues to a Post a Gig / Find a Helper choice;
+helper search is visibly marked Coming soon and does not browse work gigs. Routine Profile
 editing is separate from the initial onboarding wizard: username/categories save
 without location steps, and photo changes save immediately with checked errors.
 
@@ -176,6 +179,7 @@ Created:
 - `src/lib/location.ts`: general-area session storage.
 - `src/components/ProfileSetup.tsx`: loaded-profile three-step editor.
 - `src/app/onboarding/page.tsx`: setup and intended-destination continuation.
+- `src/app/need-help/page.tsx`: Post a Gig choice and non-navigating Find a Helper preview.
 - `supabase/migrations/0004_onboarding_post_gig.sql`: private setup fields,
   authenticated RPCs, authoritative creation and immutable retry keys.
 - `supabase/tests/onboarding_post_gig.sql`: 75 rollback-only assertions.

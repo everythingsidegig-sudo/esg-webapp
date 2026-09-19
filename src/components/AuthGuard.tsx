@@ -10,22 +10,23 @@ function AuthGuardInner({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const requiresOnboarding = pathname === "/post" || pathname === "/location";
 
   useEffect(() => {
     if (!loading && !user) {
       const next = encodeURIComponent(`${pathname}${searchParams.size ? `?${searchParams.toString()}` : ""}`);
       router.replace(`/auth/sign-in?next=${next}`);
-    } else if (!loading && user && !profileLoading && profile && !profile.onboarding_completed_at && pathname === "/post") {
+    } else if (!loading && user && !profileLoading && profile && !profile.onboarding_completed_at && requiresOnboarding) {
       router.replace(setupDestination(`${pathname}${searchParams.size ? `?${searchParams.toString()}` : ""}`));
     }
-  }, [loading, user, profileLoading, profile, pathname, searchParams, router]);
+  }, [loading, user, profileLoading, profile, pathname, searchParams, router, requiresOnboarding]);
 
   if (loading || !user) {
     return <div className="p-8 text-center text-neutral-500">Loading…</div>;
   }
 
   if (profileError && !profile) return <div role="alert">{profileError} <button onClick={() => void refreshProfile().catch(() => {})}>Retry</button></div>;
-  if (!profile || (pathname === "/post" && !profile.onboarding_completed_at)) return <p>Loading your profile…</p>;
+  if (!profile || (requiresOnboarding && !profile.onboarding_completed_at)) return <p>Loading your profile…</p>;
 
   return <>
     {profileError && <div role="alert">{profileError} <button onClick={() => void refreshProfile().catch(() => {})}>Retry</button></div>}
