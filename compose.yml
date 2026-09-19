@@ -1,0 +1,25 @@
+name: esg-local-dev
+
+services:
+  esg-web:
+    container_name: esg-local-dev-web
+    image: esg-local-dev-web:dev
+    build:
+      context: .
+    ports:
+      - "3001:3000"
+    env_file:
+      - .env.local
+    environment:
+      NODE_ENV: development
+      NEXT_TELEMETRY_DISABLED: "1"
+      WATCHPACK_POLLING: "true"
+    volumes:
+      - .:/app
+      - esg-node-modules:/app/node_modules
+      - esg-next-cache:/app/.next
+    init: true
+
+volumes:
+  esg-node-modules:
+  esg-next-cache:

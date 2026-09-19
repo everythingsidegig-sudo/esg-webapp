@@ -1,11 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useRef, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { useRouter, useSearchParams } from "next/navigation";
+import { friendlyError, registrationError, safeNext, setupDestination } from "@/lib/journey";
 
-export default function SignUp() {
+function SignUpInner() {
   const supabase = createClient();
+  const router = useRouter();
+  const next = safeNext(useSearchParams().get("next"));
+  const pending = useRef(false);
 
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
@@ -14,22 +19,28 @@ export default function SignUp() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [confirmationSent, setConfirmationSent] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  async function resend() {
+    if (pending.current) return;
+    pending.current = true; setSubmitting(true); setError(null); setNotice(null);
+    try {
+      const { error } = await supabase.auth.resend({ type: "signup", email: email.trim(), options: {
+        emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+      } });
+      if (error) throw error;
+      setNotice("If confirmation is needed, another link will arrive shortly. Check spam too.");
+    } catch (error) { setError(friendlyError(error, "Couldn't resend the link. Wait a few minutes, then try again.")); }
+    finally { pending.current = false; setSubmitting(false); }
+  }
 
   function validate(): string | null {
-    if (!/^[A-Za-z0-9]{6,}$/.test(username)) {
-      return "Username must be at least 6 letters/numbers, no spaces or symbols.";
-    }
-    if (password.length < 10 || !/[A-Za-z]/.test(password) || !/[0-9]/.test(password) || !/[^A-Za-z0-9]/.test(password)) {
-      return "Password must be at least 10 characters with a letter, a number, and a symbol.";
-    }
-    if (password !== confirm) {
-      return "Passwords don't match.";
-    }
-    return null;
+    return registrationError(username, password, confirm);
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (pending.current) return;
     setError(null);
 
     const validationError = validate();
@@ -38,34 +49,38 @@ export default function SignUp() {
       return;
     }
 
+    pending.current = true;
     setSubmitting(true);
-
-    const { data: existing } = await supabase
+    try {
+    const { data: existing, error: lookupError } = await supabase
       .from("public_profiles")
       .select("id")
       .eq("username", username)
       .maybeSingle();
+    if (lookupError) throw lookupError;
     if (existing) {
       setError("That username is already taken.");
-      setSubmitting(false);
       return;
     }
 
-    const { error: signUpError } = await supabase.auth.signUp({
-      email,
+    const { data, error: signUpError } = await supabase.auth.signUp({
+      email: email.trim(),
       password,
       options: {
         data: { username },
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
       },
     });
 
-    setSubmitting(false);
-    if (signUpError) {
-      setError(signUpError.message);
-      return;
+    if (signUpError) throw signUpError;
+    if (data.session) router.replace(setupDestination(next));
+    else setConfirmationSent(true);
+    } catch (error) {
+      setError(friendlyError(error, "Couldn't create your account. Check your connection, or try signing in if you already registered."));
+    } finally {
+      pending.current = false;
+      setSubmitting(false);
     }
-    setConfirmationSent(true);
   }
 
   if (confirmationSent) {
@@ -73,11 +88,15 @@ export default function SignUp() {
       <div className="mx-auto max-w-md space-y-3 text-center">
         <h1 className="text-xl font-semibold">Check your email</h1>
         <p className="text-sm text-neutral-600">
-          We sent a confirmation link to <strong>{email}</strong>. Click it to activate your account, then sign in.
+          If this email can be registered, a confirmation link will be sent to <strong>{email}</strong>.
+          Open it in this browser to finish setup. Already registered? Try signing in.
         </p>
-        <Link href="/auth/sign-in" className="text-emerald-700 font-medium">
+        <Link href={`/auth/sign-in?next=${encodeURIComponent(next)}`} className="text-emerald-700 font-medium">
           Go to Sign In
         </Link>
+        <button disabled={submitting} onClick={() => void resend()} className="block w-full text-emerald-700">{submitting ? "Sending…" : "Resend confirmation link"}</button>
+        {error && <p role="alert" className="text-red-600">{error}</p>}
+        {notice && <p role="status">{notice}</p>}
       </div>
     );
   }
@@ -87,8 +106,10 @@ export default function SignUp() {
       <h1 className="text-xl font-semibold">Create your ESG account</h1>
 
       <div>
-        <label className="mb-1 block text-sm font-medium">Email</label>
+        <label htmlFor="signup-email" className="mb-1 block text-sm font-medium">Email</label>
         <input
+          id="signup-email"
+          autoComplete="email"
           type="email"
           required
           value={email}
@@ -98,8 +119,11 @@ export default function SignUp() {
       </div>
 
       <div>
-        <label className="mb-1 block text-sm font-medium">Username</label>
+        <label htmlFor="signup-username" className="mb-1 block text-sm font-medium">Username</label>
         <input
+          id="signup-username"
+          autoComplete="username"
+          maxLength={40}
           required
           value={username}
           onChange={(e) => setUsername(e.target.value.replace(/\s/g, ""))}
@@ -109,8 +133,10 @@ export default function SignUp() {
       </div>
 
       <div>
-        <label className="mb-1 block text-sm font-medium">Password</label>
+        <label htmlFor="signup-password" className="mb-1 block text-sm font-medium">Password</label>
         <input
+          id="signup-password"
+          autoComplete="new-password"
           type="password"
           required
           value={password}
@@ -121,8 +147,10 @@ export default function SignUp() {
       </div>
 
       <div>
-        <label className="mb-1 block text-sm font-medium">Confirm Password</label>
+        <label htmlFor="signup-confirm" className="mb-1 block text-sm font-medium">Confirm Password</label>
         <input
+          id="signup-confirm"
+          autoComplete="new-password"
           type="password"
           required
           value={confirm}
@@ -131,7 +159,7 @@ export default function SignUp() {
         />
       </div>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
 
       <button
         type="submit"
@@ -143,10 +171,14 @@ export default function SignUp() {
 
       <p className="text-center text-sm text-neutral-500">
         Already have an account?{" "}
-        <Link href="/auth/sign-in" className="font-medium text-emerald-700">
+        <Link href={`/auth/sign-in?next=${encodeURIComponent(next)}`} className="font-medium text-emerald-700">
           Sign In
         </Link>
       </p>
     </form>
   );
+}
+
+export default function SignUp() {
+  return <Suspense fallback={<p>Loading registration…</p>}><SignUpInner /></Suspense>;
 }

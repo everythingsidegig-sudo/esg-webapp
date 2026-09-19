@@ -1,15 +1,17 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { friendlyError, safeNext, setupDestination } from "@/lib/journey";
 
 function SignInInner() {
   const supabase = createClient();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const next = searchParams.get("next") ?? "/";
+  const next = safeNext(searchParams.get("next"));
+  const pending = useRef(false);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -18,18 +20,21 @@ function SignInInner() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (pending.current) return;
+    pending.current = true;
     setSubmitting(true);
     setError(null);
 
-    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
-
-    setSubmitting(false);
-    if (signInError) {
-      // Deliberately generic per spec BR-AUTH-014/015: never reveal which field was wrong.
-      setError("That email or password isn't right.");
-      return;
+    try {
+      const { error: signInError } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+      if (signInError) throw signInError;
+      router.replace(setupDestination(next));
+    } catch (error) {
+      setError(friendlyError(error, "Couldn't sign in. Check your connection and try again."));
+    } finally {
+      pending.current = false;
+      setSubmitting(false);
     }
-    router.push(next);
   }
 
   return (
@@ -37,8 +42,10 @@ function SignInInner() {
       <h1 className="text-xl font-semibold">Sign In</h1>
 
       <div>
-        <label className="mb-1 block text-sm font-medium">Email</label>
+        <label htmlFor="signin-email" className="mb-1 block text-sm font-medium">Email</label>
         <input
+          id="signin-email"
+          autoComplete="email"
           type="email"
           required
           value={email}
@@ -48,8 +55,10 @@ function SignInInner() {
       </div>
 
       <div>
-        <label className="mb-1 block text-sm font-medium">Password</label>
+        <label htmlFor="signin-password" className="mb-1 block text-sm font-medium">Password</label>
         <input
+          id="signin-password"
+          autoComplete="current-password"
           type="password"
           required
           value={password}
@@ -58,7 +67,7 @@ function SignInInner() {
         />
       </div>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
 
       <button
         type="submit"
@@ -70,7 +79,7 @@ function SignInInner() {
 
       <p className="text-center text-sm text-neutral-500">
         New to ESG?{" "}
-        <Link href="/auth/sign-up" className="font-medium text-emerald-700">
+        <Link href={`/auth/sign-up?next=${encodeURIComponent(next)}`} className="font-medium text-emerald-700">
           Create Account
         </Link>
       </p>

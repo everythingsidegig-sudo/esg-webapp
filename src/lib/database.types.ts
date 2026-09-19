@@ -1,4 +1,4 @@
-// Hand-written types matching supabase/migrations/0001_init.sql.
+// Hand-written types matching the additive Supabase migrations.
 // Kept intentionally minimal (only what the app queries) rather than full generated types.
 
 export type GigStatus =
@@ -27,6 +27,10 @@ export interface Profile {
   lemon_count: number;
   money_made: number;
   created_at: string;
+  private_location_text: string | null;
+  private_lat: number | null;
+  private_lng: number | null;
+  onboarding_completed_at: string | null;
 }
 
 export interface PublicProfile {
@@ -39,6 +43,7 @@ export interface PublicProfile {
 
 export interface Gig {
   id: string;
+  creation_request_id: string | null;
   poster_id: string;
   service_type: string;
   title: string;
@@ -99,6 +104,9 @@ export interface Database {
       notifications: { Row: Notification; Insert: Partial<Notification>; Update: Partial<Notification> };
     };
     Functions: {
+      ensure_profile: { Args: Record<string, never>; Returns: Profile };
+      save_onboarding: { Args: { p_username: string; p_photo_url: string | null; p_location_text: string; p_lat: number | null; p_lng: number | null; p_skills: string[]; p_services: string[] }; Returns: Profile };
+      create_gig: { Args: { p_request_id: string; p_service_type: string; p_title: string; p_description: string; p_amount: number; p_price_type: string; p_scheduled_at: string | null; p_location_text: string; p_lat: number | null; p_lng: number | null; p_photo_url?: string | null; p_publish?: boolean }; Returns: Gig };
       create_claim: { Args: { p_gig_id: string }; Returns: Claim };
       select_provider: { Args: { p_gig_id: string; p_claim_id: string }; Returns: void };
       request_start: { Args: { p_gig_id: string }; Returns: void };

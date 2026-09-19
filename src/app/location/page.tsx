@@ -2,6 +2,8 @@
 
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { approximateCoordinates } from "@/lib/journey";
+import { LOCATION_KEY } from "@/lib/location";
 
 function LocationEntryInner() {
   const router = useRouter();
@@ -23,36 +25,40 @@ function LocationEntryInner() {
     }
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        setCoords(approximateCoordinates(pos.coords.latitude, pos.coords.longitude) as { lat: number; lng: number });
         setLocationText("Current location");
         setLocating(false);
       },
       () => {
         setError("Location permission denied. Enter a location manually below.");
         setLocating(false);
-      }
+      },
+      { timeout: 10000, maximumAge: 60000 }
     );
   }
 
   function continueJourney() {
-    if (!locationText.trim()) {
-      setError("Enter a location or use your current location to continue.");
+    if (locating) return;
+    if (!locationText.trim() || locationText.trim().length > 200) {
+      setError("Enter a general area of 1–200 characters or use your current location.");
       return;
     }
     const params = new URLSearchParams();
-    params.set("loc", locationText);
-    if (coords) {
+    try { sessionStorage.setItem(LOCATION_KEY, JSON.stringify({ text: locationText.trim(), ...coords })); }
+    catch { setError("Enable site storage in your browser to continue."); return; }
+    // Public browsing uses only rounded coordinates; posting reads session storage.
+    if (coords && journey === "earn_money") {
       params.set("lat", String(coords.lat));
       params.set("lng", String(coords.lng));
     }
-    router.push(`${journey === "earn_money" ? "/browse" : "/post"}?${params.toString()}`);
+    router.push(journey === "earn_money" ? `/browse?${params.toString()}` : "/post");
   }
 
   return (
     <div className="mx-auto max-w-md space-y-5">
       <h1 className="text-xl font-semibold">Where should we look?</h1>
       <p className="text-sm text-neutral-500">
-        We never require or store a home address — just a general area to search near.
+        Enter a general area, not your street address. Current-location coordinates are rounded before use.
       </p>
 
       <button
@@ -68,6 +74,8 @@ function LocationEntryInner() {
       </div>
 
       <input
+        aria-label="General area"
+        maxLength={200}
         value={locationText}
         onChange={(e) => {
           setLocationText(e.target.value);
@@ -81,6 +89,7 @@ function LocationEntryInner() {
 
       <button
         onClick={continueJourney}
+        disabled={locating}
         className="w-full rounded-lg border border-emerald-600 py-2.5 font-medium text-emerald-700 hover:bg-emerald-50"
       >
         Continue

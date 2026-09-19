@@ -5,17 +5,11 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import type { Gig } from "@/lib/database.types";
+import { SERVICE_TYPES as CATEGORIES } from "@/lib/services";
 
 const SERVICE_TYPES = [
   "All Services",
-  "Yard Work",
-  "Moving Help",
-  "Cleaning",
-  "Handyman",
-  "Delivery",
-  "Pet Care",
-  "Tech Help",
-  "Other",
+  ...CATEGORIES,
 ];
 
 function haversineMiles(lat1: number, lng1: number, lat2: number, lng2: number) {
@@ -38,17 +32,19 @@ function BrowseInner() {
   const [service, setService] = useState("All Services");
   const [radius, setRadius] = useState(5);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    supabase
+    Promise.resolve(supabase
       .from("gigs")
       .select("*")
       .eq("status", "active")
-      .order("created_at", { ascending: false })
-      .then(({ data }) => {
+      .order("created_at", { ascending: false }))
+      .then(({ data, error }) => {
+        if (error) setError("Couldn't load gigs. Please refresh and try again.");
         setGigs((data as Gig[]) ?? []);
         setLoading(false);
-      });
+      }).catch(() => { setError("Couldn't load gigs. Please refresh and try again."); setLoading(false); });
   }, [supabase]);
 
   const filtered = useMemo(() => {
@@ -90,7 +86,8 @@ function BrowseInner() {
       </div>
 
       {loading && <p className="text-neutral-500">Loading gigs…</p>}
-      {!loading && filtered.length === 0 && <p className="text-neutral-500">No gigs found. Try widening your filters.</p>}
+      {error && <p role="alert">{error}</p>}
+      {!loading && !error && filtered.length === 0 && <p className="text-neutral-500">No gigs found. Try widening your filters.</p>}
 
       <div className="grid gap-3">
         {filtered.map((gig) => (

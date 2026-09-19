@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
 
 export default function Home() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
 
   return (
     <div className="flex flex-col items-center gap-8 py-12 text-center">
@@ -30,7 +30,7 @@ export default function Home() {
           <div className="mt-1 text-sm text-neutral-500">Find gigs nearby</div>
         </Link>
       </div>
-      {!user && (
+      {!loading && !user && (
         <p className="text-sm text-neutral-500">
           Browsing works as a guest —{" "}
           <Link href="/auth/sign-in" className="font-medium text-emerald-700">
