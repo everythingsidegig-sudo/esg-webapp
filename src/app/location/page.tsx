@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { approximateCoordinates } from "@/lib/journey";
-import { LOCATION_KEY } from "@/lib/location";
+import { LOCATION_KEY, reverseGeocodeGeneralArea } from "@/lib/location";
 
 function LocationEntryInner() {
   const router = useRouter();
@@ -25,10 +25,16 @@ function LocationEntryInner() {
       return;
     }
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setCoords(approximateCoordinates(pos.coords.latitude, pos.coords.longitude) as { lat: number; lng: number });
+      async (pos) => {
+        const approximate = approximateCoordinates(pos.coords.latitude, pos.coords.longitude) as { lat: number; lng: number };
+        setCoords(approximate);
         setLocationText("Current location");
-        setLocating(false);
+        try {
+          const label = await reverseGeocodeGeneralArea(approximate.lat, approximate.lng);
+          if (label) setLocationText(label);
+        } catch {
+          // Coordinates remain valid and authoritative when the optional label lookup fails.
+        } finally { setLocating(false); }
       },
       () => {
         setError("Location permission denied. Enter a location manually below.");
@@ -59,46 +65,50 @@ function LocationEntryInner() {
   }
 
   if (confirmed) return (
-    <div className="mx-auto max-w-md space-y-5">
-      <div>
-        <h1 className="text-xl font-semibold">What would you like to do?</h1>
-        <p className="mt-1 text-sm text-neutral-500">Choose a journey for {locationText.trim()}.</p>
+    <section className="app-screen app-card space-y-6 p-5 sm:p-7">
+      <div className="space-y-2">
+        <p className="text-sm font-semibold text-emerald-700">You&apos;re all set</p>
+        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">What would you like to do?</h1>
+        <p className="text-sm leading-6 text-neutral-500">Choose a journey for {locationText.trim()}.</p>
       </div>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Link href="/need-help" className="rounded-xl border border-neutral-200 bg-white p-6 text-center shadow-sm transition hover:shadow-md">
-          <div className="text-2xl">🙋</div>
-          <div className="mt-2 font-semibold">I Need Help</div>
-          <div className="mt-1 text-sm text-neutral-500">Post a gig or find a helper.</div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Link href="/need-help" className="flex min-h-36 flex-col items-start justify-center rounded-2xl border border-neutral-200 bg-white p-5 text-left shadow-sm transition hover:border-emerald-200 hover:shadow-md">
+          <div className="text-3xl">🙋</div>
+          <div className="mt-3 font-bold">I Need Help</div>
+          <div className="mt-1 text-sm leading-5 text-neutral-500">Post a gig or find a helper.</div>
         </Link>
-        <button type="button" onClick={browseGigs} aria-label="Help & Earn Money" className="rounded-xl border border-neutral-200 bg-white p-6 text-center shadow-sm transition hover:shadow-md">
-          <div className="text-2xl">💪</div>
-          <div className="mt-2 font-semibold">Help &amp; Earn Money</div>
-          <div className="mt-1 text-sm text-neutral-500">Browse gigs nearby.</div>
+        <button type="button" onClick={browseGigs} aria-label="Help & Earn Money" className="flex min-h-36 flex-col items-start justify-center rounded-2xl border border-neutral-200 bg-white p-5 text-left shadow-sm transition hover:border-emerald-200 hover:shadow-md">
+          <div className="text-3xl">💪</div>
+          <div className="mt-3 font-bold">Help &amp; Earn Money</div>
+          <div className="mt-1 text-sm leading-5 text-neutral-500">Browse gigs nearby.</div>
         </button>
       </div>
-    </div>
+    </section>
   );
 
   return (
-    <div className="mx-auto max-w-md space-y-5">
-      <h1 className="text-xl font-semibold">Where should we look?</h1>
-      <p className="text-sm text-neutral-500">
-        Enter a general area, not your street address. Current-location coordinates are rounded before use.
-      </p>
+    <section className="app-screen app-card p-5 sm:p-7">
+      <div className="mb-7 space-y-2">
+        <p className="text-sm font-semibold text-emerald-700">Set your area</p>
+        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Where should we look?</h1>
+        <p className="text-sm leading-6 text-neutral-500">Choose an area to find nearby gigs and helpers.</p>
+      </div>
 
       <button
         onClick={useMyLocation}
         disabled={locating}
-        className="w-full rounded-lg bg-emerald-600 py-2.5 font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
+        className="touch-control w-full bg-emerald-700 px-4 font-semibold text-white shadow-sm transition hover:bg-emerald-800 disabled:cursor-wait disabled:opacity-60"
       >
-        {locating ? "Locating…" : "📍 Use My Location"}
+        {locating ? "Finding your location…" : "📍 Use My Location"}
       </button>
 
-      <div className="flex items-center gap-2 text-xs text-neutral-400">
-        <div className="h-px flex-1 bg-neutral-200" /> or enter manually <div className="h-px flex-1 bg-neutral-200" />
+      <div className="my-6 flex items-center gap-3 text-xs font-medium uppercase tracking-wider text-neutral-400">
+        <div className="h-px flex-1 bg-neutral-200" /> or <div className="h-px flex-1 bg-neutral-200" />
       </div>
 
+      <label htmlFor="general-area" className="mb-2 block text-sm font-semibold text-neutral-800">City, ZIP or neighborhood</label>
       <input
+        id="general-area"
         aria-label="General area"
         maxLength={200}
         value={locationText}
@@ -106,20 +116,25 @@ function LocationEntryInner() {
           setLocationText(e.target.value);
           setCoords(null);
         }}
-        placeholder="ZIP, neighborhood, or city"
-        className="w-full rounded-lg border border-neutral-300 px-3 py-2"
+        placeholder="Enter a general area"
+        className="app-input"
       />
+      <p className="mt-2 text-xs leading-5 text-neutral-400">
+        Location names © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer" className="underline">OpenStreetMap contributors</a>
+      </p>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      <p className="mt-4 text-xs leading-5 text-neutral-500">Use a general area, not your street address. Current-location coordinates are rounded before use.</p>
+
+      {error && <p role="alert" className="mt-4 rounded-xl bg-red-50 px-3 py-2.5 text-sm text-red-700">{error}</p>}
 
       <button
         onClick={continueJourney}
         disabled={locating}
-        className="w-full rounded-lg border border-emerald-600 py-2.5 font-medium text-emerald-700 hover:bg-emerald-50"
+        className="touch-control mt-7 w-full border border-emerald-700 bg-white px-4 font-semibold text-emerald-700 transition hover:bg-emerald-50 disabled:cursor-wait disabled:opacity-60"
       >
         Continue
       </button>
-    </div>
+    </section>
   );
 }
 

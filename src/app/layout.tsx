@@ -27,10 +27,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col bg-neutral-50 text-neutral-900">
+      <body className="app-shell min-h-full text-neutral-900">
         <AuthProvider>
           <Nav />
-          <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-6">{children}</main>
+          <main className="app-content">{children}</main>
         </AuthProvider>
       </body>
     </html>

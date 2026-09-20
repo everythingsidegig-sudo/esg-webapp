@@ -1,8 +1,11 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
+  --background: #f7f8f7;
   --foreground: #171717;
+  --esg-green: #047857;
+  --esg-green-dark: #065f46;
+  --app-bar-height: 3.75rem;
 }
 
 @theme inline {
@@ -12,15 +15,77 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  overflow-x: hidden;
+}
+
+button,
+a,
+input {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.app-shell {
+  display: flex;
+  min-height: 100dvh;
+  flex-direction: column;
+  background:
+    radial-gradient(circle at top, rgb(236 253 245 / 0.7), transparent 24rem),
+    var(--background);
+}
+
+.app-content {
+  width: 100%;
+  max-width: 72rem;
+  flex: 1;
+  margin-inline: auto;
+  padding: 1.25rem 1rem calc(6.5rem + env(safe-area-inset-bottom));
+}
+
+.app-screen {
+  width: 100%;
+  max-width: 30rem;
+  margin-inline: auto;
+}
+
+.app-card {
+  border: 1px solid rgb(229 231 235);
+  border-radius: 1.5rem;
+  background: rgb(255 255 255 / 0.94);
+  box-shadow: 0 18px 50px rgb(15 23 42 / 0.08);
+}
+
+.touch-control {
+  min-height: 3rem;
+  border-radius: 0.875rem;
+}
+
+.app-input {
+  min-height: 3.25rem;
+  width: 100%;
+  border: 1px solid rgb(209 213 219);
+  border-radius: 0.875rem;
+  background: white;
+  padding: 0.75rem 1rem;
+  font-size: 1rem;
+  outline: none;
+  transition: border-color 150ms, box-shadow 150ms;
+}
+
+.app-input:focus {
+  border-color: var(--esg-green);
+  box-shadow: 0 0 0 3px rgb(16 185 129 / 0.14);
+}
+
+@media (min-width: 48rem) {
+  .app-content {
+    padding: 2rem 2rem 7rem;
+  }
+
+  .app-card {
+    padding: 2rem;
+  }
 }

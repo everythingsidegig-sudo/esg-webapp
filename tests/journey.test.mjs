@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { safeNext, setupDestination, registrationError, passwordError, approximateCoordinates, gigInputError, friendlyError } from "../src/lib/journey.ts";
+import { generalAreaLabel } from "../src/lib/geocoding.ts";
 import { SERVICE_TYPES } from "../src/lib/services.ts";
 
 for (const value of [null, "https://evil.invalid", "//evil.invalid", "javascript:alert(1)", "/\\evil.invalid", "/%2f/evil.invalid", "/%255c%255cevil.invalid", "/post\n", "/auth/callback", "/onboarding", "/unknown", "/post?x=%0aevil", "/post?x=%ZZ"]) {
@@ -21,6 +22,12 @@ for (const [username, password, confirm] of [["short", "Password1!", "Password1!
 test("approximation rounds exact coordinates", () => assert.deepEqual(approximateCoordinates(12.345678, -45.678912), { lat: 12.35, lng: -45.68 }));
 test("zero coordinates valid", () => assert.deepEqual(approximateCoordinates(0, 0), { lat: 0, lng: 0 }));
 test("manual area needs no fabricated coordinates", () => assert.deepEqual(approximateCoordinates(null, null), { lat: null, lng: null }));
+test("reverse geocoding uses locality and country without street details", () => assert.equal(generalAreaLabel({ address: {
+  house_number: "12", road: "Private Street", postcode: "12345", town: "Kävlinge", state: "Skåne", country: "Sweden",
+} }), "Kävlinge, Sweden"));
+test("reverse geocoding falls back to region and country", () => assert.equal(generalAreaLabel({ address: {
+  road: "Private Street", state: "Skåne", country: "Sweden",
+} }), "Skåne, Sweden"));
 for (const pair of [[91, 0], [0, 181], [NaN, 0], [Infinity, 0], [null, 0]]) {
   test(`malformed coordinates ${pair}`, () => assert.throws(() => approximateCoordinates(...pair)));
 }

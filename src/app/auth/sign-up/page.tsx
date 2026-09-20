@@ -1,15 +1,20 @@
 "use client";
 
-import { Suspense, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter, useSearchParams } from "next/navigation";
 import { friendlyError, registrationError, safeNext, setupDestination } from "@/lib/journey";
+import { useAuth } from "@/lib/auth-context";
 
 function SignUpInner() {
   const supabase = createClient();
   const router = useRouter();
-  const next = safeNext(useSearchParams().get("next"));
+  const searchParams = useSearchParams();
+  const requestedNext = searchParams.get("next");
+  const next = safeNext(requestedNext);
+  const authenticatedDestination = requestedNext ? next : "/location";
+  const { user, loading } = useAuth();
   const pending = useRef(false);
 
   const [email, setEmail] = useState("");
@@ -20,6 +25,12 @@ function SignUpInner() {
   const [submitting, setSubmitting] = useState(false);
   const [confirmationSent, setConfirmationSent] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!loading && user) router.replace(authenticatedDestination);
+  }, [loading, user, router, authenticatedDestination]);
+
+  if (loading || user) return <p className="text-center text-neutral-500">Loading your account…</p>;
 
   async function resend() {
     if (pending.current) return;

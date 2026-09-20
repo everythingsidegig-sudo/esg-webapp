@@ -1,22 +1,32 @@
 "use client";
 
-import { Suspense, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { friendlyError, safeNext, setupDestination } from "@/lib/journey";
+import { useAuth } from "@/lib/auth-context";
 
 function SignInInner() {
   const supabase = createClient();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const next = safeNext(searchParams.get("next"));
+  const requestedNext = searchParams.get("next");
+  const next = safeNext(requestedNext);
+  const authenticatedDestination = requestedNext ? next : "/location";
+  const { user, loading } = useAuth();
   const pending = useRef(false);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!loading && user) router.replace(authenticatedDestination);
+  }, [loading, user, router, authenticatedDestination]);
+
+  if (loading || user) return <p className="text-center text-neutral-500">Loading your account…</p>;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();

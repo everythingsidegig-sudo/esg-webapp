@@ -207,21 +207,63 @@ test("I Need Help offers Post a Gig and a non-navigating Coming soon helper choi
 });
 
 test("Help & Earn Money passes rounded current coordinates to Browse", async () => {
-  const destinations = [], locations = [];
+  const destinations = [], locations = [], lookups = [];
   const app = await component("src/app/location/page.tsx", "LocationEntryInner", {
     storage: { setItem: (_key, value) => locations.push(JSON.parse(value)) },
     globals: { navigator: { geolocation: { getCurrentPosition: (success) => success({ coords: { latitude: 12.345, longitude: -45.678 } }) } } },
     mocks: {
-      "@/lib/location": { LOCATION_KEY: "esg:general-area" },
+      "@/lib/location": { LOCATION_KEY: "esg:general-area", reverseGeocodeGeneralArea: async (lat, lng) => { lookups.push({ lat, lng }); return "Kävlinge, Sweden"; } },
       "next/navigation": { useSearchParams: () => new URLSearchParams({ journey: "earn_money" }), useRouter: () => ({ push: (url) => destinations.push(url) }) },
     },
   });
   let tree = app.render();
   button(tree, "📍 Use My Location").props.onClick();
+  tree = app.render();
+  assert.equal(button(tree, "Finding your location…").props.disabled, true);
+  await flush();
   tree = app.render(); button(tree, "Continue").props.onClick();
   tree = app.render(); nodes(tree, (node) => node.props["aria-label"] === "Help & Earn Money")[0].props.onClick();
   assert.deepEqual(destinations, ["/browse?lat=12.35&lng=-45.68"]);
-  assert.deepEqual(locations, [{ text: "Current location", lat: 12.35, lng: -45.68 }]);
+  assert.deepEqual(lookups, [{ lat: 12.35, lng: -45.68 }]);
+  assert.deepEqual(locations, [{ text: "Kävlinge, Sweden", lat: 12.35, lng: -45.68 }]);
+});
+
+test("reverse-geocoding failure keeps coordinates and the Current location fallback", async () => {
+  const locations = [];
+  const app = await component("src/app/location/page.tsx", "LocationEntryInner", {
+    storage: { setItem: (_key, value) => locations.push(JSON.parse(value)) },
+    globals: { navigator: { geolocation: { getCurrentPosition: (success) => success({ coords: { latitude: 55.789, longitude: 13.114 } }) } } },
+    mocks: {
+      "@/lib/location": { LOCATION_KEY: "esg:general-area", reverseGeocodeGeneralArea: async () => { throw new Error("offline"); } },
+      "next/navigation": { useRouter: () => ({ push() {} }) },
+    },
+  });
+  let tree = app.render();
+  button(tree, "📍 Use My Location").props.onClick();
+  await flush();
+  tree = app.render();
+  assert.equal(nodes(tree, (node) => node.type === "input")[0].props.value, "Current location");
+  button(tree, "Continue").props.onClick();
+  assert.deepEqual(locations, [{ text: "Current location", lat: 55.79, lng: 13.11 }]);
+});
+
+test("geolocation denial preserves manual location entry", async () => {
+  const locations = [];
+  const app = await component("src/app/location/page.tsx", "LocationEntryInner", {
+    storage: { setItem: (_key, value) => locations.push(JSON.parse(value)) },
+    globals: { navigator: { geolocation: { getCurrentPosition: (_success, failure) => failure() } } },
+    mocks: {
+      "@/lib/location": { LOCATION_KEY: "esg:general-area", reverseGeocodeGeneralArea: async () => null },
+      "next/navigation": { useRouter: () => ({ push() {} }) },
+    },
+  });
+  let tree = app.render();
+  button(tree, "📍 Use My Location").props.onClick();
+  tree = app.render();
+  assert.equal(nodes(tree, (node) => node.props.children === "Location permission denied. Enter a location manually below.").length, 1);
+  nodes(tree, (node) => node.type === "input")[0].props.onChange({ target: { value: "Lund, Sweden" } });
+  tree = app.render(); button(tree, "Continue").props.onClick();
+  assert.deepEqual(locations, [{ text: "Lund, Sweden" }]);
 });
 
 test("logged-out Home contains only authentication entry links", async () => {
@@ -248,8 +290,70 @@ for (const completed of [false, true]) {
 
 test("Sign In exposes the password-recovery route", async () => {
   const app = await component("src/app/auth/sign-in/page.tsx", "SignInInner", { client: { auth: {} } });
+  app.auth.user = null;
   const tree = app.render();
   assert.equal(nodes(tree, (node) => node.props.href === "/auth/forgot-password").length, 1);
+});
+
+test("logged-out protected journey redirects to Sign In with a safe next", async () => {
+  const destinations = [];
+  const app = await component("src/components/AuthGuard.tsx", "AuthGuardInner", {
+    mocks: { "next/navigation": {
+      usePathname: () => "/location",
+      useSearchParams: () => new URLSearchParams(),
+      useRouter: () => ({ replace: (url) => destinations.push(url) }),
+    } },
+  });
+  app.auth.user = null; app.auth.profile = null;
+  app.render({ children: { type: "location" } });
+  assert.deepEqual(destinations, ["/auth/sign-in?next=%2Flocation"]);
+});
+
+test("authenticated Sign In uses validated next and never renders the form", async () => {
+  const destinations = [];
+  const app = await component("src/app/auth/sign-in/page.tsx", "SignInInner", {
+    client: { auth: {} },
+    mocks: { "next/navigation": {
+      useSearchParams: () => new URLSearchParams({ next: "/location" }),
+      useRouter: () => ({ replace: (url) => destinations.push(url) }),
+    } },
+  });
+  const tree = app.render();
+  assert.deepEqual(destinations, ["/location"]);
+  assert.equal(nodes(tree, (node) => node.type === "form").length, 0);
+});
+
+test("authenticated Sign Up defaults to Location", async () => {
+  const destinations = [];
+  const app = await component("src/app/auth/sign-up/page.tsx", "SignUpInner", {
+    client: {},
+    mocks: { "next/navigation": {
+      useSearchParams: () => new URLSearchParams(),
+      useRouter: () => ({ replace: (url) => destinations.push(url) }),
+    } },
+  });
+  const tree = app.render();
+  assert.deepEqual(destinations, ["/location"]);
+  assert.equal(nodes(tree, (node) => node.type === "form").length, 0);
+});
+
+test("auth-entry pages wait for session restoration before deciding", async () => {
+  const destinations = [];
+  const app = await component("src/app/auth/sign-in/page.tsx", "SignInInner", {
+    client: { auth: {} },
+    mocks: { "next/navigation": {
+      useSearchParams: () => new URLSearchParams({ next: "/location" }),
+      useRouter: () => ({ replace: (url) => destinations.push(url) }),
+    } },
+  });
+  app.auth.loading = true; app.auth.user = null;
+  let tree = app.render();
+  assert.equal(nodes(tree, (node) => node.type === "form").length, 0);
+  assert.deepEqual(destinations, []);
+  app.auth.loading = false; app.auth.user = user;
+  tree = app.render();
+  assert.equal(nodes(tree, (node) => node.type === "form").length, 0);
+  assert.deepEqual(destinations, ["/location"]);
 });
 
 test("forgot-password requests a recovery link without exposing account existence", async () => {
