@@ -1,15 +1,15 @@
 # Phase 1 database security verification
 
-This phase changes authorization only. It leaves `0001_init.sql`, application
+This phase changes authorization only. It leaves `20240101000001_init.sql`, application
 code, Docker, and lifecycle correctness unchanged. It does not repair historical
 reputation/earnings totals or delete existing data.
 
 ## Apply to hosted Supabase
 
 1. Back up the database and test on an isolated Supabase project first.
-2. Confirm `0001_init.sql` is already applied. Inspect any deployed schema drift,
+2. Confirm `20240101000001_init.sql` is already applied. Inspect any deployed schema drift,
    additional permissive policies, role memberships, function grants/owners, and
-   column grants before applying `0002_security_hardening.sql`.
+   column grants before applying `20240101000002_security_hardening.sql`.
 3. Run the new migration as `postgres` or a trusted migration role with BYPASSRLS.
    Its preflight rejects unexpected function owners and FORCE RLS on gigs/claims.
    Do not remove these checks without reviewing the deployment's ownership model.
@@ -93,6 +93,44 @@ node supabase/tests/run-phase1-security.mjs "$phase1Runtime/node_modules/@electr
 A passing embedded-engine result verifies PostgreSQL authorization mechanics in
 the supplied scaffold. It does **not** verify hosted grants, custom policies,
 PostgREST schema exposure/cache behavior, real Auth cookies, Storage, or Realtime.
+
+## Phase 2C: direct-write hardening
+
+Applies `migrations/20240101000005_direct_write_hardening.sql` after 0001–0004. Closes two
+grant-level bypasses: `profiles`' remaining client-writable columns (username,
+photo_url, skills, services) could be set to values that skip
+`save_onboarding()`'s validation; `gigs` never had its table-level UPDATE grant
+narrowed, so a poster could edit amount/description/service_type/price_type/
+coordinates/scheduling/payment fields directly, bypassing `create_gig()`'s
+validation and the location-privacy coordinate rounding it enforces. No RLS
+policy, RPC, storage policy, or frontend change.
+
+| Area | Phase 2C behavior |
+| --- | --- |
+| `profiles` | Client UPDATE on username/photo_url/skills/services unchanged (the Profile page genuinely needs it), but a new `BEFORE UPDATE OF` trigger re-validates any column actually being changed against `save_onboarding()`'s own rules, on every write path |
+| `gigs` | Table- and column-level client UPDATE grant revoked entirely; zero columns are genuinely needed for direct writes today. Existing `gigs_update_own_draft_or_active_edit` RLS policy is unchanged, kept for a future "edit draft" feature |
+| Lifecycle RPCs | Unaffected — all are `SECURITY DEFINER` and run as their trusted owner, independent of the calling role's table grants |
+
+Run the same regression suite pattern as Phase 1/2A/onboarding:
+
+```powershell
+psql -X -v ON_ERROR_STOP=1 -f supabase/tests/direct_write_hardening.sql
+node supabase/tests/run-phase1-security.mjs --phase2c
+node supabase/tests/run-phase1-security.mjs "$phase1Runtime/node_modules/@electric-sql/pglite/dist/index.js" --phase2c
+```
+
+`--phase2c` implies `--onboarding` (and therefore `--phase2a`), so it also runs
+`phase1_security.sql`, `phase2a_integrity.sql`, and `onboarding_post_gig.sql`.
+Two existing assertions changed to match Phase 2C's intentionally narrower
+behavior, not a regression: `onboarding_post_gig.sql`'s `creation_request_id`
+immutability check now expects `42501` (grant-denied) instead of `22023`
+(business-rule-denied), since the whole `gigs` UPDATE grant is gone before the
+`keep_creation_request` trigger would ever run; and it seeds pre-catalog
+legacy skill/service labels via `session_replication_role = replica` instead
+of a raw client-role UPDATE, since that raw write is exactly the bypass this
+phase closes. `phase1_security.sql`'s "legitimate profile edits succeed"
+fixture value changed from a non-catalog string to a real category for the
+same reason.
 
 ## Explicitly deferred concerns
 

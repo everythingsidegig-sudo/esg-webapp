@@ -1,22 +1,24 @@
 "use client";
 
 import { use, useEffect, useState } from "react";
+import TagChip from "@/components/TagChip";
 import { createClient } from "@/lib/supabase/client";
-import type { PublicProfile } from "@/lib/database.types";
+import { profileTagsForCategory } from "@/lib/tags";
+import type { PublicProfileWithTags } from "@/lib/database.types";
 
 function PublicProfileView({ username }: { username: string }) {
   const supabase = createClient();
-  const [profile, setProfile] = useState<PublicProfile | null | undefined>(undefined);
+  const [profile, setProfile] = useState<PublicProfileWithTags | null | undefined>(undefined);
   const [gigsWorked, setGigsWorked] = useState<number | null>(null);
 
   useEffect(() => {
     supabase
       .from("public_profiles")
-      .select("*")
+      .select("*, profile_tags(tag:tags(id,name,service_type))")
       .eq("username", username)
       .maybeSingle()
       .then(async ({ data }) => {
-        setProfile((data as PublicProfile) ?? null);
+        setProfile((data as PublicProfileWithTags) ?? null);
         if (data) {
           const { data: stats } = await supabase.rpc("get_public_stats", { p_profile_id: data.id });
           setGigsWorked(stats?.[0]?.gigs_worked_count ?? 0);
@@ -59,6 +61,24 @@ function PublicProfileView({ username }: { username: string }) {
               </span>
             ))}
           </div>
+        </div>
+      )}
+
+      {profile.skills.some((s) => profileTagsForCategory(profile, s).length > 0) && (
+        <div className="space-y-2">
+          <h3 className="text-sm font-medium text-neutral-500">Specializations</h3>
+          {profile.skills.map((skill) => {
+            const tags = profileTagsForCategory(profile, skill);
+            if (tags.length === 0) return null;
+            return (
+              <div key={skill}>
+                <div className="text-xs font-medium uppercase tracking-wide text-emerald-700">{skill}</div>
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {tags.map((tag) => <TagChip key={tag.id}>{tag.name}</TagChip>)}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

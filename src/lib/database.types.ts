@@ -30,6 +30,9 @@ export interface Profile {
   private_location_text: string | null;
   private_lat: number | null;
   private_lng: number | null;
+  public_location_text: string | null;
+  public_lat: number | null;
+  public_lng: number | null;
   onboarding_completed_at: string | null;
 }
 
@@ -39,7 +42,18 @@ export interface PublicProfile {
   photo_url: string | null;
   skills: string[];
   wom_count: number;
+  public_location_text: string | null;
+  public_lat: number | null;
+  public_lng: number | null;
 }
+
+export interface ProfileTag {
+  profile_id: string;
+  tag_id: string;
+}
+
+// PostgREST embed shape: public_profiles.select("*, profile_tags(tag:tags(id,name,service_type))").
+export type PublicProfileWithTags = PublicProfile & { profile_tags?: { tag: { id: string; name: string; service_type: string } }[] };
 
 export interface Gig {
   id: string;
@@ -65,6 +79,21 @@ export interface Gig {
   amount_received: number | null;
   created_at: string;
 }
+
+export interface Tag {
+  id: string;
+  service_type: string;
+  name: string;
+  created_at: string;
+}
+
+export interface GigTag {
+  gig_id: string;
+  tag_id: string;
+}
+
+// PostgREST embed shape: gigs.select("*, gig_tags(tag:tags(id,name))").
+export type GigWithTags = Gig & { gig_tags?: { tag: { id: string; name: string } }[] };
 
 export interface Claim {
   id: string;
@@ -99,6 +128,9 @@ export interface Database {
       profiles: { Row: Profile; Insert: Partial<Profile>; Update: Partial<Profile> };
       public_profiles: { Row: PublicProfile; Insert: Partial<PublicProfile>; Update: Partial<PublicProfile> };
       gigs: { Row: Gig; Insert: Partial<Gig>; Update: Partial<Gig> };
+      tags: { Row: Tag; Insert: Partial<Tag>; Update: Partial<Tag> };
+      gig_tags: { Row: GigTag; Insert: Partial<GigTag>; Update: Partial<GigTag> };
+      profile_tags: { Row: ProfileTag; Insert: Partial<ProfileTag>; Update: Partial<ProfileTag> };
       claims: { Row: Claim; Insert: Partial<Claim>; Update: Partial<Claim> };
       chat_messages: { Row: ChatMessage; Insert: Partial<ChatMessage>; Update: Partial<ChatMessage> };
       notifications: { Row: Notification; Insert: Partial<Notification>; Update: Partial<Notification> };
@@ -106,7 +138,7 @@ export interface Database {
     Functions: {
       ensure_profile: { Args: Record<string, never>; Returns: Profile };
       save_onboarding: { Args: { p_username: string; p_photo_url: string | null; p_location_text: string; p_lat: number | null; p_lng: number | null; p_skills: string[]; p_services: string[] }; Returns: Profile };
-      create_gig: { Args: { p_request_id: string; p_service_type: string; p_title: string; p_description: string; p_amount: number; p_price_type: string; p_scheduled_at: string | null; p_location_text: string; p_lat: number | null; p_lng: number | null; p_photo_url?: string | null; p_publish?: boolean }; Returns: Gig };
+      create_gig: { Args: { p_request_id: string; p_service_type: string; p_title: string; p_description: string; p_amount: number; p_price_type: string; p_scheduled_at: string | null; p_location_text: string; p_lat: number | null; p_lng: number | null; p_photo_url?: string | null; p_publish?: boolean; p_tag_ids?: string[] }; Returns: Gig };
       create_claim: { Args: { p_gig_id: string }; Returns: Claim };
       select_provider: { Args: { p_gig_id: string; p_claim_id: string }; Returns: void };
       request_start: { Args: { p_gig_id: string }; Returns: void };
@@ -118,6 +150,8 @@ export interface Database {
       publish_gig: { Args: { p_gig_id: string }; Returns: void };
       cancel_gig: { Args: { p_gig_id: string }; Returns: void };
       get_public_stats: { Args: { p_profile_id: string }; Returns: { gigs_worked_count: number; wom_count: number }[] };
+      set_helper_tags: { Args: { p_service_type: string; p_tag_ids: string[] }; Returns: void };
+      set_helper_location: { Args: { p_location_text: string | null; p_lat: number | null; p_lng: number | null }; Returns: Profile };
     };
   };
 }

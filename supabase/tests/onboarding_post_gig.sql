@@ -26,6 +26,21 @@ begin
   raise exception 'FAIL (expected error): %',p_label;
 end;
 $$;
+-- This file runs standalone (0001-0004, via --onboarding) or layered under
+-- Phase 2C (0001-0005, via --phase2c). A handful of assertions have a
+-- guarantee that holds either way but a SQLSTATE that legitimately differs
+-- by which migrations are applied; accept any of several codes for those.
+create function pg_temp.journey_error_any(p_sql text,p_codes text[],p_label text)
+returns void language plpgsql security invoker as $$
+begin
+  begin execute p_sql;
+  exception when others then
+    if sqlstate<>all(p_codes) then raise; end if;
+    raise notice 'PASS: %',p_label; return;
+  end;
+  raise exception 'FAIL (expected error): %',p_label;
+end;
+$$;
 create function pg_temp.post(p_request uuid,p_service text default 'Other',p_title text default 'Journey gig',
   p_description text default 'Help with a task',p_amount numeric default 25,p_price text default 'fixed',
   p_date timestamptz default now()+interval '1 day',p_area text default 'Test neighborhood',
@@ -94,7 +109,12 @@ select pg_temp.journey_assert((select to_jsonb(g)=(select payload from journey_s
 select pg_temp.journey_assert((select to_jsonb(g)=(select payload from journey_snapshot) from pg_temp.post(pg_temp.journey_id('request')) g),'creation retry 2 returns first unchanged row');
 select pg_temp.journey_assert((select to_jsonb(g)=(select payload from journey_snapshot) from pg_temp.post(pg_temp.journey_id('request')) g),'creation retry 3 returns first unchanged row');
 select pg_temp.journey_assert((select count(*)=1 from public.gigs where creation_request_id=pg_temp.journey_id('request')),'retries never duplicate gig');
-select pg_temp.journey_error('update public.gigs set creation_request_id=null where id=pg_temp.journey_id(''gig'')','22023','ordinary edits cannot erase creation retry key');
+-- Standalone (0001-0004), this is denied by the keep_creation_request trigger
+-- itself (22023). Layered under Phase 2C (0001-0005), gigs' client UPDATE
+-- grant is revoked entirely, so the same statement is now denied at the grant
+-- level (42501) before ever reaching that trigger. Either way the immutability
+-- guarantee holds, so both codes are accepted here.
+select pg_temp.journey_error_any('update public.gigs set creation_request_id=null where id=pg_temp.journey_id(''gig'')',array['22023','42501'],'ordinary edits cannot erase creation retry key');
 select pg_temp.journey_assert((select count(*)=1 from public.gigs where creation_request_id=pg_temp.journey_id('request')),'denied key update leaves retry identity intact');
 select pg_temp.journey_error('select pg_temp.post(pg_temp.journey_id(''second''),p_service := ''Invalid'')','22023','unknown service rejected');
 select pg_temp.journey_error('select pg_temp.post(pg_temp.journey_id(''second''),p_title := '' '')','22023','missing title rejected');
@@ -127,7 +147,16 @@ set local role authenticated;
 select pg_temp.journey_assert((select count(*)=0 from public.profiles where id=pg_temp.journey_id('poster')),'other user cannot read private onboarding address');
 select pg_temp.journey_assert((select count(*)=1 from public.gigs where id=pg_temp.journey_id('gig')),'new gig appears in public browse for other account');
 select pg_temp.journey_assert((select count(*)=0 from public.gigs where id=pg_temp.journey_id('draft')),'draft remains private');
-update public.profiles set skills='["Legacy custom skill"]',services='["Legacy custom service"]' where id=auth.uid();
+-- Seed pre-catalog legacy labels the way they would already exist in older
+-- data. Phase 2C's validation trigger fires for any ordinary role, so this
+-- fixture write (simulating historical data, not a client request) uses
+-- session_replication_role to bypass it, matching standard practice for
+-- loading data that predates a newly added trigger.
+reset role;
+set local session_replication_role = replica;
+update public.profiles set skills='["Legacy custom skill"]',services='["Legacy custom service"]' where id=pg_temp.journey_id('other');
+set local session_replication_role = default;
+set local role authenticated;
 select public.save_onboarding('OtherJourney',null,'Other private area',null,null,'["Legacy custom skill"]','["Legacy custom service"]');
 select pg_temp.journey_assert((select skills='["Legacy custom skill"]'::jsonb and services='["Legacy custom service"]'::jsonb from public.ensure_profile()),'returning users retain existing custom categories');
 select public.save_onboarding('OtherJourney',null,'Other private area',null,null,'[]','[]');

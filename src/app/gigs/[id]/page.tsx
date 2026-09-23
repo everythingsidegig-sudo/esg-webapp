@@ -7,7 +7,9 @@ import { useAuth } from "@/lib/auth-context";
 import { createClient } from "@/lib/supabase/client";
 import StatusBadge from "@/components/StatusBadge";
 import ChatPanel from "@/components/ChatPanel";
-import type { Claim, CompletionOutcome, FeedbackType, Gig, IncompleteChoice, PublicProfile } from "@/lib/database.types";
+import TagChip from "@/components/TagChip";
+import { gigTagNames } from "@/lib/tags";
+import type { Claim, CompletionOutcome, FeedbackType, GigWithTags, IncompleteChoice, PublicProfile } from "@/lib/database.types";
 
 type ClaimWithProfile = Claim & { profile?: PublicProfile };
 
@@ -16,7 +18,7 @@ function GigDetails({ id }: { id: string }) {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
 
-  const [gig, setGig] = useState<Gig | null | undefined>(undefined);
+  const [gig, setGig] = useState<GigWithTags | null | undefined>(undefined);
   const [claims, setClaims] = useState<ClaimWithProfile[]>([]);
   const [myClaim, setMyClaim] = useState<Claim | null>(null);
   const [myCompletion, setMyCompletion] = useState<CompletionOutcome | null>(null);
@@ -27,8 +29,8 @@ function GigDetails({ id }: { id: string }) {
   const [error, setError] = useState<string | null>(null);
 
   const loadAll = useCallback(async () => {
-    const { data: gigData } = await supabase.from("gigs").select("*").eq("id", id).maybeSingle();
-    setGig((gigData as Gig) ?? null);
+    const { data: gigData } = await supabase.from("gigs").select("*, gig_tags(tag:tags(id,name))").eq("id", id).maybeSingle();
+    setGig((gigData as GigWithTags) ?? null);
     if (!gigData) return;
 
     if (user && gigData.poster_id === user.id) {
@@ -142,6 +144,11 @@ function GigDetails({ id }: { id: string }) {
           <span>📍 {gig.location_text}</span>
           <span>🗓️ {gig.scheduled_at ? new Date(gig.scheduled_at).toLocaleString() : "Flexible"}</span>
         </div>
+        {gigTagNames(gig).length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {gigTagNames(gig).map((name) => <TagChip key={name}>{name}</TagChip>)}
+          </div>
+        )}
       </div>
 
       {error && <p className="text-sm text-red-600">{error}</p>}

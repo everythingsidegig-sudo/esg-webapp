@@ -11,8 +11,8 @@ Stack: Next.js (App Router) + Tailwind, Supabase (Postgres + Auth + Storage + Re
 
 1. Go to https://supabase.com and create a free account/project (you'll need to do this
    yourself — account creation isn't something I can do on your behalf).
-2. Apply `supabase/migrations/0001_init.sql`, `0002_security_hardening.sql`,
-   `0003_lifecycle_integrity.sql`, and `0004_onboarding_post_gig.sql` once, in that
+2. Apply `supabase/migrations/20240101000001_init.sql`, `20240101000002_security_hardening.sql`,
+   `20240101000003_lifecycle_integrity.sql`, and `20240101000004_onboarding_post_gig.sql` once, in that
    order, using a trusted migration role. Existing projects apply only unapplied
    migrations. Migration 0004 is required by profile loading, setup, and posting.
 3. Under **Project Settings → Data API**, confirm the Realtime toggle is on for the

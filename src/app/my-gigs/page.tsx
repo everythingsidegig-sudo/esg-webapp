@@ -7,12 +7,15 @@ import AuthGuard from "@/components/AuthGuard";
 import { useAuth } from "@/lib/auth-context";
 import { createClient } from "@/lib/supabase/client";
 import StatusBadge from "@/components/StatusBadge";
-import type { Gig, GigStatus } from "@/lib/database.types";
+import TagChip from "@/components/TagChip";
+import { gigTagNames } from "@/lib/tags";
+import type { GigStatus, GigWithTags } from "@/lib/database.types";
 
 const POSTED_BUCKETS: GigStatus[] = ["draft", "active", "in_progress", "awaiting_payment", "completed", "incomplete", "cancelled", "disputed"];
 const WORKED_BUCKETS: GigStatus[] = ["active", "in_progress", "awaiting_payment", "completed", "incomplete", "disputed"];
 
-function GigRow({ gig }: { gig: Gig }) {
+function GigRow({ gig }: { gig: GigWithTags }) {
+  const tagNames = gigTagNames(gig);
   return (
     <Link
       href={`/gigs/${gig.id}`}
@@ -21,13 +24,18 @@ function GigRow({ gig }: { gig: Gig }) {
       <div>
         <div className="font-medium">{gig.title}</div>
         <div className="text-sm text-neutral-500">${gig.amount} · {gig.service_type}</div>
+        {tagNames.length > 0 && (
+          <div className="mt-1 flex flex-wrap gap-1">
+            {tagNames.map((name) => <TagChip key={name}>{name}</TagChip>)}
+          </div>
+        )}
       </div>
       <StatusBadge status={gig.status} />
     </Link>
   );
 }
 
-function Bucketed({ gigs, buckets }: { gigs: Gig[]; buckets: GigStatus[] }) {
+function Bucketed({ gigs, buckets }: { gigs: GigWithTags[]; buckets: GigStatus[] }) {
   return (
     <div className="space-y-5">
       {buckets.map((status) => {
@@ -53,8 +61,8 @@ function MyGigsInner() {
   const supabase = createClient();
   const { user } = useAuth();
   const [tab, setTab] = useState<"posted" | "worked">("posted");
-  const [posted, setPosted] = useState<Gig[]>([]);
-  const [worked, setWorked] = useState<Gig[]>([]);
+  const [posted, setPosted] = useState<GigWithTags[]>([]);
+  const [worked, setWorked] = useState<GigWithTags[]>([]);
   const [postedLoading, setPostedLoading] = useState(true);
   const [workedLoading, setWorkedLoading] = useState(true);
   const [postedError, setPostedError] = useState<string | null>(null);
@@ -69,9 +77,9 @@ function MyGigsInner() {
     let alive = true;
     async function loadPosted() {
       try {
-        const { data, error } = await supabase.from("gigs").select("*").eq("poster_id", user!.id).order("created_at", { ascending: false });
+        const { data, error } = await supabase.from("gigs").select("*, gig_tags(tag:tags(id,name))").eq("poster_id", user!.id).order("created_at", { ascending: false });
         if (error) throw error;
-        if (alive) setPosted((data as Gig[]) ?? []);
+        if (alive) setPosted((data as GigWithTags[]) ?? []);
       } catch { if (alive) setPostedError("Couldn't load your posted gigs. Check your connection and retry."); }
       finally { if (alive) setPostedLoading(false); }
     }
@@ -94,11 +102,11 @@ function MyGigsInner() {
 
       const { data, error } = await supabase
         .from("gigs")
-        .select("*")
+        .select("*, gig_tags(tag:tags(id,name))")
         .or(orParts.join(","))
         .order("created_at", { ascending: false });
       if (error) throw error;
-      if (alive) setWorked((data as Gig[]) ?? []);
+      if (alive) setWorked((data as GigWithTags[]) ?? []);
       } catch { if (alive) setWorkedError("Couldn't load your worked gigs. Check your connection and retry."); }
       finally { if (alive) setWorkedLoading(false); }
     }

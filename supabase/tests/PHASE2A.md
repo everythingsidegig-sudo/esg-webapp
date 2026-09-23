@@ -1,6 +1,6 @@
 # Phase 2A lifecycle integrity
 
-Apply `0003_lifecycle_integrity.sql` after migrations 0001 and 0002 using a
+Apply `20240101000003_lifecycle_integrity.sql` after migrations 0001 and 0002 using a
 trusted migration role. This migration changes only three RPCs and adds a
 partial unique index. It does not repair historical rows or reputation totals.
 No hosted migration has been applied by this implementation.

@@ -6,6 +6,18 @@ import { runInNewContext } from "node:vm";
 import ts from "typescript";
 import { approximateCoordinates, gigInputError, friendlyError, passwordError, safeNext, setupDestination } from "../src/lib/journey.ts";
 
+// location.ts has extension-less relative imports (./journey, ./geocoding) that
+// Node's native ESM+TS loader can't resolve directly, so its exact haversineKm
+// formula is duplicated here rather than imported (same formula Browse already
+// uses for gig distance, just in kilometers).
+function haversineKm(lat1, lng1, lat2, lng2) {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 // Execute the actual client components with controlled hooks and Supabase responses.
 // This is a small unit harness, not a browser or hosted-Auth verification.
 const require = createRequire(import.meta.url);
@@ -23,6 +35,7 @@ async function component(path, name, overrides = {}) {
   const states = [], effects = [];
   let cursor = 0, queue = [];
   const hooks = {
+    useMemo: (callback) => callback(),
     Suspense: "suspense",
     useState(initial) {
       const index = cursor++;
@@ -47,8 +60,18 @@ async function component(path, name, overrides = {}) {
     "@/lib/supabase/client": { createClient: () => overrides.client },
     "@/lib/services": { SERVICE_TYPES: ["Cleaning", "Other"] },
     "@/lib/journey": { friendlyError, passwordError, safeNext, setupDestination, approximateCoordinates, gigInputError },
+    "@/lib/location": { loadJourneyLocation: () => ({ text: "", lat: null, lng: null }), haversineKm },
+    "@/lib/tags": {
+      loadTagCatalog: async () => ({}),
+      gigTagNames: (gig) => (gig.gig_tags ?? []).map((link) => link.tag.name),
+      profileTagsForCategory: (profile, serviceType) => (profile.profile_tags ?? []).map((link) => link.tag).filter((tag) => tag.service_type === serviceType),
+      MAX_GIG_TAGS: 8,
+      MAX_PROFILE_TAGS: 8,
+    },
     "@/components/AuthGuard": { default: "guard" },
+    "@/components/SelectionChip": { default: "selection-chip" },
     "@/components/StatusBadge": { default: "badge" },
+    "@/components/TagChip": { default: "tag-chip" },
     ...overrides.mocks,
   };
   const loadedModule = { exports: {} };
@@ -68,6 +91,391 @@ function nodes(tree, predicate) {
   return [...(predicate(tree) ? [tree] : []), ...children.flatMap((child) => nodes(child, predicate))];
 }
 const button = (tree, label) => nodes(tree, (node) => node.type === "button" && node.props.children === label)[0];
+
+test("profile chips restore saved and legacy values, toggle independently, and save the same arrays", async () => {
+  let saved;
+  const client = { from: (table) => table === "profile_tags"
+    ? { select: () => ({ eq: async () => ({ data: [], error: null }) }) }
+    : { update: (payload) => {
+        saved = payload;
+        return { eq: () => ({ select: () => ({ single: async () => ({ error: null }) }) }) };
+      } }
+  };
+  const original = { ...profile, skills: ["Cleaning", "Legacy skill"] };
+  const app = await component("src/app/profile/page.tsx", "ProfileEditor", { client });
+  const chips = (tree) => nodes(tree, (node) => node.type === "selection-chip");
+  let tree = app.render({ profile: original });
+  assert.deepEqual(chips(tree).filter((node) => node.props.selected).map((node) => node.props.children), ["Cleaning", "Legacy skill", "Other"]);
+  chips(tree)[0].props.onClick();
+  tree = app.render({ profile: original });
+  chips(tree)[1].props.onClick();
+  tree = app.render({ profile: original });
+  chips(tree)[4].props.onClick();
+  tree = app.render({ profile: original });
+  await nodes(tree, (node) => node.type === "form")[0].props.onSubmit({ preventDefault() {} });
+  assert.deepEqual(JSON.parse(JSON.stringify(saved)), { username: profile.username, skills: ["Legacy skill", "Other"], services: [] });
+  const refreshed = await component("src/app/profile/page.tsx", "ProfileEditor", { client });
+  assert.deepEqual(chips(refreshed.render({ profile: { ...original, ...saved } })).filter((node) => node.props.selected).map((node) => node.props.children), ["Other", "Legacy skill"]);
+});
+
+test("Profile specialization editor pre-populates existing tags per skill and saves via set_helper_tags", async () => {
+  const rpcCalls = [];
+  const client = {
+    from: (table) => table === "profile_tags"
+      ? { select: () => ({ eq: async () => ({ data: [{ tag: { id: "t1", name: "Deep Cleaning", service_type: "Cleaning" } }], error: null }) }) }
+      : { update: () => ({ eq: () => ({ select: () => ({ single: async () => ({ error: null }) }) }) }) },
+    rpc: async (name, payload) => { rpcCalls.push({ name, payload }); return { data: null, error: null }; },
+  };
+  const withSkill = { ...profile, skills: ["Cleaning"] };
+  const app = await component("src/app/profile/page.tsx", "ProfileEditor", {
+    client,
+    mocks: { "@/lib/tags": {
+      loadTagCatalog: async () => ({ Cleaning: [{ id: "t1", name: "Deep Cleaning", service_type: "Cleaning" }, { id: "t2", name: "Kitchen", service_type: "Cleaning" }] }),
+      MAX_PROFILE_TAGS: 8,
+    } },
+  });
+  app.render({ profile: withSkill }); await flush();
+  let tree = app.render({ profile: withSkill });
+  const chip = (label) => nodes(tree, (node) => node.type === "selection-chip" && node.props.children === label)[0];
+  assert.equal(chip("Deep Cleaning").props.selected, true, "existing specialization tag pre-populated from profile_tags");
+  assert.equal(chip("Kitchen").props.selected, false);
+  chip("Kitchen").props.onClick();
+  tree = app.render({ profile: withSkill });
+  button(tree, "Save specializations").props.onClick();
+  await flush();
+  assert.equal(rpcCalls.length, 1);
+  assert.equal(rpcCalls[0].name, "set_helper_tags");
+  assert.equal(rpcCalls[0].payload.p_service_type, "Cleaning");
+  assert.deepEqual(JSON.parse(JSON.stringify(rpcCalls[0].payload.p_tag_ids)), ["t1", "t2"], "existing selection preserved alongside the newly toggled tag");
+});
+
+test("Profile specialization editor is absent when the profile has no skills yet", async () => {
+  const client = { from: (table) => table === "profile_tags" ? { select: () => ({ eq: async () => ({ data: [], error: null }) }) } : { update: () => ({}) } };
+  const app = await component("src/app/profile/page.tsx", "ProfileEditor", {
+    client, mocks: { "@/lib/tags": { loadTagCatalog: async () => ({}), MAX_PROFILE_TAGS: 8 } },
+  });
+  app.render({ profile: { ...profile, skills: [] } }); await flush();
+  const tree = app.render({ profile: { ...profile, skills: [] } });
+  assert.equal(nodes(tree, (node) => node.props.children === "Specializations (optional)").length, 0);
+});
+
+function profileTagsOnlyClient(rpcCalls) {
+  return {
+    from: (table) => table === "profile_tags" ? { select: () => ({ eq: async () => ({ data: [], error: null }) }) } : { update: () => ({}) },
+    rpc: async (name, payload) => { rpcCalls.push({ name, payload }); return { data: null, error: null }; },
+  };
+}
+
+test("Profile helper location starts empty and shows no opt-out control until a profile has ever opted in", async () => {
+  const client = profileTagsOnlyClient([]);
+  const withSkillNoLocation = { ...profile, skills: ["Cleaning"], public_location_text: null, public_lat: null, public_lng: null };
+  const app = await component("src/app/profile/page.tsx", "ProfileEditor", {
+    client, mocks: { "@/lib/tags": { loadTagCatalog: async () => ({}), MAX_PROFILE_TAGS: 8 } },
+  });
+  app.render({ profile: withSkillNoLocation }); await flush();
+  const tree = app.render({ profile: withSkillNoLocation });
+  const areaInput = nodes(tree, (node) => node.type === "input" && node.props.placeholder === "Neighborhood, ZIP or city")[0];
+  assert.equal(areaInput.props.value, "", "helper location is never silently pre-filled for an existing profile that hasn't opted in");
+  assert.equal(button(tree, "Opt out"), undefined, "no opt-out control shown when nothing has ever been opted into");
+});
+
+test("Profile helper location: saving calls set_helper_location with the entered area", async () => {
+  const rpcCalls = [];
+  const client = profileTagsOnlyClient(rpcCalls);
+  const withSkill = { ...profile, skills: ["Cleaning"], public_location_text: null, public_lat: null, public_lng: null };
+  const app = await component("src/app/profile/page.tsx", "ProfileEditor", {
+    client, mocks: { "@/lib/tags": { loadTagCatalog: async () => ({}), MAX_PROFILE_TAGS: 8 } },
+  });
+  app.render({ profile: withSkill }); await flush();
+  let tree = app.render({ profile: withSkill });
+  const areaInput = nodes(tree, (node) => node.type === "input" && node.props.placeholder === "Neighborhood, ZIP or city")[0];
+  areaInput.props.onChange({ target: { value: "Downtown" } });
+  tree = app.render({ profile: withSkill });
+  button(tree, "Save location").props.onClick();
+  await flush();
+  assert.equal(rpcCalls.length, 1);
+  assert.equal(rpcCalls[0].name, "set_helper_location");
+  assert.equal(rpcCalls[0].payload.p_location_text, "Downtown");
+  assert.equal(rpcCalls[0].payload.p_lat, null, "manual text entry without geolocation carries no coordinates");
+  assert.equal(rpcCalls[0].payload.p_lng, null);
+});
+
+test("Profile helper location: opting out calls set_helper_location with all nulls", async () => {
+  const rpcCalls = [];
+  const client = profileTagsOnlyClient(rpcCalls);
+  const withLocation = { ...profile, skills: ["Cleaning"], public_location_text: "Downtown", public_lat: 12.34, public_lng: -56.78 };
+  const app = await component("src/app/profile/page.tsx", "ProfileEditor", {
+    client, mocks: { "@/lib/tags": { loadTagCatalog: async () => ({}), MAX_PROFILE_TAGS: 8 } },
+  });
+  app.render({ profile: withLocation }); await flush();
+  const tree = app.render({ profile: withLocation });
+  assert.ok(button(tree, "Opt out"), "opt-out control appears once a location is already set");
+  button(tree, "Opt out").props.onClick();
+  await flush();
+  assert.equal(rpcCalls.length, 1);
+  assert.equal(rpcCalls[0].name, "set_helper_location");
+  assert.deepEqual(JSON.parse(JSON.stringify(rpcCalls[0].payload)), { p_location_text: null, p_lat: null, p_lng: null });
+});
+
+test("Public profile displays specialization tags grouped by skill", async () => {
+  const publicProfile = {
+    id: "helper-1", username: "HelperOne", photo_url: null, skills: ["Cleaning", "Handyman"], wom_count: 4,
+    profile_tags: [
+      { tag: { id: "t1", name: "Deep Cleaning", service_type: "Cleaning" } },
+      { tag: { id: "t2", name: "Plumbing", service_type: "Handyman" } },
+    ],
+  };
+  const client = {
+    from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: publicProfile, error: null }) }) }) }),
+    rpc: async () => ({ data: [{ gigs_worked_count: 2, wom_count: 4 }], error: null }),
+  };
+  const app = await component("src/app/profile/[username]/page.tsx", "PublicProfileView", { client });
+  app.render({ username: "HelperOne" }); await flush();
+  const tree = app.render({ username: "HelperOne" });
+  assert.equal(nodes(tree, (node) => node.type === "tag-chip" && node.props.children === "Deep Cleaning").length, 1);
+  assert.equal(nodes(tree, (node) => node.type === "tag-chip" && node.props.children === "Plumbing").length, 1);
+  assert.equal(nodes(tree, (node) => node.props.children === "Specializations").length, 1);
+});
+
+test("Public profile hides Specializations section for a legacy profile with no tags", async () => {
+  const legacyProfile = { id: "helper-2", username: "Legacy", photo_url: null, skills: ["Cleaning"], wom_count: 1, profile_tags: [] };
+  const client = {
+    from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: legacyProfile, error: null }) }) }) }),
+    rpc: async () => ({ data: [{ gigs_worked_count: 0, wom_count: 1 }], error: null }),
+  };
+  const app = await component("src/app/profile/[username]/page.tsx", "PublicProfileView", { client });
+  app.render({ username: "Legacy" }); await flush();
+  const tree = app.render({ username: "Legacy" });
+  assert.equal(nodes(tree, (node) => node.props.children === "Specializations").length, 0, "no specialization section for a profile with skills but no tags");
+  assert.equal(nodes(tree, (node) => node.type === "tag-chip").length, 0);
+});
+
+test("Browse chips select one existing category and All Services restores results", async () => {
+  const gigs = ["Cleaning", "Other"].map((service_type) => ({ id: service_type, service_type, title: service_type, amount: 10 }));
+  const client = { from: () => ({ select: () => ({ eq: () => ({ order: async () => ({ data: gigs, error: null }) }) }) }) };
+  const app = await component("src/app/browse/page.tsx", "BrowseInner", { client });
+  app.render(); await flush();
+  const chips = (tree) => nodes(tree, (node) => node.type === "selection-chip");
+  const results = (tree) => nodes(tree, (node) => node.type === "a").map((node) => node.props.href);
+  let tree = app.render();
+  assert.equal(results(tree).length, 2);
+  chips(tree)[1].props.onClick(); tree = app.render();
+  assert.deepEqual(results(tree), ["/gigs/Cleaning"]);
+  assert.equal(chips(tree).filter((node) => node.props.selected).length, 1);
+  chips(tree)[0].props.onClick(); tree = app.render();
+  assert.equal(results(tree).length, 2);
+});
+
+test("Browse tag filter appears after choosing a category and narrows results", async () => {
+  const gigs = [
+    { id: "g1", service_type: "Cleaning", title: "Deep clean", amount: 10, gig_tags: [{ tag: { id: "t-deep", name: "Deep Cleaning" } }] },
+    { id: "g2", service_type: "Cleaning", title: "Kitchen only", amount: 12, gig_tags: [{ tag: { id: "t-kitchen", name: "Kitchen" } }] },
+  ];
+  const client = { from: () => ({ select: () => ({ eq: () => ({ order: async () => ({ data: gigs, error: null }) }) }) }) };
+  const app = await component("src/app/browse/page.tsx", "BrowseInner", {
+    client,
+    mocks: { "@/lib/tags": {
+      loadTagCatalog: async () => ({ Cleaning: [{ id: "t-deep", name: "Deep Cleaning", service_type: "Cleaning" }, { id: "t-kitchen", name: "Kitchen", service_type: "Cleaning" }] }),
+      gigTagNames: (g) => (g.gig_tags ?? []).map((l) => l.tag.name),
+    } },
+  });
+  app.render(); await flush();
+  let tree = app.render();
+  const chip = (label) => nodes(tree, (node) => node.type === "selection-chip" && node.props.children === label)[0];
+  const results = () => nodes(tree, (node) => node.type === "a").map((node) => node.props.href);
+  assert.equal(nodes(tree, (node) => node.type === "selection-chip" && node.props.children === "Deep Cleaning").length, 0, "no tag filter before a category is chosen");
+  assert.equal(results().length, 2);
+  chip("Cleaning").props.onClick();
+  tree = app.render();
+  assert.ok(chip("Deep Cleaning"), "tag filter appears once a category is selected");
+  assert.equal(results().length, 2, "selecting a category alone does not yet narrow by tag");
+  chip("Deep Cleaning").props.onClick();
+  tree = app.render();
+  assert.deepEqual(results(), ["/gigs/g1"], "selecting a tag narrows to matching gigs");
+});
+
+function helperClient(profiles) {
+  return { from: () => ({ select: () => ({ contains: (_column, value) => ({
+    then: (resolve, reject) => Promise.resolve({ data: profiles.filter((p) => p.skills.includes(value[0])), error: null }).then(resolve, reject),
+  }) }) }) };
+}
+const helperTagsMock = { profileTagsForCategory: (profile, category) => (profile.profile_tags ?? []).map((link) => link.tag).filter((tag) => tag.service_type === category) };
+// HelperCard is a locally-defined component used via JSX (<HelperCard .../>);
+// this harness never auto-invokes custom function components (only host
+// elements and pre-mocked string types), so — same workaround already used
+// for my-gigs' GigRow/Bucketed — assert on the un-invoked element's own
+// props rather than descending into its rendered output.
+const helperUsernames = (tree) => nodes(tree, (node) => node.props?.profile?.username).map((node) => node.props.profile.username);
+
+test("Find a Helper requires a category before showing tags or results", async () => {
+  const app = await component("src/app/find-helper/page.tsx", "FindHelper", {
+    client: helperClient([]),
+    mocks: { "@/lib/tags": { loadTagCatalog: async () => ({ Cleaning: [{ id: "t1", name: "Deep Cleaning", service_type: "Cleaning" }] }), ...helperTagsMock } },
+  });
+  app.render(); await flush();
+  const tree = app.render();
+  assert.equal(nodes(tree, (node) => node.type === "selection-chip" && node.props.children === "Deep Cleaning").length, 0, "no tag filter before a category is chosen");
+  assert.equal(helperUsernames(tree).length, 0, "no results before a category is chosen");
+  assert.equal(nodes(tree, (node) => node.props.children === "Choose a category to see nearby helpers.").length, 1);
+});
+
+test("Find a Helper matches on category alone when no tag filter is selected, including legacy helpers with no tags", async () => {
+  const profiles = [
+    { id: "a", username: "HelperA", photo_url: null, skills: ["Cleaning"], wom_count: 3, profile_tags: [{ tag: { id: "t1", name: "Deep Cleaning", service_type: "Cleaning" } }] },
+    { id: "c", username: "HelperC", photo_url: null, skills: ["Cleaning"], wom_count: 5, profile_tags: [] },
+  ];
+  const app = await component("src/app/find-helper/page.tsx", "FindHelper", {
+    client: helperClient(profiles),
+    mocks: { "@/lib/tags": { loadTagCatalog: async () => ({ Cleaning: [{ id: "t1", name: "Deep Cleaning", service_type: "Cleaning" }] }), ...helperTagsMock } },
+  });
+  app.render(); await flush();
+  let tree = app.render();
+  const chip = (label) => nodes(tree, (node) => node.type === "selection-chip" && node.props.children === label)[0];
+  chip("Cleaning").props.onClick();
+  tree = app.render(); await flush();
+  tree = app.render();
+  assert.deepEqual(helperUsernames(tree).sort(), ["HelperA", "HelperC"], "every category-matching helper shown, including one with no specialization tags");
+  assert.equal(nodes(tree, (node) => node.props.children === "Matching specializations").length, 0, "no partition heading when no tag filter is active");
+});
+
+test("Find a Helper partitions matching specializations from legacy fallback helpers, excluding non-matching specialists", async () => {
+  const catalog = { Cleaning: [
+    { id: "t1", name: "Deep Cleaning", service_type: "Cleaning" },
+    { id: "t2", name: "Kitchen", service_type: "Cleaning" },
+    { id: "t3", name: "Bathroom", service_type: "Cleaning" },
+  ] };
+  const profiles = [
+    { id: "a", username: "HelperA", photo_url: null, skills: ["Cleaning"], wom_count: 3, profile_tags: [{ tag: catalog.Cleaning[0] }] },
+    { id: "b", username: "HelperB", photo_url: null, skills: ["Cleaning"], wom_count: 1, profile_tags: [{ tag: catalog.Cleaning[1] }] },
+    { id: "c", username: "HelperC", photo_url: null, skills: ["Cleaning"], wom_count: 5, profile_tags: [] },
+    { id: "d", username: "HelperD", photo_url: null, skills: ["Cleaning"], wom_count: 0, profile_tags: [{ tag: catalog.Cleaning[2] }] },
+  ];
+  const app = await component("src/app/find-helper/page.tsx", "FindHelper", {
+    client: helperClient(profiles),
+    mocks: { "@/lib/tags": { loadTagCatalog: async () => catalog, ...helperTagsMock } },
+  });
+  app.render(); await flush();
+  let tree = app.render();
+  const chip = (label) => nodes(tree, (node) => node.type === "selection-chip" && node.props.children === label)[0];
+  chip("Cleaning").props.onClick();
+  tree = app.render(); await flush();
+  tree = app.render();
+  chip("Deep Cleaning").props.onClick();
+  tree = app.render();
+  assert.equal(nodes(tree, (node) => node.props.children === "Matching specializations").length, 1);
+  // JSX interpolation ("Other {category} helpers") splits into an array of parts, not one string.
+  assert.equal(nodes(tree, (node) => Array.isArray(node.props.children) && node.props.children.join("") === "Other Cleaning helpers").length, 1);
+  assert.deepEqual(helperUsernames(tree), ["HelperA", "HelperC"], "matching specialist and legacy fallback shown; non-matching specialist (HelperB, HelperD) excluded entirely");
+});
+
+test("Find a Helper clears tag selection and re-queries when the category changes", async () => {
+  const cleaningProfiles = [{ id: "a", username: "HelperA", photo_url: null, skills: ["Cleaning"], wom_count: 1, profile_tags: [] }];
+  const otherProfiles = [{ id: "b", username: "HelperB", photo_url: null, skills: ["Other"], wom_count: 2, profile_tags: [] }];
+  const client = helperClient([...cleaningProfiles, ...otherProfiles]);
+  const app = await component("src/app/find-helper/page.tsx", "FindHelper", {
+    client,
+    mocks: { "@/lib/tags": {
+      loadTagCatalog: async () => ({
+        Cleaning: [{ id: "t1", name: "Deep Cleaning", service_type: "Cleaning" }],
+        Other: [{ id: "t2", name: "Errand", service_type: "Other" }],
+      }),
+      ...helperTagsMock,
+    } },
+  });
+  app.render(); await flush();
+  let tree = app.render();
+  const chip = (label) => nodes(tree, (node) => node.type === "selection-chip" && node.props.children === label)[0];
+  chip("Cleaning").props.onClick();
+  tree = app.render(); await flush();
+  tree = app.render();
+  assert.deepEqual(helperUsernames(tree), ["HelperA"]);
+
+  chip("Other").props.onClick();
+  tree = app.render(); await flush();
+  tree = app.render();
+  assert.equal(nodes(tree, (node) => node.type === "selection-chip" && node.props.children === "Deep Cleaning").length, 0, "previous category's tags are gone");
+  assert.deepEqual(helperUsernames(tree), ["HelperB"], "results re-queried for the new category");
+});
+
+const originLocationMock = { loadJourneyLocation: () => ({ text: "Origin", lat: 0, lng: 0 }), haversineKm };
+
+test("Find a Helper: Any distance (default) includes helpers with and without a public location", async () => {
+  const profiles = [
+    { id: "a", username: "NearHelper", photo_url: null, skills: ["Cleaning"], wom_count: 1, public_lat: 0.01, public_lng: 0, profile_tags: [] },
+    { id: "b", username: "NoLocationHelper", photo_url: null, skills: ["Cleaning"], wom_count: 2, public_lat: null, public_lng: null, profile_tags: [] },
+  ];
+  const app = await component("src/app/find-helper/page.tsx", "FindHelper", {
+    client: helperClient(profiles),
+    mocks: { "@/lib/tags": { loadTagCatalog: async () => ({}), ...helperTagsMock }, "@/lib/location": originLocationMock },
+  });
+  app.render(); await flush();
+  let tree = app.render();
+  const chip = (label) => nodes(tree, (node) => node.type === "selection-chip" && node.props.children === label)[0];
+  chip("Cleaning").props.onClick();
+  tree = app.render(); await flush();
+  tree = app.render();
+  assert.deepEqual(helperUsernames(tree).sort(), ["NearHelper", "NoLocationHelper"], "Any distance shows every category match regardless of location, unchanged from before this feature");
+});
+
+test("Find a Helper distance filter narrows by 5/10/25 km boundaries, excludes helpers without a public location, and sorts nearest-first", async () => {
+  const kmPerDegLat = haversineKm(0, 0, 1, 0);
+  const at = (km) => km / kmPerDegLat;
+  const profiles = [
+    { id: "near", username: "Near4km", photo_url: null, skills: ["Cleaning"], wom_count: 1, public_lat: at(4), public_lng: 0, profile_tags: [] },
+    { id: "mid", username: "Mid9km", photo_url: null, skills: ["Cleaning"], wom_count: 1, public_lat: at(9), public_lng: 0, profile_tags: [] },
+    { id: "far", username: "Far24km", photo_url: null, skills: ["Cleaning"], wom_count: 1, public_lat: at(24), public_lng: 0, profile_tags: [] },
+    { id: "beyond", username: "Beyond26km", photo_url: null, skills: ["Cleaning"], wom_count: 1, public_lat: at(26), public_lng: 0, profile_tags: [] },
+    { id: "none", username: "NoLocation", photo_url: null, skills: ["Cleaning"], wom_count: 1, public_lat: null, public_lng: null, profile_tags: [] },
+  ];
+  const app = await component("src/app/find-helper/page.tsx", "FindHelper", {
+    client: helperClient(profiles),
+    mocks: { "@/lib/tags": { loadTagCatalog: async () => ({}), ...helperTagsMock }, "@/lib/location": originLocationMock },
+  });
+  app.render(); await flush();
+  let tree = app.render();
+  const chip = (label) => nodes(tree, (node) => node.type === "selection-chip" && node.props.children === label)[0];
+  chip("Cleaning").props.onClick();
+  tree = app.render(); await flush();
+  tree = app.render();
+  assert.deepEqual(helperUsernames(tree).sort(), ["Beyond26km", "Far24km", "Mid9km", "Near4km", "NoLocation"], "Any distance still includes everyone");
+
+  const select = () => nodes(tree, (node) => node.type === "select")[0];
+  select().props.onChange({ target: { value: "5" } });
+  tree = app.render();
+  assert.deepEqual(helperUsernames(tree), ["Near4km"], "5 km radius includes only the 4 km helper; excludes the one with no location entirely (not just from the radius)");
+
+  select().props.onChange({ target: { value: "10" } });
+  tree = app.render();
+  assert.deepEqual(helperUsernames(tree), ["Near4km", "Mid9km"], "10 km radius adds the 9 km helper, nearest-first order");
+
+  select().props.onChange({ target: { value: "25" } });
+  tree = app.render();
+  assert.deepEqual(helperUsernames(tree), ["Near4km", "Mid9km", "Far24km"], "25 km radius adds the 24 km helper but excludes the 26 km one");
+});
+
+test("Find a Helper combines category, tag, and distance filters together", async () => {
+  const catalog = { Cleaning: [{ id: "t1", name: "Deep Cleaning", service_type: "Cleaning" }] };
+  const profiles = [
+    { id: "a", username: "NearSpecialist", photo_url: null, skills: ["Cleaning"], wom_count: 1, public_lat: 0.01, public_lng: 0, profile_tags: [{ tag: catalog.Cleaning[0] }] },
+    { id: "b", username: "FarSpecialist", photo_url: null, skills: ["Cleaning"], wom_count: 1, public_lat: 1, public_lng: 0, profile_tags: [{ tag: catalog.Cleaning[0] }] },
+    { id: "c", username: "NearLegacy", photo_url: null, skills: ["Cleaning"], wom_count: 1, public_lat: 0.02, public_lng: 0, profile_tags: [] },
+  ];
+  const app = await component("src/app/find-helper/page.tsx", "FindHelper", {
+    client: helperClient(profiles),
+    mocks: { "@/lib/tags": { loadTagCatalog: async () => catalog, ...helperTagsMock }, "@/lib/location": originLocationMock },
+  });
+  app.render(); await flush();
+  let tree = app.render();
+  const chip = (label) => nodes(tree, (node) => node.type === "selection-chip" && node.props.children === label)[0];
+  chip("Cleaning").props.onClick();
+  tree = app.render(); await flush();
+  tree = app.render();
+  chip("Deep Cleaning").props.onClick();
+  tree = app.render();
+  nodes(tree, (node) => node.type === "select")[0].props.onChange({ target: { value: "10" } });
+  tree = app.render();
+  assert.deepEqual(helperUsernames(tree), ["NearSpecialist", "NearLegacy"], "within radius: matching specialist first, legacy fallback still included; far specialist (111 km away) and radius-excluded helpers are gone");
+});
 
 function gigClient(failure) {
   const calls = [];
@@ -125,6 +533,7 @@ for (const fails of [false, true]) {
   test(`normal profile save ${fails ? "surfaces failure" : "persists only editable fields without setup"}`, async () => {
     const updates = [];
     const client = { from(table) {
+      if (table === "profile_tags") return { select: () => ({ eq: async () => ({ data: [], error: null }) }) };
       assert.equal(table, "profiles");
       return { update(payload) {
         updates.push(payload);
@@ -149,6 +558,109 @@ for (const fails of [false, true]) {
     assert.equal(nodes(tree, (node) => node.type === "input" && node.props.value === "Edited123").length, 1);
   });
 }
+
+test("Post category chips select Cleaning, submit its unchanged value, and restore pending selection", async () => {
+  const calls = [], values = new Map();
+  const options = {
+    client: { rpc: async (name, payload) => { calls.push({ name, payload }); return { data: { id: "created", status: "active" }, error: null }; } },
+    storage: { getItem: (key) => values.get(key), setItem: (key, value) => values.set(key, value), removeItem: (key) => values.delete(key) },
+    mocks: { "@/lib/location": { loadJourneyLocation: () => ({ text: "Test city", lat: null, lng: null }) } },
+  };
+  const app = await component("src/app/post/page.tsx", "PostGigForm", options);
+  const chips = (tree) => nodes(tree, (node) => node.type === "selection-chip");
+  let tree = app.render();
+  chips(tree)[1].props.onClick(); tree = app.render();
+  assert.equal(chips(tree).filter((node) => node.props.selected).length, 1);
+  chips(tree)[0].props.onClick(); tree = app.render();
+  assert.equal(chips(tree).find((node) => node.props.selected).props.children, "Cleaning");
+  assert.equal(nodes(tree, (node) => node.type === "select").length, 0);
+  for (const [predicate, value] of [
+    [(node) => node.type === "input" && node.props.maxLength === 120, "Test gig"],
+    [(node) => node.type === "textarea", "Test description"],
+    [(node) => node.props.type === "number", "10"],
+    [(node) => node.props.type === "datetime-local", new Date(Date.now() + 86400000).toISOString().slice(0, 16)],
+  ]) nodes(tree, predicate)[0].props.onChange({ target: { value } });
+  tree = app.render(); button(tree, "Post Gig").props.onClick(); await flush();
+  assert.equal(calls[0].name, "create_gig");
+  assert.equal(calls[0].payload.p_service_type, "Cleaning");
+  values.set(`esg:post:${user.id}`, JSON.stringify(calls[0].payload));
+  const restored = await component("src/app/post/page.tsx", "PostGigForm", options);
+  tree = restored.render();
+  assert.equal(chips(tree).find((node) => node.props.selected).props.children, "Cleaning");
+  assert.equal(nodes(tree, (node) => node.type === "fieldset")[0].props.disabled, true);
+});
+
+test("Post Gig tag chips load for the category, toggle, clear on category change, and submit selected ids", async () => {
+  const calls = [];
+  const tagsByCategory = {
+    Cleaning: [{ id: "t-deep", name: "Deep Cleaning", service_type: "Cleaning" }, { id: "t-kitchen", name: "Kitchen", service_type: "Cleaning" }],
+    Other: [{ id: "t-errand", name: "Errand", service_type: "Other" }],
+  };
+  const values = new Map();
+  const app = await component("src/app/post/page.tsx", "PostGigForm", {
+    client: { rpc: async (name, payload) => { calls.push({ name, payload }); return { data: { id: "created", status: "active" }, error: null }; } },
+    storage: { getItem: (key) => values.get(key), setItem: (key, value) => values.set(key, value), removeItem: (key) => values.delete(key) },
+    mocks: {
+      "@/lib/location": { loadJourneyLocation: () => ({ text: "Test city", lat: null, lng: null }) },
+      "@/lib/tags": { loadTagCatalog: async () => tagsByCategory, gigTagNames: () => [], MAX_GIG_TAGS: 8 },
+    },
+  });
+  app.render(); await flush();
+  let tree = app.render();
+  const chip = (label) => nodes(tree, (node) => node.type === "selection-chip" && node.props.children === label)[0];
+  assert.ok(chip("Deep Cleaning"), "tag chips render for the default (first) category");
+  chip("Deep Cleaning").props.onClick();
+  tree = app.render();
+  assert.equal(chip("Deep Cleaning").props.selected, true);
+
+  chip("Other").props.onClick();
+  tree = app.render();
+  assert.equal(nodes(tree, (node) => node.type === "selection-chip" && node.props.children === "Deep Cleaning").length, 0, "changing category clears incompatible tags from view");
+  assert.ok(chip("Errand"), "tag set swaps to the new category");
+  chip("Errand").props.onClick();
+  tree = app.render();
+  assert.equal(chip("Errand").props.selected, true);
+
+  for (const [predicate, value] of [
+    [(node) => node.type === "input" && node.props.maxLength === 120, "Test gig"],
+    [(node) => node.type === "textarea", "Test description"],
+    [(node) => node.props.type === "number", "10"],
+    [(node) => node.props.type === "datetime-local", new Date(Date.now() + 86400000).toISOString().slice(0, 16)],
+  ]) nodes(tree, predicate)[0].props.onChange({ target: { value } });
+  tree = app.render(); button(tree, "Post Gig").props.onClick(); await flush();
+  assert.deepEqual(JSON.parse(JSON.stringify(calls[0].payload.p_tag_ids)), ["t-errand"], "only the tag selected under the final category is submitted");
+});
+
+test("Post Gig tag selection is capped at MAX_GIG_TAGS", async () => {
+  const many = Array.from({ length: 10 }, (_, i) => ({ id: `t${i}`, name: `Tag ${i}`, service_type: "Cleaning" }));
+  const app = await component("src/app/post/page.tsx", "PostGigForm", {
+    mocks: {
+      "@/lib/location": { loadJourneyLocation: () => ({ text: "", lat: null, lng: null }) },
+      "@/lib/tags": { loadTagCatalog: async () => ({ Cleaning: many }), gigTagNames: () => [], MAX_GIG_TAGS: 8 },
+    },
+  });
+  app.render(); await flush();
+  let tree = app.render();
+  const tagChips = () => nodes(tree, (node) => node.type === "selection-chip" && typeof node.props.children === "string" && node.props.children.startsWith("Tag "));
+  for (let i = 0; i < many.length; i++) {
+    tagChips()[i].props.onClick();
+    tree = app.render();
+  }
+  assert.equal(tagChips().filter((c) => c.props.selected).length, 8);
+});
+
+test("Post category arrow keys move selection and focus with wrapping", async () => {
+  const app = await component("src/app/post/page.tsx", "PostGigForm", {
+    mocks: { "@/lib/location": { loadJourneyLocation: () => ({ text: "", lat: null, lng: null }) } },
+  });
+  const chips = () => nodes(app.render(), (node) => node.type === "selection-chip");
+  let focused, prevented = false;
+  chips()[0].props.onKeyDown({ key: "ArrowLeft", preventDefault() { prevented = true; },
+    currentTarget: { parentElement: { querySelectorAll: () => [0, 1].map((index) => ({ focus() { focused = index; } })) } } });
+  assert.equal(prevented, true);
+  assert.equal(focused, 1);
+  assert.deepEqual(chips().map((node) => [node.props.selected, node.props.tabIndex]), [[false, -1], [true, 0]]);
+});
 
 for (const status of ["active", "draft"]) {
   test(`creation retry retains identity and opens ${status === "draft" ? "My Gigs" : "Gig Detail"}`, async () => {
@@ -196,14 +708,14 @@ test("Location is confirmed before either journey choice appears", async () => {
   assert.equal(locations[0].text, "Test city");
 });
 
-test("I Need Help offers Post a Gig and a non-navigating Coming soon helper choice", async () => {
+test("I Need Help offers Post a Gig and Find a Helper as real links", async () => {
   const app = await component("src/app/need-help/page.tsx", "NeedHelp");
   const tree = app.render();
   const links = nodes(tree, (node) => node.type === "a");
-  assert.deepEqual(links.map((link) => link.props.href), ["/post"]);
+  assert.deepEqual(links.map((link) => link.props.href), ["/post", "/find-helper"]);
   assert.equal(nodes(tree, (node) => node.props.children === "Find a Helper").length, 1);
-  assert.equal(nodes(tree, (node) => node.props.children === "Coming soon").length, 1);
-  assert.equal(nodes(tree, (node) => node.props.href === "/browse").length, 0);
+  assert.equal(nodes(tree, (node) => node.props.children === "Coming soon").length, 0);
+  assert.equal(nodes(tree, (node) => node.props["aria-disabled"] === "true").length, 0);
 });
 
 test("Help & Earn Money passes rounded current coordinates to Browse", async () => {

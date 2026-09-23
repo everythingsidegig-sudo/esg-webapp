@@ -1,19 +1,22 @@
 "use client";
 
-import { Suspense, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
+import SelectionChip from "@/components/SelectionChip";
 import { useAuth } from "@/lib/auth-context";
 import { createClient } from "@/lib/supabase/client";
 import { approximateCoordinates, friendlyError, gigInputError } from "@/lib/journey";
 import { loadJourneyLocation } from "@/lib/location";
 import { SERVICE_TYPES } from "@/lib/services";
+import { loadTagCatalog, MAX_GIG_TAGS } from "@/lib/tags";
+import type { Tag } from "@/lib/database.types";
 
 interface CreationRequest {
   p_request_id: string; p_service_type: string; p_title: string; p_description: string;
   p_amount: number; p_price_type: string; p_scheduled_at: string | null;
   p_location_text: string; p_lat: number | null; p_lng: number | null;
-  p_photo_url: string | null; p_publish: boolean;
+  p_photo_url: string | null; p_publish: boolean; p_tag_ids: string[];
 }
 function readPending(key: string): CreationRequest | null {
   try {
@@ -36,6 +39,8 @@ function PostGigForm() {
   const [retained, setRetained] = useState<CreationRequest | null>(() => readPending(key));
   const [initialLocation] = useState(loadJourneyLocation);
   const [serviceType, setServiceType] = useState<string>(retained?.p_service_type ?? SERVICE_TYPES[0]);
+  const [tagCatalog, setTagCatalog] = useState<Record<string, Tag[]>>({});
+  const [tagIds, setTagIds] = useState<string[]>(retained?.p_tag_ids ?? []);
   const [title, setTitle] = useState(retained?.p_title ?? "");
   const [description, setDescription] = useState(retained?.p_description ?? "");
   const [amount, setAmount] = useState(retained ? String(retained.p_amount) : "");
@@ -48,6 +53,17 @@ function PostGigForm() {
   const [submitting, setSubmitting] = useState(false);
   const pending = useRef(false);
   const input = "w-full rounded-lg border border-neutral-300 px-3 py-2";
+
+  useEffect(() => {
+    let active = true;
+    loadTagCatalog(supabase).then((catalog) => { if (active) setTagCatalog(catalog); }).catch(() => {});
+    return () => { active = false; };
+  }, [supabase]);
+
+  function toggleTag(id: string) {
+    setTagIds((current) => current.includes(id) ? current.filter((item) => item !== id)
+      : current.length >= MAX_GIG_TAGS ? current : [...current, id]);
+  }
 
   async function submit(publish: boolean) {
     if (pending.current) return;
@@ -76,7 +92,7 @@ function PostGigForm() {
           p_title: title.trim(), p_description: description.trim(), p_amount: Number(amount),
           p_price_type: "fixed", p_scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null,
           p_location_text: locationText.trim(), p_lat: coords.lat, p_lng: coords.lng,
-          p_photo_url: photoUrl, p_publish: publish };
+          p_photo_url: photoUrl, p_publish: publish, p_tag_ids: tagIds };
         // Preserve the request before sending. Ambiguous network failures reuse this ID/payload.
         try { sessionStorage.setItem(key, JSON.stringify(request)); } catch {
           setError("Browser storage is unavailable. Enable site storage before posting so retries stay safe."); return;
@@ -99,7 +115,33 @@ function PostGigForm() {
     <h1 className="text-xl font-semibold">Post a Gig</h1>
     {retained && <p role="status">A previous request is awaiting confirmation. Retry it to check the saved gig safely.</p>}
     <fieldset disabled={submitting || !!retained} className="space-y-4">
-      <label className="block">Service Type<select value={serviceType} onChange={(e) => setServiceType(e.target.value)} className={input}>{SERVICE_TYPES.map((item) => <option key={item}>{item}</option>)}</select></label>
+      <div role="radiogroup" aria-labelledby="category-label">
+        <p id="category-label" className="text-sm font-medium">Choose a category</p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {SERVICE_TYPES.map((item, index) => <SelectionChip key={item} role="radio"
+            selected={serviceType === item} tabIndex={serviceType === item ? 0 : -1}
+            onClick={() => { setServiceType(item); setTagIds([]); }}
+            onKeyDown={(event) => {
+              const direction = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key];
+              if (direction === undefined) return;
+              event.preventDefault();
+              const next = (index + direction + SERVICE_TYPES.length) % SERVICE_TYPES.length;
+              setServiceType(SERVICE_TYPES[next]);
+              setTagIds([]);
+              event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="radio"]')[next]?.focus();
+            }}>{item}</SelectionChip>)}
+        </div>
+      </div>
+      {(tagCatalog[serviceType]?.length ?? 0) > 0 && (
+        <fieldset className="min-w-0">
+          <legend className="text-sm font-medium">Tags (optional, up to {MAX_GIG_TAGS})</legend>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {tagCatalog[serviceType].map((tag) => (
+              <SelectionChip key={tag.id} selected={tagIds.includes(tag.id)} onClick={() => toggleTag(tag.id)}>{tag.name}</SelectionChip>
+            ))}
+          </div>
+        </fieldset>
+      )}
       <label className="block">Gig Title<input required maxLength={120} value={title} onChange={(e) => setTitle(e.target.value)} className={input} /></label>
       <label className="block">Brief Description<textarea required maxLength={280} rows={3} value={description} onChange={(e) => setDescription(e.target.value)} className={input} /></label>
       <label className="block">Photo (optional)<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => { setPhoto(e.target.files?.[0] ?? null); setUploadedPhoto(null); }} /></label>

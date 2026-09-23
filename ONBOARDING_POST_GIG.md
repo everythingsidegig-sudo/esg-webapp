@@ -34,7 +34,7 @@ workflow was added. Docker, dependencies and migrations 0001–0003 are unchange
 
 ## Deployment prerequisites
 
-1. Apply additive migration `supabase/migrations/0004_onboarding_post_gig.sql`
+1. Apply additive migration `supabase/migrations/20240101000004_onboarding_post_gig.sql`
    after 0001–0003 using the trusted migration role, first on an isolated project.
    Deploy the matching client alongside it: old clients use direct INSERT, which
    is intentionally revoked by 0004. Existing profiles require setup once; legacy
@@ -180,7 +180,7 @@ Created:
 - `src/components/ProfileSetup.tsx`: loaded-profile three-step editor.
 - `src/app/onboarding/page.tsx`: setup and intended-destination continuation.
 - `src/app/need-help/page.tsx`: Post a Gig choice and non-navigating Find a Helper preview.
-- `supabase/migrations/0004_onboarding_post_gig.sql`: private setup fields,
+- `supabase/migrations/20240101000004_onboarding_post_gig.sql`: private setup fields,
   authenticated RPCs, authoritative creation and immutable retry keys.
 - `supabase/tests/onboarding_post_gig.sql`: 75 rollback-only assertions.
 - `tests/journey.test.mjs`: 58 built-in Node tests after removal of the intermediate route.

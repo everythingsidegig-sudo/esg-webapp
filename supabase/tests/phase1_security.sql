@@ -232,9 +232,11 @@ set local role authenticated;
 
 select pg_temp.assert((select count(*) from public.gigs where id in (select id from pg_temp.security_fixture)) = 6, 'poster reads own gigs in every status without recursion');
 select pg_temp.assert((select count(*) from public.claims where id in (select id from pg_temp.security_fixture)) = 6, 'poster reads all claims on own gigs without recursion');
-update public.profiles set photo_url='https://example.invalid/photo', skills='["Testing"]', services='["Other"]' where id=pg_temp.fixture('poster');
-select pg_temp.assert((select skills = '["Testing"]'::jsonb and services = '["Other"]'::jsonb from public.profiles where id=pg_temp.fixture('poster')), 'legitimate profile edits succeed');
-select pg_temp.assert((select skills = '["Testing"]'::jsonb from public.public_profiles where id=pg_temp.fixture('poster')), 'profile synchronization trigger still succeeds');
+-- Phase 2C validates skills/services against the fixed catalog on direct writes;
+-- use a catalog value here so this remains a legitimate-edit assertion.
+update public.profiles set photo_url='https://example.invalid/photo', skills='["Cleaning"]', services='["Other"]' where id=pg_temp.fixture('poster');
+select pg_temp.assert((select skills = '["Cleaning"]'::jsonb and services = '["Other"]'::jsonb from public.profiles where id=pg_temp.fixture('poster')), 'legitimate profile edits succeed');
+select pg_temp.assert((select skills = '["Cleaning"]'::jsonb from public.public_profiles where id=pg_temp.fixture('poster')), 'profile synchronization trigger still succeeds');
 select pg_temp.expect_denied('update public.chat_messages set body=''forged'' where id=pg_temp.fixture(''provider_message'')', 'participant cannot modify chat body');
 select pg_temp.expect_denied('update public.chat_messages set sender_id=pg_temp.fixture(''poster'') where id=pg_temp.fixture(''provider_message'')', 'participant cannot modify chat sender_id');
 select pg_temp.expect_denied('update public.chat_messages set gig_id=pg_temp.fixture(''open'') where id=pg_temp.fixture(''provider_message'')', 'participant cannot modify chat gig_id');

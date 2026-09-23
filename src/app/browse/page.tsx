@@ -2,10 +2,13 @@
 
 import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import SelectionChip from "@/components/SelectionChip";
+import TagChip from "@/components/TagChip";
 import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import type { Gig } from "@/lib/database.types";
+import type { GigWithTags, Tag } from "@/lib/database.types";
 import { SERVICE_TYPES as CATEGORIES } from "@/lib/services";
+import { loadTagCatalog, gigTagNames } from "@/lib/tags";
 
 const SERVICE_TYPES = [
   "All Services",
@@ -28,48 +31,74 @@ function BrowseInner() {
   const lat = searchParams.get("lat") ? Number(searchParams.get("lat")) : null;
   const lng = searchParams.get("lng") ? Number(searchParams.get("lng")) : null;
 
-  const [gigs, setGigs] = useState<Gig[]>([]);
+  const [gigs, setGigs] = useState<GigWithTags[]>([]);
   const [service, setService] = useState("All Services");
   const [radius, setRadius] = useState(5);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [tagCatalog, setTagCatalog] = useState<Record<string, Tag[]>>({});
+  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
 
   useEffect(() => {
     Promise.resolve(supabase
       .from("gigs")
-      .select("*")
+      .select("*, gig_tags(tag:tags(id,name))")
       .eq("status", "active")
       .order("created_at", { ascending: false }))
       .then(({ data, error }) => {
         if (error) setError("Couldn't load gigs. Please refresh and try again.");
-        setGigs((data as Gig[]) ?? []);
+        setGigs((data as GigWithTags[]) ?? []);
         setLoading(false);
       }).catch(() => { setError("Couldn't load gigs. Please refresh and try again."); setLoading(false); });
   }, [supabase]);
 
+  useEffect(() => {
+    loadTagCatalog(supabase).then(setTagCatalog).catch(() => {});
+  }, [supabase]);
+
+  const categoryTags = useMemo(
+    () => service === "All Services" ? [] : (tagCatalog[service] ?? []),
+    [service, tagCatalog]
+  );
+  const selectedTagNames = useMemo(
+    () => new Set(categoryTags.filter((t) => selectedTagIds.includes(t.id)).map((t) => t.name)),
+    [categoryTags, selectedTagIds]
+  );
+
   const filtered = useMemo(() => {
     return gigs
       .filter((g) => service === "All Services" || g.service_type === service)
+      .filter((g) => selectedTagNames.size === 0 || gigTagNames(g).some((name) => selectedTagNames.has(name)))
       .filter((g) => {
         if (!lat || !lng || g.lat == null || g.lng == null) return true;
         return haversineMiles(lat, lng, g.lat, g.lng) <= radius;
       });
-  }, [gigs, service, radius, lat, lng]);
+  }, [gigs, service, selectedTagNames, radius, lat, lng]);
 
   return (
     <div className="space-y-5">
       <h1 className="text-xl font-semibold">Find Providers Nearby</h1>
 
       <div className="flex flex-wrap gap-3">
-        <select
-          value={service}
-          onChange={(e) => setService(e.target.value)}
-          className="rounded-lg border border-neutral-300 px-3 py-2 text-sm"
-        >
-          {SERVICE_TYPES.map((s) => (
-            <option key={s}>{s}</option>
-          ))}
-        </select>
+        <fieldset className="min-w-0 w-full">
+          <legend className="text-sm font-medium">Service category</legend>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {SERVICE_TYPES.map((s) => <SelectionChip key={s} selected={service === s} onClick={() => { setService(s); setSelectedTagIds([]); }}>{s}</SelectionChip>)}
+          </div>
+        </fieldset>
+        {categoryTags.length > 0 && (
+          <fieldset className="min-w-0 w-full">
+            <legend className="text-sm font-medium">Tags</legend>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {categoryTags.map((tag) => (
+                <SelectionChip key={tag.id} selected={selectedTagIds.includes(tag.id)}
+                  onClick={() => setSelectedTagIds((current) => current.includes(tag.id) ? current.filter((id) => id !== tag.id) : [...current, tag.id])}>
+                  {tag.name}
+                </SelectionChip>
+              ))}
+            </div>
+          </fieldset>
+        )}
         {lat && lng && (
           <select
             value={radius}
@@ -104,6 +133,11 @@ function BrowseInner() {
             <div className="mt-1 text-sm text-neutral-500">
               {gig.location_text} · {gig.scheduled_at ? new Date(gig.scheduled_at).toLocaleString() : "Flexible"}
             </div>
+            {gigTagNames(gig).length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {gigTagNames(gig).map((name) => <TagChip key={name}>{name}</TagChip>)}
+              </div>
+            )}
           </Link>
         ))}
       </div>

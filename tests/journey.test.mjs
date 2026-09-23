@@ -48,8 +48,23 @@ test("unverified login actionable", () => assert.match(friendlyError({ code: "em
 test("duplicate username actionable", () => assert.match(friendlyError({ code: "23505" }), /username is already taken/));
 test("existing catalog retained", () => assert.deepEqual(SERVICE_TYPES, ["Yard Work", "Moving Help", "Cleaning", "Handyman", "Delivery", "Pet Care", "Tech Help", "Other"]));
 test("database validation uses the same POC catalog", async () => {
-  const sql = await readFile(new URL("../supabase/migrations/0004_onboarding_post_gig.sql", import.meta.url), "utf8");
+  const sql = await readFile(new URL("../supabase/migrations/20240101000004_onboarding_post_gig.sql", import.meta.url), "utf8");
   const catalogs = [...sql.matchAll(/array\[('Yard Work'[^\]]+)\]/g)];
   assert.equal(catalogs.length, 2);
   for (const [, catalog] of catalogs) assert.deepEqual(catalog.split(",").map((label) => label.slice(1, -1)), [...SERVICE_TYPES]);
+});
+test("gig tags migration validates against the same POC catalog", async () => {
+  const sql = await readFile(new URL("../supabase/migrations/20240101000006_gig_tags.sql", import.meta.url), "utf8");
+  const catalogs = [...sql.matchAll(/array\[('Yard Work'[^\]]+)\]/g)];
+  assert.equal(catalogs.length, 2);
+  for (const [, catalog] of catalogs) assert.deepEqual(catalog.split(",").map((label) => label.slice(1, -1)), [...SERVICE_TYPES]);
+});
+test("seeded tag catalog only uses approved categories and excludes scheduling/location terms", async () => {
+  const sql = await readFile(new URL("../supabase/migrations/20240101000006_gig_tags.sql", import.meta.url), "utf8");
+  const seed = sql.match(/insert into public\.tags \(service_type, name\) values\n([\s\S]+?)\non conflict/)[1];
+  const rows = [...seed.matchAll(/\('([^']+)','([^']+)'\)/g)].map(([, category, name]) => ({ category, name }));
+  assert.ok(rows.length > 0);
+  for (const { category } of rows) assert.ok(SERVICE_TYPES.includes(category), `unexpected category: ${category}`);
+  const excluded = ["Weekend", "Same-Day", "Seasonal", "Local", "Long Distance"];
+  for (const { name } of rows) assert.ok(!excluded.includes(name), `excluded scheduling/location term used as a tag: ${name}`);
 });
