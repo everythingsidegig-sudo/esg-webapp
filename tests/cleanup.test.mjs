@@ -58,7 +58,7 @@ async function component(path, name, overrides = {}) {
     "next/navigation": { useSearchParams: () => params, usePathname: () => "/profile", useRouter: () => ({ replace() {} }) },
     "@/lib/auth-context": { useAuth: () => auth },
     "@/lib/supabase/client": { createClient: () => overrides.client },
-    "@/lib/services": { SERVICE_TYPES: ["Cleaning", "Other"] },
+    "@/lib/services": { SERVICE_TYPES: ["Cleaning", "Other"], SPECIALIZATION_PROMPTS: { Cleaning: "What kind of cleaning?", Handyman: "What kind of handyman work?", Other: "What kind of help?" } },
     "@/lib/journey": { friendlyError, passwordError, safeNext, setupDestination, approximateCoordinates, gigInputError },
     "@/lib/location": { loadJourneyLocation: () => ({ text: "", lat: null, lng: null }), haversineKm },
     "@/lib/tags": {
@@ -99,7 +99,11 @@ test("profile chips restore saved and legacy values, toggle independently, and s
     : { update: (payload) => {
         saved = payload;
         return { eq: () => ({ select: () => ({ single: async () => ({ error: null }) }) }) };
-      } }
+      } },
+    // The unified Save also syncs specializations for whatever ends up selected;
+    // this test only cares about the profiles.update payload, so a no-op stub
+    // is enough to let those calls succeed harmlessly.
+    rpc: async () => ({ data: null, error: null }),
   };
   const original = { ...profile, skills: ["Cleaning", "Legacy skill"] };
   const app = await component("src/app/profile/page.tsx", "ProfileEditor", { client });
@@ -118,45 +122,115 @@ test("profile chips restore saved and legacy values, toggle independently, and s
   assert.deepEqual(chips(refreshed.render({ profile: { ...original, ...saved } })).filter((node) => node.props.selected).map((node) => node.props.children), ["Other", "Legacy skill"]);
 });
 
-test("Profile specialization editor pre-populates existing tags per skill and saves via set_helper_tags", async () => {
-  const rpcCalls = [];
+test("Profile: selecting a skill immediately reveals its specialization prompt with compact chips, and no 'tag' wording appears", async () => {
+  const client = { from: (table) => table === "profile_tags" ? { select: () => ({ eq: async () => ({ data: [], error: null }) }) } : { update: () => ({}) } };
+  const app = await component("src/app/profile/page.tsx", "ProfileEditor", {
+    client,
+    mocks: { "@/lib/tags": { loadTagCatalog: async () => ({ Cleaning: [{ id: "t1", name: "Deep Cleaning", service_type: "Cleaning" }] }), MAX_PROFILE_TAGS: 8 } },
+  });
+  app.render({ profile: { ...profile, skills: [] } }); await flush();
+  let tree = app.render({ profile: { ...profile, skills: [] } });
+  assert.equal(nodes(tree, (node) => node.props.children === "What kind of cleaning?").length, 0, "no specialization prompt before the skill is selected");
+  const chip = (label) => nodes(tree, (node) => node.type === "selection-chip" && node.props.children === label)[0];
+  chip("Cleaning").props.onClick();
+  tree = app.render({ profile: { ...profile, skills: [] } });
+  assert.equal(nodes(tree, (node) => node.props.children === "What kind of cleaning?").length, 1, "specialization prompt appears inline immediately, before saving");
+  const specializationChip = chip("Deep Cleaning");
+  assert.ok(specializationChip, "specialization chip renders under the selected skill");
+  assert.equal(specializationChip.props.size, "compact", "specializations use the smaller/secondary chip size for visual hierarchy");
+
+  const allText = nodes(tree, (node) => typeof node.props?.children === "string").map((node) => node.props.children).join(" ");
+  assert.doesNotMatch(allText, /\btags?\b/i, "no 'tag' wording is shown to the user");
+  assert.doesNotMatch(allText, /profile_tags/i);
+});
+
+test("Profile: deselecting a skill hides its specialization chips immediately", async () => {
+  const client = { from: (table) => table === "profile_tags" ? { select: () => ({ eq: async () => ({ data: [], error: null }) }) } : { update: () => ({}) } };
+  const app = await component("src/app/profile/page.tsx", "ProfileEditor", {
+    client,
+    mocks: { "@/lib/tags": { loadTagCatalog: async () => ({ Cleaning: [{ id: "t1", name: "Deep Cleaning", service_type: "Cleaning" }] }), MAX_PROFILE_TAGS: 8 } },
+  });
+  const withSkill = { ...profile, skills: ["Cleaning"] };
+  app.render({ profile: withSkill }); await flush();
+  let tree = app.render({ profile: withSkill });
+  const chip = (label) => nodes(tree, (node) => node.type === "selection-chip" && node.props.children === label)[0];
+  assert.ok(chip("Deep Cleaning"), "specialization chip present while the skill is selected");
+  chip("Cleaning").props.onClick();
+  tree = app.render({ profile: withSkill });
+  assert.equal(chip("Deep Cleaning"), undefined, "specialization chips disappear once the skill is deselected");
+});
+
+test("Profile Save persists skill/service changes and specializations together, clearing a deselected skill's specializations first", async () => {
+  const calls = [];
   const client = {
-    from: (table) => table === "profile_tags"
-      ? { select: () => ({ eq: async () => ({ data: [{ tag: { id: "t1", name: "Deep Cleaning", service_type: "Cleaning" } }], error: null }) }) }
-      : { update: () => ({ eq: () => ({ select: () => ({ single: async () => ({ error: null }) }) }) }) },
-    rpc: async (name, payload) => { rpcCalls.push({ name, payload }); return { data: null, error: null }; },
+    from(table) {
+      if (table === "profile_tags") {
+        return { select: () => ({ eq: async () => ({
+          data: [
+            { tag: { id: "t1", name: "Deep Cleaning", service_type: "Cleaning" } },
+            { tag: { id: "t2", name: "Plumbing", service_type: "Handyman" } },
+          ],
+          error: null,
+        }) }) };
+      }
+      return { update: (payload) => {
+        calls.push({ type: "profile-update", payload });
+        return { eq: () => ({ select: () => ({ single: async () => ({ error: null }) }) }) };
+      } };
+    },
+    rpc: async (name, payload) => { calls.push({ type: "rpc", name, payload }); return { data: null, error: null }; },
+  };
+  const withSkills = { ...profile, skills: ["Cleaning", "Handyman"] };
+  const app = await component("src/app/profile/page.tsx", "ProfileEditor", {
+    client,
+    mocks: { "@/lib/tags": {
+      loadTagCatalog: async () => ({
+        Cleaning: [{ id: "t1", name: "Deep Cleaning", service_type: "Cleaning" }, { id: "t3", name: "Kitchen", service_type: "Cleaning" }],
+        Handyman: [{ id: "t2", name: "Plumbing", service_type: "Handyman" }],
+      }),
+      MAX_PROFILE_TAGS: 8,
+    } },
+  });
+  app.render({ profile: withSkills }); await flush();
+  let tree = app.render({ profile: withSkills });
+  const chip = (label) => nodes(tree, (node) => node.type === "selection-chip" && node.props.children === label)[0];
+  chip("Handyman").props.onClick(); // deselect a skill that had a specialization
+  tree = app.render({ profile: withSkills });
+  chip("Kitchen").props.onClick(); // add a second specialization to the remaining skill
+  tree = app.render({ profile: withSkills });
+  await nodes(tree, (node) => node.type === "form")[0].props.onSubmit({ preventDefault() {} });
+
+  const rpcCalls = calls.filter((c) => c.type === "rpc");
+  const profileUpdateIndex = calls.findIndex((c) => c.type === "profile-update");
+  assert.equal(rpcCalls.length, 2, "one clear call for the deselected skill, one sync call for the remaining skill");
+  assert.equal(rpcCalls[0].payload.p_service_type, "Handyman");
+  assert.deepEqual(JSON.parse(JSON.stringify(rpcCalls[0].payload.p_tag_ids)), [], "deselected skill's specializations are cleared");
+  assert.ok(calls.indexOf(rpcCalls[0]) < profileUpdateIndex, "clearing happens before the skill is actually removed from the database, while it's still valid");
+  assert.equal(rpcCalls[1].payload.p_service_type, "Cleaning");
+  assert.deepEqual(JSON.parse(JSON.stringify(rpcCalls[1].payload.p_tag_ids)).sort(), ["t1", "t3"], "remaining skill's specializations (existing + newly added) are saved");
+  assert.ok(calls.indexOf(rpcCalls[1]) > profileUpdateIndex, "syncing the remaining skill happens after the profile update confirms it");
+  assert.deepEqual(JSON.parse(JSON.stringify(calls[profileUpdateIndex].payload)), { username: profile.username, skills: ["Cleaning"], services: profile.services });
+});
+
+test("Profile Save reports a distinct message when the profile saves but specialization sync fails afterward", async () => {
+  const client = {
+    from(table) {
+      if (table === "profile_tags") return { select: () => ({ eq: async () => ({ data: [], error: null }) }) };
+      return { update: () => ({ eq: () => ({ select: () => ({ single: async () => ({ error: null }) }) }) }) };
+    },
+    rpc: async () => ({ data: null, error: new Error("network blip") }),
   };
   const withSkill = { ...profile, skills: ["Cleaning"] };
   const app = await component("src/app/profile/page.tsx", "ProfileEditor", {
     client,
-    mocks: { "@/lib/tags": {
-      loadTagCatalog: async () => ({ Cleaning: [{ id: "t1", name: "Deep Cleaning", service_type: "Cleaning" }, { id: "t2", name: "Kitchen", service_type: "Cleaning" }] }),
-      MAX_PROFILE_TAGS: 8,
-    } },
+    mocks: { "@/lib/tags": { loadTagCatalog: async () => ({ Cleaning: [{ id: "t1", name: "Deep Cleaning", service_type: "Cleaning" }] }), MAX_PROFILE_TAGS: 8 } },
   });
   app.render({ profile: withSkill }); await flush();
   let tree = app.render({ profile: withSkill });
-  const chip = (label) => nodes(tree, (node) => node.type === "selection-chip" && node.props.children === label)[0];
-  assert.equal(chip("Deep Cleaning").props.selected, true, "existing specialization tag pre-populated from profile_tags");
-  assert.equal(chip("Kitchen").props.selected, false);
-  chip("Kitchen").props.onClick();
+  await nodes(tree, (node) => node.type === "form")[0].props.onSubmit({ preventDefault() {} });
   tree = app.render({ profile: withSkill });
-  button(tree, "Save specializations").props.onClick();
-  await flush();
-  assert.equal(rpcCalls.length, 1);
-  assert.equal(rpcCalls[0].name, "set_helper_tags");
-  assert.equal(rpcCalls[0].payload.p_service_type, "Cleaning");
-  assert.deepEqual(JSON.parse(JSON.stringify(rpcCalls[0].payload.p_tag_ids)), ["t1", "t2"], "existing selection preserved alongside the newly toggled tag");
-});
-
-test("Profile specialization editor is absent when the profile has no skills yet", async () => {
-  const client = { from: (table) => table === "profile_tags" ? { select: () => ({ eq: async () => ({ data: [], error: null }) }) } : { update: () => ({}) } };
-  const app = await component("src/app/profile/page.tsx", "ProfileEditor", {
-    client, mocks: { "@/lib/tags": { loadTagCatalog: async () => ({}), MAX_PROFILE_TAGS: 8 } },
-  });
-  app.render({ profile: { ...profile, skills: [] } }); await flush();
-  const tree = app.render({ profile: { ...profile, skills: [] } });
-  assert.equal(nodes(tree, (node) => node.props.children === "Specializations (optional)").length, 0);
+  assert.equal(nodes(tree, (node) => node.props.role === "alert" && /profile saved/i.test(node.props.children)).length, 1, "distinguishes a partial failure from a full failure");
+  assert.equal(nodes(tree, (node) => node.props.role === "status").length, 0, "does not also show a misleading success message");
 });
 
 function profileTagsOnlyClient(rpcCalls) {

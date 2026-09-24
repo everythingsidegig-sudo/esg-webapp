@@ -6,7 +6,7 @@ import SelectionChip from "@/components/SelectionChip";
 import TagChip from "@/components/TagChip";
 import { createClient } from "@/lib/supabase/client";
 import type { PublicProfileWithTags, Tag } from "@/lib/database.types";
-import { SERVICE_TYPES } from "@/lib/services";
+import { SERVICE_TYPES, SPECIALIZATION_PROMPTS } from "@/lib/services";
 import { loadTagCatalog, profileTagsForCategory } from "@/lib/tags";
 import { haversineKm, loadJourneyLocation } from "@/lib/location";
 
@@ -143,7 +143,7 @@ export default function FindHelper() {
 
       {category && categoryTags.length > 0 && (
         <fieldset className="min-w-0 w-full">
-          <legend className="text-sm font-medium">Tags (optional)</legend>
+          <legend className="text-sm font-medium">{SPECIALIZATION_PROMPTS[category] ?? `What kind of ${category.toLowerCase()}?`}</legend>
           <div className="mt-2 flex flex-wrap gap-2">
             {categoryTags.map((tag) => (
               <SelectionChip key={tag.id} selected={selectedTagIds.includes(tag.id)}

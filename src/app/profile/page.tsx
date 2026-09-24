@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { createClient } from "@/lib/supabase/client";
 import { approximateCoordinates, friendlyError } from "@/lib/journey";
-import { SERVICE_TYPES } from "@/lib/services";
+import { SERVICE_TYPES, SPECIALIZATION_PROMPTS } from "@/lib/services";
 import { loadTagCatalog, MAX_PROFILE_TAGS } from "@/lib/tags";
 import type { Profile as ProfileRow, Tag } from "@/lib/database.types";
 
@@ -29,27 +29,30 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
   const catalog = [...new Set<string>([...SERVICE_TYPES, ...profile.skills, ...profile.services])];
   const toggle = (values: string[], value: string) => values.includes(value) ? values.filter((item) => item !== value) : [...values, value];
 
-  // Specializations are scoped to the caller's already-saved skills (not the
-  // live, possibly-unsaved `skills` selection above), since set_helper_tags
-  // validates the category against the database, not this form's draft state.
+  // Specializations are edited inline under each selected skill below, and
+  // saved as part of the one Save action. The catalog and the caller's
+  // existing selections load once; until they do, saving the profile skips
+  // syncing specializations rather than risk overwriting real selections
+  // with an empty draft.
   const [tagCatalog, setTagCatalog] = useState<Record<string, Tag[]>>({});
   const [specializationTags, setSpecializationTags] = useState<Record<string, string[]>>({});
-  const [savingTags, setSavingTags] = useState(false);
-  const [tagsMessage, setTagsMessage] = useState<string | null>(null);
-  const [tagsError, setTagsError] = useState<string | null>(null);
+  const [helperDataLoaded, setHelperDataLoaded] = useState(false);
 
   useEffect(() => {
     let active = true;
-    loadTagCatalog(supabase).then((value) => { if (active) setTagCatalog(value); }).catch(() => {});
-    supabase.from("profile_tags").select("tag:tags(id,name,service_type)").eq("profile_id", profile.id)
-      .then(({ data }) => {
-        if (!active || !data) return;
-        const byCategory: Record<string, string[]> = {};
-        for (const row of data as unknown as { tag: { id: string; service_type: string } }[]) {
-          (byCategory[row.tag.service_type] ??= []).push(row.tag.id);
-        }
-        setSpecializationTags(byCategory);
-      });
+    Promise.all([
+      loadTagCatalog(supabase),
+      supabase.from("profile_tags").select("tag:tags(id,name,service_type)").eq("profile_id", profile.id),
+    ]).then(([catalogResult, { data }]) => {
+      if (!active) return;
+      setTagCatalog(catalogResult);
+      const byCategory: Record<string, string[]> = {};
+      for (const row of (data ?? []) as unknown as { tag: { id: string; service_type: string } }[]) {
+        (byCategory[row.tag.service_type] ??= []).push(row.tag.id);
+      }
+      setSpecializationTags(byCategory);
+      setHelperDataLoaded(true);
+    }).catch(() => {});
     return () => { active = false; };
   }, [supabase, profile.id]);
 
@@ -60,19 +63,6 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
         : selected.length >= MAX_PROFILE_TAGS ? selected : [...selected, tagId];
       return { ...current, [category]: next };
     });
-  }
-
-  async function saveSpecializations() {
-    if (pending.current) return;
-    pending.current = true; setSavingTags(true); setTagsError(null); setTagsMessage(null);
-    try {
-      for (const category of profile.skills) {
-        const { error } = await supabase.rpc("set_helper_tags", { p_service_type: category, p_tag_ids: specializationTags[category] ?? [] });
-        if (error) throw error;
-      }
-      setTagsMessage("Specializations saved.");
-    } catch (error) { setTagsError(friendlyError(error, "Couldn't save specializations. Please try again.")); }
-    finally { pending.current = false; setSavingTags(false); }
   }
 
   // Opt-in, separate from the private onboarding address: null until a helper
@@ -149,18 +139,42 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
     finally { pending.current = false; setSaving(false); }
   }
 
+  // One Save action from the user's perspective: save the profile/skills,
+  // then persist specialization selections for the saved skills. A skill
+  // that's being deselected has its specializations cleared first, while
+  // set_helper_tags can still validate that category against the
+  // not-yet-updated skill list (it would reject the same call once the
+  // skill is actually gone from profiles.skills).
   async function saveProfile(e: React.FormEvent) {
     e.preventDefault();
     if (pending.current) return;
     setError(null); setMessage(null);
     if (!/^[A-Za-z0-9]{6,40}$/.test(username)) { setError("Username must be 6–40 letters/numbers."); return; }
     pending.current = true; setSaving(true);
+    let profileSaved = false;
     try {
-      const { error } = await supabase.from("profiles").update({ username, skills, services }).eq("id", profile.id).select("id").single();
-      if (error) throw error;
+      if (helperDataLoaded) {
+        for (const category of profile.skills.filter((item) => !skills.includes(item))) {
+          const { error: clearError } = await supabase.rpc("set_helper_tags", { p_service_type: category, p_tag_ids: [] });
+          if (clearError) throw clearError;
+        }
+      }
+      const { error: profileError } = await supabase.from("profiles").update({ username, skills, services }).eq("id", profile.id).select("id").single();
+      if (profileError) throw profileError;
+      profileSaved = true;
+      if (helperDataLoaded) {
+        for (const category of skills) {
+          const { error: tagError } = await supabase.rpc("set_helper_tags", { p_service_type: category, p_tag_ids: specializationTags[category] ?? [] });
+          if (tagError) throw tagError;
+        }
+      }
       await confirmSave("Profile saved.");
-    } catch (error) { setError(friendlyError(error, "Couldn't save your profile. Please try again.")); }
-    finally { pending.current = false; setSaving(false); }
+    } catch (error) {
+      setError(friendlyError(error, profileSaved
+        ? "Your profile saved, but some specializations couldn't be saved. Try saving again."
+        : "Couldn't save your profile. Please try again."));
+      if (profileSaved) { try { await refreshProfile(); } catch {} }
+    } finally { pending.current = false; setSaving(false); }
   }
 
   const total = profile.wom_count + profile.lemon_count;
@@ -185,6 +199,19 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
         <label className="block text-sm font-medium">Username<input required maxLength={40} value={username} onChange={(e) => setUsername(e.target.value)} className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2" /></label>
         <fieldset className="min-w-0"><legend className="text-sm font-medium">Skills I can use to make money</legend>
           <div className="mt-2 flex flex-wrap gap-2">{catalog.map((item) => <SelectionChip key={item} selected={skills.includes(item)} onClick={() => setSkills(toggle(skills, item))}>{item}</SelectionChip>)}</div>
+          {skills.map((skill) => (tagCatalog[skill]?.length ?? 0) > 0 && (
+            <div key={skill} className="mt-3 border-l-2 border-emerald-100 pl-3">
+              <p className="text-xs font-medium text-neutral-500">{SPECIALIZATION_PROMPTS[skill] ?? `What kind of ${skill.toLowerCase()}?`}</p>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {tagCatalog[skill].map((tag) => (
+                  <SelectionChip key={tag.id} size="compact" selected={(specializationTags[skill] ?? []).includes(tag.id)}
+                    onClick={() => toggleSpecializationTag(skill, tag.id)}>
+                    {tag.name}
+                  </SelectionChip>
+                ))}
+              </div>
+            </div>
+          ))}
         </fieldset>
         <fieldset className="min-w-0"><legend className="text-sm font-medium">Services I might need</legend>
           <div className="mt-2 flex flex-wrap gap-2">{catalog.map((item) => <SelectionChip key={item} selected={services.includes(item)} onClick={() => setServices(toggle(services, item))}>{item}</SelectionChip>)}</div>
@@ -194,33 +221,6 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
     </form>
     {message && <p role="status" className="text-sm text-emerald-700">{message}</p>}
     {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
-
-    {profile.skills.length > 0 && (
-      <div className="space-y-3 rounded-lg border border-neutral-200 bg-white p-4">
-        <h2 className="text-sm font-medium">Specializations (optional)</h2>
-        <p className="text-sm text-neutral-500">Choose up to {MAX_PROFILE_TAGS} tags per skill to help people find you for specific work.</p>
-        <fieldset disabled={savingTags} className="space-y-3">
-          {profile.skills.map((category) => (tagCatalog[category]?.length ?? 0) > 0 && (
-            <fieldset key={category} className="min-w-0">
-              <legend className="text-sm font-medium">{category}</legend>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {tagCatalog[category].map((tag) => (
-                  <SelectionChip key={tag.id} selected={(specializationTags[category] ?? []).includes(tag.id)}
-                    onClick={() => toggleSpecializationTag(category, tag.id)}>
-                    {tag.name}
-                  </SelectionChip>
-                ))}
-              </div>
-            </fieldset>
-          ))}
-          <button type="button" onClick={() => void saveSpecializations()} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-60">
-            {savingTags ? "Saving…" : "Save specializations"}
-          </button>
-        </fieldset>
-        {tagsMessage && <p role="status" className="text-sm text-emerald-700">{tagsMessage}</p>}
-        {tagsError && <p role="alert" className="text-sm text-red-600">{tagsError}</p>}
-      </div>
-    )}
 
     {profile.skills.length > 0 && (
       <div className="space-y-3 rounded-lg border border-neutral-200 bg-white p-4">
