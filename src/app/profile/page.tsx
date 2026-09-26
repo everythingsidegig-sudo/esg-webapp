@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { createClient } from "@/lib/supabase/client";
 import { approximateCoordinates, friendlyError } from "@/lib/journey";
+import { reverseGeocodeGeneralArea } from "@/lib/location";
 import { SERVICE_TYPES, SPECIALIZATION_PROMPTS } from "@/lib/services";
 import { loadTagCatalog, MAX_PROFILE_TAGS } from "@/lib/tags";
 import type { Profile as ProfileRow, Tag } from "@/lib/database.types";
@@ -26,6 +27,9 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const pending = useRef(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const catalog = [...new Set<string>([...SERVICE_TYPES, ...profile.skills, ...profile.services])];
   const toggle = (values: string[], value: string) => values.includes(value) ? values.filter((item) => item !== value) : [...values, value];
 
@@ -79,12 +83,19 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
     setLocationError(null);
     if (!navigator.geolocation) { setLocationError("Geolocation isn't available in this browser. Enter an area manually."); return; }
     setLocatingHelper(true);
-    navigator.geolocation.getCurrentPosition((pos) => {
+    navigator.geolocation.getCurrentPosition(async (pos) => {
       const approx = approximateCoordinates(pos.coords.latitude, pos.coords.longitude) as { lat: number; lng: number };
       setHelperCoords(approx);
-      setHelperLocationText((current) => current || "Current location");
-      setLocatingHelper(false);
-    }, () => { setLocationError("Couldn't get your location. Enter an area manually."); setLocatingHelper(false); },
+      try {
+        const label = await reverseGeocodeGeneralArea(approx.lat, approx.lng);
+        if (label) setHelperLocationText((current) => current || label);
+        else setLocationError("Couldn't determine your area automatically. Enter it manually.");
+      } catch {
+        setLocationError("Couldn't determine your area automatically. Enter it manually.");
+      } finally {
+        setLocatingHelper(false);
+      }
+    }, () => { setLocationError("We couldn't access your location. Enter your area manually."); setLocatingHelper(false); },
     { timeout: 10000, maximumAge: 60000 });
   }
 
@@ -168,13 +179,35 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
           if (tagError) throw tagError;
         }
       }
-      await confirmSave("Profile saved.");
+      await confirmSave("Profile updated.");
     } catch (error) {
       setError(friendlyError(error, profileSaved
         ? "Your profile saved, but some specializations couldn't be saved. Try saving again."
         : "Couldn't save your profile. Please try again."));
       if (profileSaved) { try { await refreshProfile(); } catch {} }
     } finally { pending.current = false; setSaving(false); }
+  }
+
+  function openDeleteDialog() {
+    setDeleteError(null);
+    setDeleteConfirmText("");
+    setShowDeleteDialog(true);
+  }
+
+  function closeDeleteDialog() {
+    setShowDeleteDialog(false);
+    setDeleteConfirmText("");
+    setDeleteError(null);
+  }
+
+  // Account deletion touches marketplace history (gigs, claims, feedback) that
+  // must not be silently destroyed or left broken. The destructive backend
+  // path (migration + RPC/API route) is intentionally not implemented yet,
+  // pending sign-off on the retention policy; this surfaces that honestly
+  // instead of pretending the click succeeded.
+  function confirmDeleteAccount() {
+    if (deleteConfirmText !== "DELETE") return;
+    setDeleteError("Account deletion isn't available yet. Please check back soon.");
   }
 
   const total = profile.wom_count + profile.lemon_count;
@@ -216,7 +249,7 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
         <fieldset className="min-w-0"><legend className="text-sm font-medium">Services I might need</legend>
           <div className="mt-2 flex flex-wrap gap-2">{catalog.map((item) => <SelectionChip key={item} selected={services.includes(item)} onClick={() => setServices(toggle(services, item))}>{item}</SelectionChip>)}</div>
         </fieldset>
-        <button type="submit" className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-60">{saving ? "Saving…" : "Save"}</button>
+        <button type="submit" className="flex w-full items-center justify-center whitespace-nowrap rounded-lg bg-emerald-600 px-4 py-2.5 font-medium text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60">{saving ? "Updating…" : "Update profile"}</button>
       </fieldset>
     </form>
     {message && <p role="status" className="text-sm text-emerald-700">{message}</p>}
@@ -244,6 +277,54 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
         </fieldset>
         {locationMessage && <p role="status" className="text-sm text-emerald-700">{locationMessage}</p>}
         {locationError && <p role="alert" className="text-sm text-red-600">{locationError}</p>}
+      </div>
+    )}
+
+    <div className="space-y-3 rounded-lg border border-red-200 bg-red-50 p-4">
+      <h2 className="text-sm font-semibold text-red-700">Danger zone</h2>
+      <div>
+        <p className="text-sm font-medium text-neutral-900">Delete account</p>
+        <p className="text-sm text-neutral-500">Permanently delete your account and associated personal data.</p>
+      </div>
+      <button
+        type="button"
+        onClick={openDeleteDialog}
+        className="rounded-lg border border-red-600 bg-white px-4 py-2.5 font-medium text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        Delete account
+      </button>
+    </div>
+
+    {showDeleteDialog && (
+      <div role="dialog" aria-modal="true" aria-labelledby="delete-account-heading" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+        <div className="w-full max-w-sm space-y-4 rounded-lg bg-white p-5">
+          <div>
+            <h2 id="delete-account-heading" className="text-lg font-semibold text-neutral-900">Delete your account?</h2>
+            <p className="mt-1 text-sm text-neutral-500">This action cannot be undone.</p>
+          </div>
+          <label className="block text-sm font-medium">Type DELETE to confirm
+            <input
+              autoComplete="off"
+              value={deleteConfirmText}
+              onChange={(e) => setDeleteConfirmText(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2"
+            />
+          </label>
+          {deleteError && <p role="alert" className="text-sm text-red-600">{deleteError}</p>}
+          <div className="flex justify-end gap-3">
+            <button type="button" onClick={closeDeleteDialog} className="rounded-lg border border-neutral-300 px-4 py-2.5 font-medium text-neutral-700 disabled:cursor-not-allowed disabled:opacity-60">
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={confirmDeleteAccount}
+              disabled={deleteConfirmText !== "DELETE"}
+              className="rounded-lg bg-red-600 px-4 py-2.5 font-medium text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Delete account
+            </button>
+          </div>
+        </div>
       </div>
     )}
   </div>;

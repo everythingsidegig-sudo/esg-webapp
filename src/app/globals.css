@@ -28,6 +28,20 @@ input {
   -webkit-tap-highlight-color: transparent;
 }
 
+/*
+ * Tailwind's Preflight resets native cursor behavior on form controls, so
+ * every button in the app needs this explicitly: a hand cursor while
+ * enabled, a not-allowed cursor once disabled. Set once here instead of
+ * per component so every button/chip stays consistent automatically.
+ */
+button:not(:disabled) {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
 .app-shell {
   display: flex;
   min-height: 100dvh;

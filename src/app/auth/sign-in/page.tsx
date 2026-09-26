@@ -91,9 +91,9 @@ function SignInInner() {
       </button>
 
       <p className="text-center text-sm text-neutral-500">
-        New to ESG?{" "}
+        New user?{" "}
         <Link href={`/auth/sign-up?next=${encodeURIComponent(next)}`} className="font-medium text-emerald-700">
-          Create Account
+          Register
         </Link>
       </p>
     </form>

@@ -291,6 +291,166 @@ test("Profile helper location: opting out calls set_helper_location with all nul
   assert.deepEqual(JSON.parse(JSON.stringify(rpcCalls[0].payload)), { p_location_text: null, p_lat: null, p_lng: null });
 });
 
+test("Profile helper location: current-location resolves to a locality, never the raw placeholder, and saves rounded coordinates", async () => {
+  const rpcCalls = [];
+  const lookups = [];
+  const client = profileTagsOnlyClient(rpcCalls);
+  const withSkill = { ...profile, skills: ["Cleaning"], public_location_text: null, public_lat: null, public_lng: null };
+  const app = await component("src/app/profile/page.tsx", "ProfileEditor", {
+    client,
+    globals: { navigator: { geolocation: { getCurrentPosition: (success) => success({ coords: { latitude: 55.789, longitude: 13.114 } }) } } },
+    mocks: {
+      "@/lib/tags": { loadTagCatalog: async () => ({}), MAX_PROFILE_TAGS: 8 },
+      "@/lib/location": { reverseGeocodeGeneralArea: async (lat, lng) => { lookups.push({ lat, lng }); return "Kävlinge, Sweden"; } },
+    },
+  });
+  app.render({ profile: withSkill }); await flush();
+  let tree = app.render({ profile: withSkill });
+  button(tree, "Use my current location").props.onClick();
+  await flush();
+  tree = app.render({ profile: withSkill });
+  const areaInput = nodes(tree, (node) => node.type === "input" && node.props.placeholder === "Neighborhood, ZIP or city")[0];
+  assert.equal(areaInput.props.value, "Kävlinge, Sweden", "the resolved locality fills the field, not a literal placeholder");
+  assert.deepEqual(lookups, [{ lat: 55.79, lng: 13.11 }], "coordinates are rounded client-side before reverse geocoding, matching the rest of the app");
+  button(tree, "Save location").props.onClick();
+  await flush();
+  assert.equal(rpcCalls.length, 1);
+  assert.equal(rpcCalls[0].name, "set_helper_location");
+  assert.notEqual(rpcCalls[0].payload.p_location_text, "Current location", "the literal placeholder is never persisted as the area");
+  assert.equal(rpcCalls[0].payload.p_location_text, "Kävlinge, Sweden");
+  assert.equal(rpcCalls[0].payload.p_lat, 55.79, "coordinates are still passed through to the existing RPC, which rounds them again server-side");
+  assert.equal(rpcCalls[0].payload.p_lng, 13.11);
+});
+
+test("Profile helper location: geolocation denial shows the required message and manual entry still works", async () => {
+  const client = profileTagsOnlyClient([]);
+  const withSkill = { ...profile, skills: ["Cleaning"], public_location_text: null, public_lat: null, public_lng: null };
+  const app = await component("src/app/profile/page.tsx", "ProfileEditor", {
+    client,
+    globals: { navigator: { geolocation: { getCurrentPosition: (_success, failure) => failure() } } },
+    mocks: { "@/lib/tags": { loadTagCatalog: async () => ({}), MAX_PROFILE_TAGS: 8 } },
+  });
+  app.render({ profile: withSkill }); await flush();
+  let tree = app.render({ profile: withSkill });
+  button(tree, "Use my current location").props.onClick();
+  tree = app.render({ profile: withSkill });
+  assert.equal(nodes(tree, (node) => node.props.children === "We couldn't access your location. Enter your area manually.").length, 1);
+  const areaInput = nodes(tree, (node) => node.type === "input" && node.props.placeholder === "Neighborhood, ZIP or city")[0];
+  areaInput.props.onChange({ target: { value: "Malmö" } });
+  tree = app.render({ profile: withSkill });
+  assert.equal(nodes(tree, (node) => node.type === "input" && node.props.placeholder === "Neighborhood, ZIP or city")[0].props.value, "Malmö");
+});
+
+test("Profile helper location: reverse-geocoding failure never falls back to the literal placeholder and permits manual entry", async () => {
+  const rpcCalls = [];
+  const client = profileTagsOnlyClient(rpcCalls);
+  const withSkill = { ...profile, skills: ["Cleaning"], public_location_text: null, public_lat: null, public_lng: null };
+  const app = await component("src/app/profile/page.tsx", "ProfileEditor", {
+    client,
+    globals: { navigator: { geolocation: { getCurrentPosition: (success) => success({ coords: { latitude: 55.789, longitude: 13.114 } }) } } },
+    mocks: {
+      "@/lib/tags": { loadTagCatalog: async () => ({}), MAX_PROFILE_TAGS: 8 },
+      "@/lib/location": { reverseGeocodeGeneralArea: async () => { throw new Error("offline"); } },
+    },
+  });
+  app.render({ profile: withSkill }); await flush();
+  let tree = app.render({ profile: withSkill });
+  button(tree, "Use my current location").props.onClick();
+  await flush();
+  tree = app.render({ profile: withSkill });
+  const areaInput = nodes(tree, (node) => node.type === "input" && node.props.placeholder === "Neighborhood, ZIP or city")[0];
+  assert.equal(areaInput.props.value, "", "coordinates alone never populate the literal 'Current location' placeholder");
+  assert.equal(nodes(tree, (node) => node.props.children === "Couldn't determine your area automatically. Enter it manually.").length, 1);
+  areaInput.props.onChange({ target: { value: "Kävlinge" } });
+  tree = app.render({ profile: withSkill });
+  button(tree, "Save location").props.onClick();
+  await flush();
+  assert.equal(rpcCalls.length, 1);
+  assert.equal(rpcCalls[0].payload.p_location_text, "Kävlinge", "the field remains editable and the manual entry is what gets saved");
+});
+
+test("Profile: existing profile values prepopulate the edit form", async () => {
+  const client = { from: (table) => table === "profile_tags" ? { select: () => ({ eq: async () => ({ data: [], error: null }) }) } : { update: () => ({}) } };
+  const existing = { ...profile, username: "ExistingUser1", skills: ["Cleaning"], services: ["Other"] };
+  const app = await component("src/app/profile/page.tsx", "ProfileEditor", { client });
+  app.render({ profile: existing }); await flush();
+  const tree = app.render({ profile: existing });
+  const usernameInput = nodes(tree, (node) => node.type === "input" && node.props.required === true)[0];
+  assert.equal(usernameInput.props.value, "ExistingUser1", "username is prepopulated from the existing profile");
+  const chips = nodes(tree, (node) => node.type === "selection-chip");
+  assert.deepEqual(chips.filter((node) => node.props.selected).map((node) => node.props.children), ["Cleaning", "Other"],
+    "existing skills and services are preselected");
+});
+
+test("Profile: primary action is 'Update profile', shows 'Updating…' while saving, and the pending guard blocks a duplicate submit", async () => {
+  const calls = [];
+  const soloProfile = { ...profile, skills: [], services: [] };
+  const client = {
+    from: (table) => table === "profile_tags"
+      ? { select: () => ({ eq: async () => ({ data: [], error: null }) }) }
+      : { update: (payload) => { calls.push(payload); return { eq: () => ({ select: () => ({ single: async () => ({ error: null }) }) }) }; } },
+  };
+  const app = await component("src/app/profile/page.tsx", "ProfileEditor", { client });
+  app.render({ profile: soloProfile }); await flush();
+  let tree = app.render({ profile: soloProfile });
+  assert.ok(button(tree, "Update profile"), "primary action is labeled Update profile, not Save");
+  const submit = () => nodes(tree, (node) => node.type === "form")[0].props.onSubmit({ preventDefault() {} });
+  const first = submit();
+  const second = submit(); // fired before the first call's promise settles
+  tree = app.render({ profile: soloProfile });
+  assert.ok(button(tree, "Updating…"), "shows a distinct loading label while saving");
+  assert.equal(nodes(tree, (node) => node.type === "fieldset")[0].props.disabled, true, "the form disables itself while saving");
+  await Promise.all([first, second]);
+  await flush();
+  assert.equal(calls.length, 1, "the pending guard drops the duplicate submission");
+  tree = app.render({ profile: soloProfile });
+  assert.equal(nodes(tree, (node) => node.props.role === "status" && node.props.children === "Profile updated.").length, 1);
+});
+
+test("Profile Danger zone: Delete account opens a confirmation dialog, disabled until DELETE is typed exactly", async () => {
+  const client = { from: (table) => table === "profile_tags" ? { select: () => ({ eq: async () => ({ data: [], error: null }) }) } : { update: () => ({}) } };
+  const app = await component("src/app/profile/page.tsx", "ProfileEditor", { client });
+  app.render({ profile }); await flush();
+  let tree = app.render({ profile });
+  assert.equal(nodes(tree, (node) => node.props.role === "dialog").length, 0, "no dialog before Delete account is clicked");
+  const trigger = nodes(tree, (node) => node.type === "button" && node.props.children === "Delete account" && node.props.disabled === undefined)[0];
+  trigger.props.onClick();
+  tree = app.render({ profile });
+  assert.equal(nodes(tree, (node) => node.props.role === "dialog").length, 1, "confirmation dialog opens");
+  assert.equal(nodes(tree, (node) => node.props.children === "Delete your account?").length, 1);
+  assert.equal(nodes(tree, (node) => node.props.children === "This action cannot be undone.").length, 1);
+  const confirmButton = () => nodes(tree, (node) => node.type === "button" && node.props.children === "Delete account" && node.props.disabled !== undefined)[0];
+  assert.equal(confirmButton().props.disabled, true, "disabled until DELETE is typed");
+  const input = nodes(tree, (node) => node.type === "input" && node.props.autoComplete === "off")[0];
+  input.props.onChange({ target: { value: "delete" } });
+  tree = app.render({ profile });
+  assert.equal(confirmButton().props.disabled, true, "must match DELETE exactly (case-sensitive)");
+  input.props.onChange({ target: { value: "DELETE" } });
+  tree = app.render({ profile });
+  assert.equal(confirmButton().props.disabled, false, "enabled once DELETE is typed exactly");
+});
+
+test("Profile Danger zone: Cancel closes the dialog without deleting anything", async () => {
+  const calls = [];
+  const client = {
+    from: (table) => table === "profile_tags" ? { select: () => ({ eq: async () => ({ data: [], error: null }) }) } : { update: (payload) => { calls.push(payload); return {}; } },
+    rpc: async (name, payload) => { calls.push({ name, payload }); return { data: null, error: null }; },
+  };
+  const app = await component("src/app/profile/page.tsx", "ProfileEditor", { client });
+  app.render({ profile }); await flush();
+  let tree = app.render({ profile });
+  const trigger = nodes(tree, (node) => node.type === "button" && node.props.children === "Delete account" && node.props.disabled === undefined)[0];
+  trigger.props.onClick();
+  tree = app.render({ profile });
+  const input = nodes(tree, (node) => node.type === "input" && node.props.autoComplete === "off")[0];
+  input.props.onChange({ target: { value: "DELETE" } });
+  tree = app.render({ profile });
+  button(tree, "Cancel").props.onClick();
+  tree = app.render({ profile });
+  assert.equal(nodes(tree, (node) => node.props.role === "dialog").length, 0, "dialog closes");
+  assert.equal(calls.length, 0, "no request of any kind was made");
+});
+
 test("Public profile displays specialization tags grouped by skill", async () => {
   const publicProfile = {
     id: "helper-1", username: "HelperOne", photo_url: null, skills: ["Cleaning", "Handyman"], wom_count: 4,
@@ -852,33 +1012,65 @@ test("geolocation denial preserves manual location entry", async () => {
   assert.deepEqual(locations, [{ text: "Lund, Sweden" }]);
 });
 
-test("logged-out Home contains only authentication entry links", async () => {
+test("logged-out landing page shows I Need Help and Help & Make Money, not Sign In/Register as primary options", async () => {
   const app = await component("src/app/page.tsx", "Home");
   app.auth.user = null; app.auth.profile = null;
   const tree = app.render();
-  assert.deepEqual(nodes(tree, (node) => node.type === "a").map((node) => node.props.href), ["/auth/sign-in", "/auth/sign-up"]);
-  assert.equal(nodes(tree, (node) => node.props.children === "I Need Help").length, 0);
-  assert.equal(nodes(tree, (node) => node.props.children === "Help & Earn Money").length, 0);
-  assert.equal(nodes(tree, (node) => String(node.props.children).includes("guest")).length, 0);
+  assert.equal(nodes(tree, (node) => node.props.children === "I Need Help").length, 1);
+  assert.equal(nodes(tree, (node) => node.props.children === "Help & Make Money" || (Array.isArray(node.props.children) && node.props.children.join("") === "Help & Make Money")).length, 1);
+  const links = nodes(tree, (node) => node.type === "a").map((node) => node.props.href);
+  assert.deepEqual(links.sort(), ["/auth/sign-in?next=%2Fbrowse", "/auth/sign-in?next=%2Fneed-help"], "both options preserve the selected journey through sign-in; neither Sign In nor Register appear as a bare primary option");
+  assert.equal(nodes(tree, (node) => node.props.children === "Sign In" || node.props.children === "Register" || node.props.children === "Create Account").length, 0);
 });
 
-for (const completed of [false, true]) {
-  test(`authenticated Home routes ${completed ? "completed" : "incomplete"} profile toward Location`, async () => {
-    const destinations = [];
-    const app = await component("src/app/page.tsx", "Home", {
-      mocks: { "next/navigation": { useRouter: () => ({ replace: (url) => destinations.push(url) }) } },
-    });
-    app.auth.profile = { ...profile, onboarding_completed_at: completed ? "2026-01-01" : null };
-    app.render();
-    assert.deepEqual(destinations, [completed ? "/location" : "/onboarding?next=%2Flocation"]);
+test("authenticated + onboarded landing page links go directly to the selected journey", async () => {
+  const app = await component("src/app/page.tsx", "Home");
+  app.auth.profile = { ...profile, onboarding_completed_at: "2026-01-01" };
+  const tree = app.render();
+  const links = nodes(tree, (node) => node.type === "a").map((node) => node.props.href);
+  assert.deepEqual(links.sort(), ["/browse", "/need-help"], "an already-onboarded authenticated user skips straight to the journey, no intermediate hop");
+});
+
+test("authenticated but not-yet-onboarded landing page links route through the existing onboarding flow", async () => {
+  const app = await component("src/app/page.tsx", "Home");
+  app.auth.profile = { ...profile, onboarding_completed_at: null };
+  const tree = app.render();
+  const links = nodes(tree, (node) => node.type === "a").map((node) => node.props.href);
+  assert.deepEqual(links.sort(), ["/onboarding?next=%2Fbrowse", "/onboarding?next=%2Fneed-help"], "reuses setupDestination()/onboarding, not a duplicated redirect");
+});
+
+test("header shows a single Sign In action for unauthenticated users", async () => {
+  const app = await component("src/components/Nav.tsx", "Nav", {
+    client: { auth: { signOut: async () => ({ error: null }) } },
+    mocks: {
+      "@/components/NotificationsBell": { default: "notifications-bell" },
+      "next/navigation": { usePathname: () => "/", useRouter: () => ({ replace() {} }) },
+    },
   });
-}
+  app.auth.user = null; app.auth.profile = null;
+  const tree = app.render();
+  assert.deepEqual(nodes(tree, (node) => node.props.href === "/auth/sign-in").map((node) => node.props.children), ["Sign In"]);
+  assert.equal(nodes(tree, (node) => node.props.children === "Log out").length, 0, "no authenticated-only actions leak into the logged-out header");
+});
 
 test("Sign In exposes the password-recovery route", async () => {
   const app = await component("src/app/auth/sign-in/page.tsx", "SignInInner", { client: { auth: {} } });
   app.auth.user = null;
   const tree = app.render();
   assert.equal(nodes(tree, (node) => node.props.href === "/auth/forgot-password").length, 1);
+});
+
+test("Sign In shows 'New user? Register' and Register opens the existing signup flow, preserving next", async () => {
+  const app = await component("src/app/auth/sign-in/page.tsx", "SignInInner", {
+    client: { auth: {} },
+    mocks: { "next/navigation": { useSearchParams: () => new URLSearchParams({ next: "/need-help" }), useRouter: () => ({ replace() {} }) } },
+  });
+  app.auth.user = null;
+  const tree = app.render();
+  assert.equal(nodes(tree, (node) => Array.isArray(node.props.children) && node.props.children.includes("New user?")).length, 1);
+  const register = nodes(tree, (node) => node.props.children === "Register")[0];
+  assert.ok(register, "Register link is present");
+  assert.equal(register.props.href, "/auth/sign-up?next=%2Fneed-help", "Register reuses the existing signup flow and carries the selected journey through");
 });
 
 test("logged-out protected journey redirects to Sign In with a safe next", async () => {
