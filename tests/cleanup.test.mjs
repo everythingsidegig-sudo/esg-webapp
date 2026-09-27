@@ -60,7 +60,7 @@ async function component(path, name, overrides = {}) {
     "@/lib/supabase/client": { createClient: () => overrides.client },
     "@/lib/services": { SERVICE_TYPES: ["Cleaning", "Other"], SPECIALIZATION_PROMPTS: { Cleaning: "What kind of cleaning?", Handyman: "What kind of handyman work?", Other: "What kind of help?" } },
     "@/lib/journey": { friendlyError, passwordError, safeNext, setupDestination, approximateCoordinates, gigInputError },
-    "@/lib/location": { loadJourneyLocation: () => ({ text: "", lat: null, lng: null }), haversineKm },
+    "@/lib/location": { loadJourneyLocation: () => ({ text: "", lat: null, lng: null }), haversineKm, clearGeneralAreaState: () => {} },
     "@/lib/tags": {
       loadTagCatalog: async () => ({}),
       gigTagNames: (gig) => (gig.gig_tags ?? []).map((link) => link.tag.name),
@@ -449,6 +449,94 @@ test("Profile Danger zone: Cancel closes the dialog without deleting anything", 
   tree = app.render({ profile });
   assert.equal(nodes(tree, (node) => node.props.role === "dialog").length, 0, "dialog closes");
   assert.equal(calls.length, 0, "no request of any kind was made");
+});
+
+test("Profile Danger zone: successful deletion signs out, clears ESG session state, and redirects home", async () => {
+  const client = {
+    from: (table) => table === "profile_tags" ? { select: () => ({ eq: async () => ({ data: [], error: null }) }) } : { update: () => ({}) },
+    auth: { signOut: async () => ({ error: null }) },
+  };
+  const destinations = [];
+  const cleared = [];
+  let fetchCalls = 0;
+  let requestedUrl, requestedMethod;
+  const app = await component("src/app/profile/page.tsx", "ProfileEditor", {
+    client,
+    globals: { fetch: async (url, init) => { fetchCalls++; requestedUrl = url; requestedMethod = init?.method; return { ok: true, json: async () => ({ ok: true }) }; } },
+    mocks: {
+      "next/navigation": { useRouter: () => ({ replace: (url) => destinations.push(url) }) },
+      "@/lib/location": { reverseGeocodeGeneralArea: async () => null, clearGeneralAreaState: () => cleared.push("cleared") },
+    },
+  });
+  app.render({ profile }); await flush();
+  let tree = app.render({ profile });
+  const trigger = nodes(tree, (node) => node.type === "button" && node.props.children === "Delete account" && node.props.disabled === undefined)[0];
+  trigger.props.onClick();
+  tree = app.render({ profile });
+  const input = nodes(tree, (node) => node.type === "input" && node.props.autoComplete === "off")[0];
+  input.props.onChange({ target: { value: "DELETE" } });
+  tree = app.render({ profile });
+  const confirmButton = nodes(tree, (node) => node.type === "button" && node.props.children === "Delete account" && node.props.disabled !== undefined)[0];
+  confirmButton.props.onClick();
+  await flush();
+  assert.equal(fetchCalls, 1);
+  assert.equal(requestedUrl, "/api/account/delete");
+  assert.equal(requestedMethod, "POST");
+  assert.deepEqual(destinations, ["/"], "redirects home after successful deletion");
+  assert.deepEqual(cleared, ["cleared"], "ESG-specific session state (general area, geocode cache) is cleared");
+});
+
+test("Profile Danger zone: backend failure shows the server's error, keeps the dialog open, and does not sign out or redirect", async () => {
+  const client = { from: (table) => table === "profile_tags" ? { select: () => ({ eq: async () => ({ data: [], error: null }) }) } : { update: () => ({}) },
+    auth: { signOut: async () => { throw new Error("should not be called"); } } };
+  const destinations = [];
+  const app = await component("src/app/profile/page.tsx", "ProfileEditor", {
+    client,
+    globals: { fetch: async () => ({ ok: false, json: async () => ({ error: "Couldn't finish deleting your account. Please try again." }) }) },
+    mocks: { "next/navigation": { useRouter: () => ({ replace: (url) => destinations.push(url) }) } },
+  });
+  app.render({ profile }); await flush();
+  let tree = app.render({ profile });
+  const trigger = nodes(tree, (node) => node.type === "button" && node.props.children === "Delete account" && node.props.disabled === undefined)[0];
+  trigger.props.onClick();
+  tree = app.render({ profile });
+  const input = nodes(tree, (node) => node.type === "input" && node.props.autoComplete === "off")[0];
+  input.props.onChange({ target: { value: "DELETE" } });
+  tree = app.render({ profile });
+  const confirmButton = nodes(tree, (node) => node.type === "button" && node.props.children === "Delete account" && node.props.disabled !== undefined)[0];
+  confirmButton.props.onClick();
+  await flush();
+  tree = app.render({ profile });
+  assert.equal(nodes(tree, (node) => node.props.role === "dialog").length, 1, "dialog stays open after a failure");
+  assert.equal(nodes(tree, (node) => node.props.role === "alert" && node.props.children === "Couldn't finish deleting your account. Please try again.").length, 1);
+  assert.deepEqual(destinations, [], "no redirect on failure");
+});
+
+test("Profile Danger zone: shows a 'Deleting…' loading state, disables Cancel while in flight, and a duplicate click issues only one request", async () => {
+  const client = { from: (table) => table === "profile_tags" ? { select: () => ({ eq: async () => ({ data: [], error: null }) }) } : { update: () => ({}) },
+    auth: { signOut: async () => ({ error: null }) } };
+  let fetchCalls = 0;
+  const app = await component("src/app/profile/page.tsx", "ProfileEditor", {
+    client,
+    globals: { fetch: async () => { fetchCalls++; return { ok: true, json: async () => ({ ok: true }) }; } },
+    mocks: { "next/navigation": { useRouter: () => ({ replace() {} }) }, "@/lib/location": { clearGeneralAreaState: () => {} } },
+  });
+  app.render({ profile }); await flush();
+  let tree = app.render({ profile });
+  const trigger = nodes(tree, (node) => node.type === "button" && node.props.children === "Delete account" && node.props.disabled === undefined)[0];
+  trigger.props.onClick();
+  tree = app.render({ profile });
+  const input = nodes(tree, (node) => node.type === "input" && node.props.autoComplete === "off")[0];
+  input.props.onChange({ target: { value: "DELETE" } });
+  tree = app.render({ profile });
+  const confirmButton = () => nodes(tree, (node) => node.type === "button" && node.props.children === "Delete account" && node.props.disabled !== undefined)[0];
+  confirmButton().props.onClick();
+  confirmButton().props.onClick(); // duplicate click before the first request settles
+  tree = app.render({ profile });
+  assert.ok(nodes(tree, (node) => node.type === "button" && node.props.children === "Deleting…")[0], "shows a distinct loading label while deleting");
+  assert.equal(button(tree, "Cancel").props.disabled, true, "Cancel is disabled while deleting");
+  await flush();
+  assert.equal(fetchCalls, 1, "the pending guard drops the duplicate submission");
 });
 
 test("Public profile displays specialization tags grouped by skill", async () => {
@@ -942,14 +1030,64 @@ test("Location is confirmed before either journey choice appears", async () => {
   assert.equal(locations[0].text, "Test city");
 });
 
-test("I Need Help offers Post a Gig and Find a Helper as real links", async () => {
+test("I Need Help offers Post a Gig and Find a Helper as real links, reachable with no session at all", async () => {
   const app = await component("src/app/need-help/page.tsx", "NeedHelp");
+  app.auth.user = null; app.auth.profile = null;
   const tree = app.render();
   const links = nodes(tree, (node) => node.type === "a");
   assert.deepEqual(links.map((link) => link.props.href), ["/post", "/find-helper"]);
   assert.equal(nodes(tree, (node) => node.props.children === "Find a Helper").length, 1);
   assert.equal(nodes(tree, (node) => node.props.children === "Coming soon").length, 0);
   assert.equal(nodes(tree, (node) => node.props["aria-disabled"] === "true").length, 0);
+});
+
+test("Find a Helper and the public helper profile require no authentication -- no AuthGuard, no useAuth dependency", async () => {
+  const findHelperSource = await readFile(new URL("../src/app/find-helper/page.tsx", import.meta.url), "utf8");
+  const publicProfileSource = await readFile(new URL("../src/app/profile/[username]/page.tsx", import.meta.url), "utf8");
+  for (const source of [findHelperSource, publicProfileSource]) {
+    assert.doesNotMatch(source, /AuthGuard|useAuth/, "helper browsing and public profiles have no session/auth-guard dependency to gate them");
+  }
+});
+
+test("Post a Gig, reached from I Need Help, requires authentication: unauthenticated visitors are sent to Sign In preserving next=/post", async () => {
+  const destinations = [];
+  const app = await component("src/components/AuthGuard.tsx", "AuthGuardInner", {
+    mocks: { "next/navigation": {
+      usePathname: () => "/post",
+      useSearchParams: () => new URLSearchParams(),
+      useRouter: () => ({ replace: (url) => destinations.push(url) }),
+    } },
+  });
+  app.auth.user = null; app.auth.profile = null;
+  app.render({ children: { type: "post-gig-form" } });
+  assert.deepEqual(destinations, ["/auth/sign-in?next=%2Fpost"]);
+});
+
+test("Post a Gig: an authenticated but not-yet-onboarded visitor is routed through onboarding, preserving next=/post", async () => {
+  const destinations = [];
+  const app = await component("src/components/AuthGuard.tsx", "AuthGuardInner", {
+    mocks: { "next/navigation": {
+      usePathname: () => "/post",
+      useSearchParams: () => new URLSearchParams(),
+      useRouter: () => ({ replace: (url) => destinations.push(url) }),
+    } },
+  });
+  app.auth.profile = { ...profile, onboarding_completed_at: null };
+  app.render({ children: { type: "post-gig-form" } });
+  assert.deepEqual(destinations, ["/onboarding?next=%2Fpost"], "onboarding preserves /post as the destination to return to, not a generic profile/home page");
+});
+
+test("Sign In with next=/post sends an already-authenticated user straight to Post a Gig, completing the round trip", async () => {
+  const destinations = [];
+  const app = await component("src/app/auth/sign-in/page.tsx", "SignInInner", {
+    client: { auth: {} },
+    mocks: { "next/navigation": {
+      useSearchParams: () => new URLSearchParams({ next: "/post" }),
+      useRouter: () => ({ replace: (url) => destinations.push(url) }),
+    } },
+  });
+  app.render();
+  assert.deepEqual(destinations, ["/post"]);
 });
 
 test("Help & Earn Money passes rounded current coordinates to Browse", async () => {
@@ -1012,14 +1150,15 @@ test("geolocation denial preserves manual location entry", async () => {
   assert.deepEqual(locations, [{ text: "Lund, Sweden" }]);
 });
 
-test("logged-out landing page shows I Need Help and Help & Make Money, not Sign In/Register as primary options", async () => {
+test("logged-out landing page: I Need Help is always /need-help (unauthenticated visitors are not pre-gated), Help & Make Money still requires sign-in", async () => {
   const app = await component("src/app/page.tsx", "Home");
   app.auth.user = null; app.auth.profile = null;
   const tree = app.render();
   assert.equal(nodes(tree, (node) => node.props.children === "I Need Help").length, 1);
   assert.equal(nodes(tree, (node) => node.props.children === "Help & Make Money" || (Array.isArray(node.props.children) && node.props.children.join("") === "Help & Make Money")).length, 1);
   const links = nodes(tree, (node) => node.type === "a").map((node) => node.props.href);
-  assert.deepEqual(links.sort(), ["/auth/sign-in?next=%2Fbrowse", "/auth/sign-in?next=%2Fneed-help"], "both options preserve the selected journey through sign-in; neither Sign In nor Register appear as a bare primary option");
+  assert.deepEqual(links.sort(), ["/auth/sign-in?next=%2Fbrowse", "/need-help"],
+    "I Need Help is reachable with no auth at all; Help & Make Money is unaffected and still preserves the journey through sign-in");
   assert.equal(nodes(tree, (node) => node.props.children === "Sign In" || node.props.children === "Register" || node.props.children === "Create Account").length, 0);
 });
 
@@ -1031,12 +1170,13 @@ test("authenticated + onboarded landing page links go directly to the selected j
   assert.deepEqual(links.sort(), ["/browse", "/need-help"], "an already-onboarded authenticated user skips straight to the journey, no intermediate hop");
 });
 
-test("authenticated but not-yet-onboarded landing page links route through the existing onboarding flow", async () => {
+test("authenticated but not-yet-onboarded: I Need Help still goes straight to /need-help, Help & Make Money still routes through onboarding", async () => {
   const app = await component("src/app/page.tsx", "Home");
   app.auth.profile = { ...profile, onboarding_completed_at: null };
   const tree = app.render();
   const links = nodes(tree, (node) => node.type === "a").map((node) => node.props.href);
-  assert.deepEqual(links.sort(), ["/onboarding?next=%2Fbrowse", "/onboarding?next=%2Fneed-help"], "reuses setupDestination()/onboarding, not a duplicated redirect");
+  assert.deepEqual(links.sort(), ["/need-help", "/onboarding?next=%2Fbrowse"],
+    "I Need Help is never gated by onboarding either -- Post a Gig's own AuthGuard enforces onboarding only if that sub-choice is picked; Help & Make Money keeps its existing onboarding gate");
 });
 
 test("header shows a single Sign In action for unauthenticated users", async () => {
@@ -1058,6 +1198,23 @@ test("Sign In exposes the password-recovery route", async () => {
   app.auth.user = null;
   const tree = app.render();
   assert.equal(nodes(tree, (node) => node.props.href === "/auth/forgot-password").length, 1);
+});
+
+test("Sign In password field toggles between masked and visible via the Show/Hide control", async () => {
+  const app = await component("src/app/auth/sign-in/page.tsx", "SignInInner", { client: { auth: {} } });
+  app.auth.user = null;
+  let tree = app.render();
+  const passwordInput = () => nodes(tree, (node) => node.props.id === "signin-password")[0];
+  assert.equal(passwordInput().props.type, "password", "password is masked by default");
+  const toggle = () => nodes(tree, (node) => node.type === "button" && (node.props["aria-label"] === "Show password" || node.props["aria-label"] === "Hide password"))[0];
+  assert.equal(toggle().props["aria-label"], "Show password");
+  toggle().props.onClick();
+  tree = app.render();
+  assert.equal(passwordInput().props.type, "text", "clicking Show reveals the password");
+  assert.equal(toggle().props["aria-label"], "Hide password");
+  toggle().props.onClick();
+  tree = app.render();
+  assert.equal(passwordInput().props.type, "password", "clicking Hide masks it again");
 });
 
 test("Sign In shows 'New user? Register' and Register opens the existing signup flow, preserving next", async () => {
@@ -1134,19 +1291,28 @@ test("auth-entry pages wait for session restoration before deciding", async () =
   assert.deepEqual(destinations, ["/location"]);
 });
 
-test("forgot-password requests a recovery link without exposing account existence", async () => {
+test("forgot-password requests a recovery link without exposing account existence, disabling submit while pending", async () => {
   const requests = [];
+  let resolveRequest;
   const app = await component("src/app/auth/forgot-password/page.tsx", "ForgotPassword", {
-    client: { auth: { resetPasswordForEmail: async (email, options) => { requests.push({ email, options }); return { error: null }; } } },
+    client: { auth: { resetPasswordForEmail: async (email, options) => {
+      requests.push({ email, options });
+      return new Promise((resolve) => { resolveRequest = () => resolve({ error: null }); });
+    } } },
     globals: { window: { location: { origin: "http://localhost:3001" } } },
   });
   let tree = app.render();
   nodes(tree, (node) => node.props.id === "recovery-email")[0].props.onChange({ target: { value: "person@example.com" } });
   tree = app.render();
-  await nodes(tree, (node) => node.type === "form")[0].props.onSubmit({ preventDefault() {} });
+  const event = { defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } };
+  const submission = nodes(tree, (node) => node.type === "form")[0].props.onSubmit(event);
+  assert.equal(button(app.render(), "Sending…").props.disabled, true, "submit is disabled while the request is pending");
+  resolveRequest();
+  await submission;
   tree = app.render();
   assert.deepEqual(JSON.parse(JSON.stringify(requests)), [{ email: "person@example.com", options: { redirectTo: "http://localhost:3001/auth/reset-password" } }]);
   assert.equal(nodes(tree, (node) => String(node.props.children).includes("If an ESG account uses that email")).length, 1);
+  assert.equal(event.defaultPrevented, true);
 });
 
 test("reset-password exchanges the recovery code before updating the password", async () => {
@@ -1173,3 +1339,83 @@ test("reset-password exchanges the recovery code before updating the password", 
   assert.deepEqual(calls, [["exchange", "recovery-code"], ["clean", "/auth/reset-password"], ["update", "Replacement1!"]]);
   assert.deepEqual(destinations, ["/"]);
 });
+
+test("signup callback exchanges a fresh code then redirects to onboarding with the requested destination", async () => {
+  const calls = [], destinations = [];
+  const app = await component("src/app/auth/callback/page.tsx", "CallbackInner", {
+    client: { auth: {
+      exchangeCodeForSession: async () => { calls.push("exchange"); return { error: null }; },
+      getSession: async () => { calls.push("session"); return { data: { session: { user } }, error: null }; },
+    } },
+    globals: { window: {
+      location: { href: "http://localhost:3001/auth/callback?next=%2Fprofile&code=fresh-test-code" },
+      history: { replaceState: (_state, _title, url) => calls.push(url) },
+    } },
+    mocks: { "next/navigation": {
+      useSearchParams: () => new URLSearchParams("next=%2Fprofile"),
+      useRouter: () => ({ replace: (url) => destinations.push(url) }),
+    } },
+  });
+  app.render(); await flush();
+  assert.deepEqual(calls, ["exchange", "session", "/auth/callback?next=%2Fprofile"]);
+  assert.deepEqual(destinations, ["/onboarding?next=%2Fprofile"]);
+});
+
+for (const flow of [
+  { path: "callback", component: "CallbackInner", label: "signup" },
+  { path: "reset-password", component: "ResetPassword", label: "recovery" },
+]) {
+  test(`${flow.label} provider errors are reported before URL cleanup and never attempt a PKCE exchange`, async () => {
+    const app = await component(`src/app/auth/${flow.path}/page.tsx`, flow.component, {
+      client: { auth: {
+        exchangeCodeForSession: async () => { throw new Error("Exchange must not run"); },
+        getSession: async () => { throw new Error("Session lookup must not run"); },
+      } },
+      globals: { window: {
+        location: { href: `http://localhost:3001/auth/${flow.path}#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired` },
+        history: { replaceState() {} },
+      } },
+    });
+    app.render(); await flush();
+    // If the code had wrongly attempted an exchange, the "must not run" mocks
+    // above would surface as a *different* alert message than this one.
+    assert.equal(nodes(app.render(), (node) => node.props.role === "alert" && /invalid or expired/i.test(String(node.props.children))).length, 1);
+  });
+
+  test(`${flow.label} PKCE exchange errors stop session lookup and navigation`, async () => {
+    const destinations = [];
+    const app = await component(`src/app/auth/${flow.path}/page.tsx`, flow.component, {
+      client: { auth: {
+        exchangeCodeForSession: async () => ({ error: { code: "bad_code_verifier", status: 400 } }),
+        getSession: async () => { throw new Error("Session lookup must not run"); },
+      } },
+      globals: { window: {
+        location: { href: `http://localhost:3001/auth/${flow.path}?code=fresh-failing-test-code` },
+        history: { replaceState() {} },
+      } },
+      mocks: { "next/navigation": { useSearchParams: () => new URLSearchParams(), useRouter: () => ({ replace: (url) => destinations.push(url) }) } },
+    });
+    app.render(); await flush();
+    assert.deepEqual(destinations, [], "no navigation happens after an exchange failure");
+    // If session lookup had wrongly run, the "must not run" mock above would
+    // surface as a *different* alert message than this one.
+    assert.equal(nodes(app.render(), (node) => node.props.role === "alert" && /expired/i.test(String(node.props.children))).length, 1);
+  });
+
+  test(`${flow.label} recognizes a hash error_code even without a plain error key, and never attempts a PKCE exchange`, async () => {
+    const calls = [];
+    const app = await component(`src/app/auth/${flow.path}/page.tsx`, flow.component, {
+      client: { auth: {
+        exchangeCodeForSession: async () => { throw new Error("Exchange must not run"); },
+        getSession: async () => { throw new Error("Session lookup must not run"); },
+      } },
+      globals: { window: {
+        location: { href: `http://localhost:3001/auth/${flow.path}#error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired` },
+        history: { replaceState: () => calls.push("clean") },
+      } },
+    });
+    app.render(); await flush();
+    assert.deepEqual(calls, ["clean"]);
+    assert.equal(nodes(app.render(), (node) => node.props.role === "alert").length, 1);
+  });
+}

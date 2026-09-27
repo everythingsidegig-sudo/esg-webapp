@@ -21,7 +21,12 @@ export default function Home() {
     return <div className="py-12 text-center text-neutral-500">Preparing your journey…</div>;
   }
 
-  const needHelpHref = journeyHref(user, profile?.onboarding_completed_at, "/need-help");
+  // I Need Help itself requires no auth/onboarding: it only shows a choice
+  // between Post a Gig (its own AuthGuard gates that) and Find a Helper
+  // (public browsing, no auth needed at all). Gating the destinations
+  // individually -- not this landing link -- is what lets an anonymous
+  // visitor browse helpers without ever hitting sign-in.
+  const needHelpHref = "/need-help";
   const helpMoneyHref = journeyHref(user, profile?.onboarding_completed_at, "/browse");
 
   return (

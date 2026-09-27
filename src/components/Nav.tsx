@@ -6,7 +6,7 @@ import { useAuth } from "@/lib/auth-context";
 import { createClient } from "@/lib/supabase/client";
 import NotificationsBell from "@/components/NotificationsBell";
 import { useRef, useState } from "react";
-import { LOCATION_KEY } from "@/lib/location";
+import { clearGeneralAreaState } from "@/lib/location";
 
 export default function Nav() {
   const { user, profile, loading } = useAuth();
@@ -30,7 +30,7 @@ export default function Nav() {
     try {
       const { error } = await supabase.auth.signOut();
       if (error) throw error;
-      try { sessionStorage.removeItem(LOCATION_KEY); } catch {}
+      clearGeneralAreaState();
       router.replace("/");
     } catch { setError("Couldn't log out. Check your connection and retry."); }
     finally { pending.current = false; setSigningOut(false); }

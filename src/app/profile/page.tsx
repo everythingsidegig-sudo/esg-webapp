@@ -3,10 +3,11 @@
 import AuthGuard from "@/components/AuthGuard";
 import SelectionChip from "@/components/SelectionChip";
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { createClient } from "@/lib/supabase/client";
 import { approximateCoordinates, friendlyError } from "@/lib/journey";
-import { reverseGeocodeGeneralArea } from "@/lib/location";
+import { reverseGeocodeGeneralArea, clearGeneralAreaState } from "@/lib/location";
 import { SERVICE_TYPES, SPECIALIZATION_PROMPTS } from "@/lib/services";
 import { loadTagCatalog, MAX_PROFILE_TAGS } from "@/lib/tags";
 import type { Profile as ProfileRow, Tag } from "@/lib/database.types";
@@ -19,6 +20,7 @@ function ProfileInner() {
 
 function ProfileEditor({ profile }: { profile: ProfileRow }) {
   const supabase = createClient();
+  const router = useRouter();
   const { refreshProfile } = useAuth();
   const [username, setUsername] = useState(profile.username);
   const [skills, setSkills] = useState(profile.skills);
@@ -29,6 +31,7 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
   const pending = useRef(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const catalog = [...new Set<string>([...SERVICE_TYPES, ...profile.skills, ...profile.services])];
   const toggle = (values: string[], value: string) => values.includes(value) ? values.filter((item) => item !== value) : [...values, value];
@@ -195,19 +198,33 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
   }
 
   function closeDeleteDialog() {
+    if (deleting) return;
     setShowDeleteDialog(false);
     setDeleteConfirmText("");
     setDeleteError(null);
   }
 
-  // Account deletion touches marketplace history (gigs, claims, feedback) that
-  // must not be silently destroyed or left broken. The destructive backend
-  // path (migration + RPC/API route) is intentionally not implemented yet,
-  // pending sign-off on the retention policy; this surfaces that honestly
-  // instead of pretending the click succeeded.
-  function confirmDeleteAccount() {
-    if (deleteConfirmText !== "DELETE") return;
-    setDeleteError("Account deletion isn't available yet. Please check back soon.");
+  // Deletion itself runs server-side (delete_own_account() RPC + the Admin
+  // API in src/app/api/account/delete/route.ts) so the service-role key
+  // never reaches the browser, and the account acted on is always whichever
+  // one the caller's own session belongs to.
+  async function confirmDeleteAccount() {
+    if (deleteConfirmText !== "DELETE" || pending.current) return;
+    pending.current = true; setDeleting(true); setDeleteError(null);
+    try {
+      const response = await fetch("/api/account/delete", { method: "POST" });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body?.error || "Couldn't delete your account. Please try again.");
+      }
+      await supabase.auth.signOut();
+      clearGeneralAreaState();
+      router.replace("/");
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : "Couldn't delete your account. Please try again.");
+    } finally {
+      pending.current = false; setDeleting(false);
+    }
   }
 
   const total = profile.wom_count + profile.lemon_count;
@@ -305,23 +322,24 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
           <label className="block text-sm font-medium">Type DELETE to confirm
             <input
               autoComplete="off"
+              disabled={deleting}
               value={deleteConfirmText}
               onChange={(e) => setDeleteConfirmText(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2"
+              className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60"
             />
           </label>
           {deleteError && <p role="alert" className="text-sm text-red-600">{deleteError}</p>}
           <div className="flex justify-end gap-3">
-            <button type="button" onClick={closeDeleteDialog} className="rounded-lg border border-neutral-300 px-4 py-2.5 font-medium text-neutral-700 disabled:cursor-not-allowed disabled:opacity-60">
+            <button type="button" onClick={closeDeleteDialog} disabled={deleting} className="rounded-lg border border-neutral-300 px-4 py-2.5 font-medium text-neutral-700 disabled:cursor-not-allowed disabled:opacity-60">
               Cancel
             </button>
             <button
               type="button"
-              onClick={confirmDeleteAccount}
-              disabled={deleteConfirmText !== "DELETE"}
+              onClick={() => void confirmDeleteAccount()}
+              disabled={deleteConfirmText !== "DELETE" || deleting}
               className="rounded-lg bg-red-600 px-4 py-2.5 font-medium text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Delete account
+              {deleting ? "Deleting…" : "Delete account"}
             </button>
           </div>
         </div>

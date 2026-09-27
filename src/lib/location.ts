@@ -19,6 +19,19 @@ export function cacheGeneralArea(lat: number, lng: number, label: string) {
   try { sessionStorage.setItem(cacheKey(lat, lng), label); } catch {}
 }
 
+// Clears every piece of general-area session state: the chosen area itself
+// plus any cached reverse-geocode labels. Used on sign-out and account
+// deletion so no ESG-specific location data survives the session.
+export function clearGeneralAreaState() {
+  try {
+    sessionStorage.removeItem(LOCATION_KEY);
+    for (let i = sessionStorage.length - 1; i >= 0; i--) {
+      const key = sessionStorage.key(i);
+      if (key?.startsWith(GEOCODE_CACHE_PREFIX)) sessionStorage.removeItem(key);
+    }
+  } catch {}
+}
+
 export async function reverseGeocodeGeneralArea(lat: number, lng: number): Promise<string | null> {
   const cached = cachedGeneralArea(lat, lng);
   if (cached) return cached;

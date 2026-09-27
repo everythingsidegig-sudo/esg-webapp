@@ -23,7 +23,7 @@ export default function ResetPassword() {
     async function establishRecoverySession() {
       const url = new URL(window.location.href);
       const hash = new URLSearchParams(url.hash.slice(1));
-      if (url.searchParams.has("error") || url.searchParams.has("error_code") || hash.has("error")) {
+      if (url.searchParams.has("error") || url.searchParams.has("error_code") || hash.has("error") || hash.has("error_code")) {
         throw new Error("This password-reset link is invalid or expired. Request another link.");
       }
       const code = url.searchParams.get("code");

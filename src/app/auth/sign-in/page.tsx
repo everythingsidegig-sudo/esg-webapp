@@ -19,6 +19,7 @@ function SignInInner() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -69,15 +70,25 @@ function SignInInner() {
           <label htmlFor="signin-password" className="text-sm font-medium">Password</label>
           <Link href="/auth/forgot-password" className="text-sm font-medium text-emerald-700">Forgot password?</Link>
         </div>
-        <input
-          id="signin-password"
-          autoComplete="current-password"
-          type="password"
-          required
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className="w-full rounded-lg border border-neutral-300 px-3 py-2"
-        />
+        <div className="relative">
+          <input
+            id="signin-password"
+            autoComplete="current-password"
+            type={showPassword ? "text" : "password"}
+            required
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="w-full rounded-lg border border-neutral-300 px-3 py-2 pr-16"
+          />
+          <button
+            type="button"
+            onClick={() => setShowPassword((current) => !current)}
+            aria-label={showPassword ? "Hide password" : "Show password"}
+            className="absolute inset-y-0 right-0 px-3 text-sm font-medium text-emerald-700"
+          >
+            {showPassword ? "Hide" : "Show"}
+          </button>
+        </div>
       </div>
 
       {error && <p role="alert" className="text-sm text-red-600">{error}</p>}

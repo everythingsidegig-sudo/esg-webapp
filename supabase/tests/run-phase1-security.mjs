@@ -4,7 +4,8 @@ import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
 const root = new URL("../", import.meta.url);
-const distance = process.argv.includes("--distance");
+const deletion = process.argv.includes("--deletion");
+const distance = process.argv.includes("--distance") || deletion;
 const helpers = process.argv.includes("--helpers") || distance;
 const tags = process.argv.includes("--tags") || helpers;
 const phase2c = process.argv.includes("--phase2c") || tags;
@@ -159,6 +160,38 @@ if (distance) {
   }
   console.log("PASS: frontend Find a Helper and Profile pages never reference private coordinates");
 }
+if (deletion) {
+  const accountDeletion = await readFile(new URL("migrations/20240101000009_account_deletion.sql", root), "utf8");
+  const created = [...accountDeletion.matchAll(/create function public\.([a-z_]+)\(/g)];
+  if (created.length !== 1 || created[0][1] !== "delete_own_account") {
+    throw new Error("Account deletion migration must only create delete_own_account, no other RPC");
+  }
+  if (!/create function public\.delete_own_account\(\)/.test(accountDeletion)) {
+    throw new Error("delete_own_account must take zero parameters: no user_id argument for a client to target another account with");
+  }
+  if (!/security definer set search_path = ''/.test(accountDeletion) || !/if v_uid is null then raise exception 'Authentication required'/.test(accountDeletion)) {
+    throw new Error("delete_own_account must be a safely-scoped SECURITY DEFINER function with an explicit authentication guard");
+  }
+  for (const table of ["public.gigs where poster_id", "public.claims where provider_id", "public.chat_messages where sender_id",
+    "public.gig_completions where user_id", "public.gig_incomplete_choices where user_id", "public.feedback where from_id",
+    "public.notifications where recipient_id"]) {
+    if (!accountDeletion.includes(table)) {
+      throw new Error(`Account deletion migration must check ${table} for marketplace history before allowing a hard delete`);
+    }
+  }
+  const accountDeletionCode = accountDeletion.replace(/--.*$/gm, "");
+  if (/wom_count|lemon_count|money_made/.test(accountDeletionCode)) {
+    throw new Error("Account deletion must never alter wom_count/lemon_count/money_made -- those are the counterparty's recorded history, not this user's personal data");
+  }
+  if (/auth\.users/.test(accountDeletionCode)) {
+    throw new Error("Account deletion must never touch auth.users from SQL -- that requires the service-role Admin API, run server-side only");
+  }
+  if (!/revoke execute on function public\.delete_own_account\(\) from public, anon, authenticated/.test(accountDeletion)
+      || !/grant execute on function public\.delete_own_account\(\) to authenticated/.test(accountDeletion)) {
+    throw new Error("delete_own_account must be grant-scoped to authenticated only");
+  }
+  console.log("PASS: account-deletion migration scope (single zero-arg RPC, explicit auth guard, checks all marketplace-history tables, never touches auth.users or reputation counters, grant-scoped to authenticated)");
+}
 if (!runtimePath) {
   console.log("Static verification only. Supply a PGlite dist/index.js path for SQL execution.");
   process.exit(0);
@@ -213,6 +246,7 @@ try {
     ...(tags ? ["migrations/20240101000006_gig_tags.sql"] : []),
     ...(helpers ? ["migrations/20240101000007_profile_tags.sql"] : []),
     ...(distance ? ["migrations/20240101000008_helper_location.sql"] : []),
+    ...(deletion ? ["migrations/20240101000009_account_deletion.sql"] : []),
     "tests/phase1_security.sql",
     ...(phase2a ? ["tests/phase2a_integrity.sql"] : []),
     ...(onboarding ? ["tests/onboarding_post_gig.sql"] : []),
@@ -220,19 +254,20 @@ try {
     ...(tags ? ["tests/gig_tags.sql"] : []),
     ...(helpers ? ["tests/profile_tags.sql"] : []),
     ...(distance ? ["tests/helper_location.sql"] : []),
+    ...(deletion ? ["tests/account_deletion.sql"] : []),
   ]) {
     const sql = await readFile(new URL(file, root), "utf8");
     await db.exec(sql);
     if (file.startsWith("tests/")) {
       // Every assertion is an unconditional top-level SELECT. Successful SQL
       // execution means every call returned without raising its failure error.
-      const assertions = [...sql.matchAll(/^select pg_temp\.(?:assert|expect_denied|phase2_assert|phase2_expect_error|journey_assert|journey_error_any|journey_error|dw_assert|dw_denied|dw_error|gt_assert|gt_denied|gt_error|pt_assert|pt_denied|pt_error|hl_assert|hl_denied|hl_error)\(/gm)].length;
+      const assertions = [...sql.matchAll(/^select pg_temp\.(?:assert|expect_denied|phase2_assert|phase2_expect_error|journey_assert|journey_error_any|journey_error|dw_assert|dw_denied|dw_error|gt_assert|gt_denied|gt_error|pt_assert|pt_denied|pt_error|hl_assert|hl_denied|hl_error|ad_assert|ad_error)\(/gm)].length;
       passed += assertions;
       console.log(`PASS: ${file}: ${assertions} assertions`);
     }
     console.log(`Executed ${file}`);
   }
-  const cleanup = await db.query("select to_regclass('pg_temp.security_fixture') is null and to_regclass('pg_temp.phase2_fixture') is null and to_regclass('pg_temp.journey_fixture') is null and to_regclass('pg_temp.dw_fixture') is null and to_regclass('pg_temp.gt_fixture') is null and to_regclass('pg_temp.pt_fixture') is null and to_regclass('pg_temp.hl_fixture') is null as clean");
+  const cleanup = await db.query("select to_regclass('pg_temp.security_fixture') is null and to_regclass('pg_temp.phase2_fixture') is null and to_regclass('pg_temp.journey_fixture') is null and to_regclass('pg_temp.dw_fixture') is null and to_regclass('pg_temp.gt_fixture') is null and to_regclass('pg_temp.pt_fixture') is null and to_regclass('pg_temp.hl_fixture') is null and to_regclass('pg_temp.ad_fixture') is null as clean");
   if (!cleanup.rows[0].clean) throw new Error("SQL fixtures did not roll back");
   console.log(`PASS: ${passed} security assertions in isolated PostgreSQL/WASM`);
   console.log("Hosted Supabase, PostgREST, Auth, Storage and Realtime integration remain unverified.");
