@@ -1,6 +1,7 @@
 "use client";
 
 import AuthGuard from "@/components/AuthGuard";
+import OptionSheet from "@/components/OptionSheet";
 import SelectionChip from "@/components/SelectionChip";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -11,6 +12,8 @@ import { reverseGeocodeGeneralArea, clearGeneralAreaState } from "@/lib/location
 import { SERVICE_TYPES, SPECIALIZATION_PROMPTS } from "@/lib/services";
 import { loadTagCatalog, MAX_PROFILE_TAGS } from "@/lib/tags";
 import type { Profile as ProfileRow, Tag } from "@/lib/database.types";
+
+const ALL_SKILLS = "*";
 
 function ProfileInner() {
   const { profile } = useAuth();
@@ -71,6 +74,22 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
     }).catch(() => {});
     return () => { active = false; };
   }, [supabase, profile.id]);
+
+  // Specializations for every selected skill live in one place: removable
+  // chips for what's chosen, and a bottom sheet (large rows, easy on phones)
+  // to add more.
+  // The sheet opens for one skill when it's newly selected, or for all selected
+  // skills (grouped) from the "+ Add" pill.
+  const [sheetScope, setSheetScope] = useState<string | null>(null);
+  const specializationSkills = skills.filter((skill) => (tagCatalog[skill]?.length ?? 0) > 0);
+  const sheetSkills = sheetScope === ALL_SKILLS ? specializationSkills : specializationSkills.filter((skill) => skill === sheetScope);
+  function toggleSkill(item: string) {
+    const adding = !skills.includes(item);
+    setSkills(toggle(skills, item));
+    if (adding && (tagCatalog[item]?.length ?? 0) > 0) setSheetScope(item);
+  }
+  const chosenSpecializations = specializationSkills.flatMap((skill) =>
+    (tagCatalog[skill] ?? []).filter((tag) => (specializationTags[skill] ?? []).includes(tag.id)).map((tag) => ({ skill, tag })));
 
   function toggleSpecializationTag(category: string, tagId: string) {
     setSpecializationTags((current) => {
@@ -261,21 +280,24 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
           <p id="username-hint" className="mt-1 text-xs text-neutral-500">6–40 letters or numbers, no spaces or symbols.</p>
         </div>
         <fieldset className="min-w-0"><legend className="text-sm font-medium">Skills I can use to make money</legend>
-          <div className="mt-2 flex flex-wrap gap-2">{catalog.map((item) => <SelectionChip key={item} selected={skills.includes(item)} onClick={() => setSkills(toggle(skills, item))}>{item}</SelectionChip>)}</div>
-          {skills.map((skill) => (tagCatalog[skill]?.length ?? 0) > 0 && (
-            <div key={skill} className="mt-3 border-l-2 border-emerald-100 pl-3">
-              <p className="text-xs font-medium text-neutral-500">{SPECIALIZATION_PROMPTS[skill] ?? `What kind of ${skill.toLowerCase()}?`}</p>
-              <div className="mt-1.5 flex flex-wrap gap-1.5">
-                {tagCatalog[skill].map((tag) => (
-                  <SelectionChip key={tag.id} size="compact" selected={(specializationTags[skill] ?? []).includes(tag.id)}
-                    onClick={() => toggleSpecializationTag(skill, tag.id)}>
-                    {tag.name}
-                  </SelectionChip>
-                ))}
-              </div>
-            </div>
-          ))}
+          <div className="mt-2 flex flex-wrap gap-2">{catalog.map((item) => <SelectionChip key={item} selected={skills.includes(item)} onClick={() => toggleSkill(item)}>{item}</SelectionChip>)}</div>
         </fieldset>
+        {specializationSkills.length > 0 && (
+          <fieldset className="min-w-0"><legend className="text-sm font-medium">Specializations (optional)</legend>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              {chosenSpecializations.map(({ skill, tag }) => (
+                <span key={tag.id} className="inline-flex items-center rounded-full bg-neutral-100 pl-3 text-sm text-neutral-800">
+                  {tag.name}
+                  <button type="button" onClick={() => toggleSpecializationTag(skill, tag.id)} aria-label={`Remove ${tag.name}`}
+                    className="flex h-9 w-9 items-center justify-center rounded-full text-neutral-500 hover:text-neutral-900">✕</button>
+                </span>
+              ))}
+              {chosenSpecializations.length === 0 && <span className="text-sm text-neutral-500">None added yet.</span>}
+              <button type="button" onClick={() => setSheetScope(ALL_SKILLS)} aria-label="Add specializations"
+                className="inline-flex min-h-9 items-center rounded-full border border-dashed border-emerald-600 px-3 text-sm font-medium text-emerald-700 hover:bg-emerald-50">+ Add</button>
+            </div>
+          </fieldset>
+        )}
         <fieldset className="min-w-0"><legend className="text-sm font-medium">Services I might need</legend>
           <div className="mt-2 flex flex-wrap gap-2">{catalog.map((item) => <SelectionChip key={item} selected={services.includes(item)} onClick={() => setServices(toggle(services, item))}>{item}</SelectionChip>)}</div>
         </fieldset>
@@ -327,6 +349,32 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
         Delete account
       </button>
     </div>
+
+    {sheetSkills.length > 0 && (
+      <OptionSheet title={sheetScope === ALL_SKILLS ? "Add specializations" : (SPECIALIZATION_PROMPTS[sheetSkills[0]] ?? `What kind of ${sheetSkills[0].toLowerCase()}?`)}
+        onClose={() => setSheetScope(null)}
+        footer={<div className="flex items-center justify-between gap-3">
+          <p className="text-sm text-neutral-500">{chosenSpecializations.filter(({ skill }) => sheetSkills.includes(skill)).length} selected</p>
+          <button type="button" onClick={() => setSheetScope(null)} className="rounded-lg bg-emerald-600 px-6 py-2.5 font-medium text-white hover:bg-emerald-700">Done</button>
+        </div>}>
+        {sheetSkills.map((skill) => {
+          const selectedIds = specializationTags[skill] ?? [];
+          return <div key={skill} role="group" aria-label={`${skill} specializations`} className="pb-2">
+            <p className="px-3 pt-2 text-xs font-semibold uppercase tracking-wide text-emerald-700">{skill}</p>
+            {(tagCatalog[skill] ?? []).map((tag) => {
+              const selected = selectedIds.includes(tag.id);
+              const atLimit = !selected && selectedIds.length >= MAX_PROFILE_TAGS;
+              return <button key={tag.id} type="button" role="checkbox" aria-checked={selected} disabled={atLimit}
+                onClick={() => toggleSpecializationTag(skill, tag.id)}
+                className="flex min-h-12 w-full items-center justify-between gap-3 rounded-lg px-3 text-left text-sm text-neutral-900 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-50">
+                <span>{tag.name}</span>
+                <span aria-hidden="true" className={`flex h-6 w-6 items-center justify-center rounded-md border text-sm ${selected ? "border-emerald-600 bg-emerald-600 text-white" : "border-neutral-300 text-transparent"}`}>✓</span>
+              </button>;
+            })}
+          </div>;
+        })}
+      </OptionSheet>
+    )}
 
     {showDeleteDialog && (
       <div role="dialog" aria-modal="true" aria-labelledby="delete-account-heading" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
