@@ -3,6 +3,7 @@
 import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import AuthGuard from "@/components/AuthGuard";
 import { useAuth } from "@/lib/auth-context";
 import { createClient } from "@/lib/supabase/client";
 import StatusBadge from "@/components/StatusBadge";
@@ -362,5 +363,5 @@ function GigDetails({ id }: { id: string }) {
 
 export default function GigDetailsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  return <GigDetails id={id} />;
+  return <AuthGuard><GigDetails id={id} /></AuthGuard>;
 }

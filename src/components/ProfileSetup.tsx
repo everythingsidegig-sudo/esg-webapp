@@ -3,7 +3,8 @@
 import { useRef, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { createClient } from "@/lib/supabase/client";
-import { friendlyError } from "@/lib/journey";
+import { approximateCoordinates, friendlyError } from "@/lib/journey";
+import { reverseGeocodeGeneralArea } from "@/lib/location";
 import { SERVICE_TYPES } from "@/lib/services";
 import type { Profile } from "@/lib/database.types";
 
@@ -47,9 +48,18 @@ export default function ProfileSetup({ profile, onFinish }: { profile: Profile; 
     setError(null);
     if (!navigator.geolocation) { setError("Location isn't available. Enter an address or area manually."); return; }
     setLocating(true);
-    navigator.geolocation.getCurrentPosition((position) => {
+    navigator.geolocation.getCurrentPosition(async (position) => {
       setCoords({ lat: position.coords.latitude, lng: position.coords.longitude });
-      setArea((current) => current || "Current location"); setLocating(false);
+      try {
+        // Only rounded coordinates leave the browser for the label lookup;
+        // the exact private coordinates above are untouched.
+        const rounded = approximateCoordinates(position.coords.latitude, position.coords.longitude) as { lat: number; lng: number };
+        const label = await reverseGeocodeGeneralArea(rounded.lat, rounded.lng);
+        if (label) setArea((current) => current || label);
+        else setMessage("Couldn't determine your area automatically. Enter it manually.");
+      } catch {
+        setMessage("Couldn't determine your area automatically. Enter it manually.");
+      } finally { setLocating(false); }
     }, () => { setError("Couldn't get your location. Enter an address or area manually."); setLocating(false); },
     { timeout: 10000, maximumAge: 60000 });
   }

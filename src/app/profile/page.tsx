@@ -43,7 +43,15 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
   // with an empty draft.
   const [tagCatalog, setTagCatalog] = useState<Record<string, Tag[]>>({});
   const [specializationTags, setSpecializationTags] = useState<Record<string, string[]>>({});
+  const [savedSpecializations, setSavedSpecializations] = useState<Record<string, string[]>>({});
   const [helperDataLoaded, setHelperDataLoaded] = useState(false);
+
+  // "Update profile" is only actionable once something differs from what's saved.
+  const sameItems = (a: string[], b: string[]) => a.length === b.length && a.every((item) => b.includes(item));
+  const dirty = username !== profile.username
+    || !sameItems(skills, profile.skills)
+    || !sameItems(services, profile.services)
+    || (helperDataLoaded && skills.some((category) => !sameItems(specializationTags[category] ?? [], savedSpecializations[category] ?? [])));
 
   useEffect(() => {
     let active = true;
@@ -58,6 +66,7 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
         (byCategory[row.tag.service_type] ??= []).push(row.tag.id);
       }
       setSpecializationTags(byCategory);
+      setSavedSpecializations(byCategory);
       setHelperDataLoaded(true);
     }).catch(() => {});
     return () => { active = false; };
@@ -161,7 +170,7 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
   // skill is actually gone from profiles.skills).
   async function saveProfile(e: React.FormEvent) {
     e.preventDefault();
-    if (pending.current) return;
+    if (pending.current || !dirty) return;
     setError(null); setMessage(null);
     if (!/^[A-Za-z0-9]{6,40}$/.test(username)) { setError("Username must be 6–40 letters/numbers."); return; }
     pending.current = true; setSaving(true);
@@ -181,6 +190,7 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
           const { error: tagError } = await supabase.rpc("set_helper_tags", { p_service_type: category, p_tag_ids: specializationTags[category] ?? [] });
           if (tagError) throw tagError;
         }
+        setSavedSpecializations(specializationTags);
       }
       await confirmSave("Profile updated.");
     } catch (error) {
@@ -246,7 +256,10 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
     </div>
     <form onSubmit={saveProfile} className="space-y-3 rounded-lg border border-neutral-200 bg-white p-4">
       <fieldset disabled={saving} className="space-y-3">
-        <label className="block text-sm font-medium">Username<input required maxLength={40} value={username} onChange={(e) => setUsername(e.target.value)} className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2" /></label>
+        <div>
+          <label className="block text-sm font-medium">Username<input required maxLength={40} aria-describedby="username-hint" value={username} onChange={(e) => setUsername(e.target.value)} className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2" /></label>
+          <p id="username-hint" className="mt-1 text-xs text-neutral-500">6–40 letters or numbers, no spaces or symbols.</p>
+        </div>
         <fieldset className="min-w-0"><legend className="text-sm font-medium">Skills I can use to make money</legend>
           <div className="mt-2 flex flex-wrap gap-2">{catalog.map((item) => <SelectionChip key={item} selected={skills.includes(item)} onClick={() => setSkills(toggle(skills, item))}>{item}</SelectionChip>)}</div>
           {skills.map((skill) => (tagCatalog[skill]?.length ?? 0) > 0 && (
@@ -266,7 +279,10 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
         <fieldset className="min-w-0"><legend className="text-sm font-medium">Services I might need</legend>
           <div className="mt-2 flex flex-wrap gap-2">{catalog.map((item) => <SelectionChip key={item} selected={services.includes(item)} onClick={() => setServices(toggle(services, item))}>{item}</SelectionChip>)}</div>
         </fieldset>
-        <button type="submit" className="flex w-full items-center justify-center whitespace-nowrap rounded-lg bg-emerald-600 px-4 py-2.5 font-medium text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60">{saving ? "Updating…" : "Update profile"}</button>
+        <button type="submit" disabled={!dirty} className={`flex w-full items-center justify-center whitespace-nowrap rounded-lg px-4 py-2.5 font-medium transition-colors disabled:cursor-not-allowed ${dirty
+          ? "bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-60"
+          : "bg-neutral-200 text-neutral-500"}`}>{saving ? "Updating…" : "Update profile"}</button>
+        <p className="text-center text-xs text-neutral-500">{dirty ? "You have unsaved changes." : "No changes yet."}</p>
       </fieldset>
     </form>
     {message && <p role="status" className="text-sm text-emerald-700">{message}</p>}
