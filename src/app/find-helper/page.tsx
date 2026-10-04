@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import OptionSheet from "@/components/OptionSheet";
 import SelectionChip from "@/components/SelectionChip";
 import TagChip from "@/components/TagChip";
 import { createClient } from "@/lib/supabase/client";
@@ -65,6 +66,7 @@ export default function FindHelper() {
   const [helpers, setHelpers] = useState<PublicProfileWithTags[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [radiusKm, setRadiusKm] = useState<number | null>(null);
   const [searcherLocation] = useState(loadJourneyLocation);
 
@@ -99,10 +101,13 @@ export default function FindHelper() {
   }, [supabase, category]);
 
   const categoryTags = category ? (tagCatalog[category] ?? []) : [];
+  const chosenTags = categoryTags.filter((tag) => selectedTagIds.includes(tag.id));
+  const toggleTag = (id: string) => setSelectedTagIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
 
   function chooseCategory(next: string) {
     setCategory(next);
     setSelectedTagIds([]);
+    setSheetOpen(false);
     setLoading(true);
     setError(null);
   }
@@ -153,14 +158,18 @@ export default function FindHelper() {
 
       {category && categoryTags.length > 0 && (
         <fieldset className="min-w-0 w-full">
-          <legend className="text-sm font-medium">{SPECIALIZATION_PROMPTS[category] ?? `What kind of ${category.toLowerCase()}?`}</legend>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {categoryTags.map((tag) => (
-              <SelectionChip key={tag.id} selected={selectedTagIds.includes(tag.id)}
-                onClick={() => setSelectedTagIds((current) => current.includes(tag.id) ? current.filter((id) => id !== tag.id) : [...current, tag.id])}>
+          <legend className="text-sm font-medium">Specializations (optional)</legend>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            {chosenTags.map((tag) => (
+              <span key={tag.id} className="inline-flex items-center rounded-full bg-neutral-100 pl-3 text-sm text-neutral-800">
                 {tag.name}
-              </SelectionChip>
+                <button type="button" onClick={() => toggleTag(tag.id)} aria-label={`Remove ${tag.name}`}
+                  className="flex h-11 w-11 items-center justify-center rounded-full text-neutral-500 hover:text-neutral-900">✕</button>
+              </span>
             ))}
+            {chosenTags.length === 0 && <span className="text-sm text-neutral-500">Any specialization.</span>}
+            <button type="button" onClick={() => setSheetOpen(true)} aria-label="Add specializations"
+              className="inline-flex min-h-9 items-center rounded-full border border-dashed border-emerald-600 px-3 text-sm font-medium text-emerald-700 hover:bg-emerald-50">+ Add</button>
           </div>
         </fieldset>
       )}
@@ -198,6 +207,22 @@ export default function FindHelper() {
             {othersByDistance.map(({ profile, distanceKm }) => <HelperCard key={profile.id} profile={profile} category={category} distanceKm={distanceKm} />)}
           </div>
         </div>
+      )}
+      {sheetOpen && category && categoryTags.length > 0 && (
+        <OptionSheet title={SPECIALIZATION_PROMPTS[category] ?? `What kind of ${category.toLowerCase()}?`} onClose={() => setSheetOpen(false)}
+          footer={<div className="flex items-center justify-between gap-3">
+            <p className="text-sm text-neutral-500">{chosenTags.length} selected</p>
+            <button type="button" onClick={() => setSheetOpen(false)} className="rounded-lg bg-emerald-600 px-6 py-2.5 font-medium text-white hover:bg-emerald-700">Done</button>
+          </div>}>
+          {categoryTags.map((tag) => {
+            const selected = selectedTagIds.includes(tag.id);
+            return <button key={tag.id} type="button" role="checkbox" aria-checked={selected} onClick={() => toggleTag(tag.id)}
+              className="flex min-h-12 w-full items-center justify-between gap-3 rounded-lg px-3 text-left text-sm text-neutral-900 hover:bg-neutral-50">
+              <span>{tag.name}</span>
+              <span aria-hidden="true" className={`flex h-6 w-6 items-center justify-center rounded-md border text-sm ${selected ? "border-emerald-600 bg-emerald-600 text-white" : "border-neutral-300 text-transparent"}`}>✓</span>
+            </button>;
+          })}
+        </OptionSheet>
       )}
     </div>
   );

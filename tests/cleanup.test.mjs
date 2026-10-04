@@ -905,6 +905,15 @@ function helperClient(profiles, filters = []) {
   }) }) }) };
 }
 const helperTagsMock = { withProfileTags: async (_supabase, rows) => rows, profileTagsForCategory: (profile, category) => (profile.profile_tags ?? []).map((link) => link.tag).filter((tag) => tag.service_type === category) };
+// Specializations are chosen in the same bottom sheet as on the profile page: "+ Add", then tick a row.
+const addSpecializations = (tree) => nodes(tree, (node) => node.type === "button" && node.props["aria-label"] === "Add specializations")[0];
+const specializationRow = (tree, name) => nodes(tree, (node) => node.type === "option-sheet")
+  .flatMap((sheet) => nodes(sheet, (node) => node.type === "button" && node.props.role === "checkbox" && textOf(node.props.children[0]) === name))[0];
+function pickSpecialization(app, name) {
+  addSpecializations(app.render()).props.onClick();
+  specializationRow(app.render(), name).props.onClick();
+  return app.render();
+}
 // HelperCard is a locally-defined component used via JSX (<HelperCard .../>);
 // this harness never auto-invokes custom function components (only host
 // elements and pre-mocked string types), so — same workaround already used
@@ -965,12 +974,42 @@ test("Find a Helper partitions matching specializations from legacy fallback hel
   chip("Cleaning").props.onClick();
   tree = app.render(); await flush();
   tree = app.render();
-  chip("Deep Cleaning").props.onClick();
-  tree = app.render();
+  tree = pickSpecialization(app, "Deep Cleaning");
   assert.equal(nodes(tree, (node) => node.props.children === "Matching specializations").length, 1);
   // JSX interpolation ("Other {category} helpers") splits into an array of parts, not one string.
   assert.equal(nodes(tree, (node) => Array.isArray(node.props.children) && node.props.children.join("") === "Other Cleaning helpers").length, 1);
   assert.deepEqual(helperUsernames(tree), ["HelperA", "HelperC"], "matching specialist and legacy fallback shown; non-matching specialist (HelperB, HelperD) excluded entirely");
+});
+
+test("Find a Helper specializations use the profile pattern: chips plus a + Add bottom sheet, removable", async () => {
+  const catalog = { Cleaning: [{ id: "t1", name: "Deep Cleaning", service_type: "Cleaning" }, { id: "t2", name: "Kitchen", service_type: "Cleaning" }] };
+  const profiles = [{ id: "a", username: "HelperA", photo_url: null, skills: ["Cleaning"], wom_count: 1, profile_tags: [{ tag: catalog.Cleaning[0] }] },
+    { id: "b", username: "HelperB", photo_url: null, skills: ["Cleaning"], wom_count: 1, profile_tags: [{ tag: catalog.Cleaning[1] }] }];
+  const app = await component("src/app/find-helper/page.tsx", "FindHelper", {
+    client: helperClient(profiles),
+    mocks: { "@/lib/tags": { loadTagCatalog: async () => catalog, ...helperTagsMock } },
+  });
+  app.render(); await flush();
+  let tree = app.render();
+  nodes(tree, (node) => node.type === "selection-chip" && node.props.children === "Cleaning")[0].props.onClick();
+  tree = app.render(); await flush(); tree = app.render();
+  assert.equal(nodes(tree, (node) => node.type === "selection-chip" && ["Deep Cleaning", "Kitchen"].includes(node.props.children)).length, 0, "options are not an inline wall of selection chips");
+  assert.equal(nodes(tree, (node) => node.props.children === "Specializations (optional)").length, 1);
+  assert.equal(nodes(tree, (node) => node.props.children === "Any specialization.").length, 1, "nothing chosen means any specialization");
+  assert.equal(nodes(tree, (node) => node.type === "option-sheet").length, 0, "sheet is closed until + Add");
+  addSpecializations(tree).props.onClick();
+  tree = app.render();
+  assert.equal(nodes(tree, (node) => node.type === "option-sheet").length, 1);
+  assert.ok(specializationRow(tree, "Deep Cleaning") && specializationRow(tree, "Kitchen"), "every option for the category is listed in the sheet");
+  specializationRow(tree, "Kitchen").props.onClick();
+  tree = app.render();
+  assert.equal(specializationRow(tree, "Kitchen").props["aria-checked"], true);
+  assert.deepEqual(helperUsernames(tree), ["HelperB"]);
+  const remove = nodes(tree, (node) => node.type === "button" && node.props["aria-label"] === "Remove Kitchen")[0];
+  assert.ok(remove, "the chosen specialization shows as a removable chip");
+  remove.props.onClick();
+  tree = app.render();
+  assert.deepEqual(helperUsernames(tree).sort(), ["HelperA", "HelperB"], "removing the chip clears the filter");
 });
 
 test("Find a Helper clears tag selection and re-queries when the category changes", async () => {
@@ -1075,8 +1114,7 @@ test("Find a Helper combines category, tag, and distance filters together", asyn
   chip("Cleaning").props.onClick();
   tree = app.render(); await flush();
   tree = app.render();
-  chip("Deep Cleaning").props.onClick();
-  tree = app.render();
+  tree = pickSpecialization(app, "Deep Cleaning");
   nodes(tree, (node) => node.type === "select")[0].props.onChange({ target: { value: "10" } });
   tree = app.render();
   assert.deepEqual(helperUsernames(tree), ["NearSpecialist", "NearLegacy"], "within radius: matching specialist first, legacy fallback still included; far specialist (111 km away) and radius-excluded helpers are gone");
