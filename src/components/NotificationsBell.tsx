@@ -6,6 +6,12 @@ import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import type { Notification } from "@/lib/database.types";
 
+// Every notification opens its gig -- the permanent place to manage it. A new
+// proposal lands on the poster's proposals list within that gig.
+export function notificationHref(n: Pick<Notification, "gig_id" | "type">) {
+  return n.type === "claim_received" ? `/gigs/${n.gig_id}#proposals` : `/gigs/${n.gig_id}`;
+}
+
 export default function NotificationsBell() {
   const { user } = useAuth();
   const supabase = createClient();
@@ -54,32 +60,33 @@ export default function NotificationsBell() {
       setItems((prev) => prev.map((i) => (i.id === n.id ? { ...i, read: true } : i)));
     }
     setOpen(false);
-    if (n.gig_id) router.push(`/gigs/${n.gig_id}`);
+    if (n.gig_id) router.push(notificationHref(n));
   }
 
   return (
     <div className="relative">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="relative rounded-full p-2 hover:bg-neutral-100"
-        aria-label="Gig Updates"
+        className="relative flex h-11 w-11 items-center justify-center rounded-full text-xl hover:bg-neutral-100"
+        aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"}
+        aria-expanded={open}
       >
-        🤝
+        <span aria-hidden="true">🤝</span>
         {unreadCount > 0 && (
-          <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs text-white">
+          <span aria-hidden="true" className="absolute right-0.5 top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-xs text-white">
             {unreadCount > 9 ? "9+" : unreadCount}
           </span>
         )}
       </button>
       {open && (
-        <div className="absolute right-0 z-20 mt-2 w-80 max-h-96 overflow-y-auto rounded-lg border border-neutral-200 bg-white shadow-lg">
-          <div className="border-b border-neutral-100 px-3 py-2 text-sm font-semibold">Gigs So Far</div>
+        <div className="absolute right-0 z-20 mt-2 max-h-96 w-[min(20rem,calc(100vw-2rem))] overflow-y-auto rounded-lg border border-neutral-200 bg-white shadow-lg">
+          <div className="border-b border-neutral-100 px-3 py-2 text-sm font-semibold">Notifications</div>
           {items.length === 0 && <div className="p-4 text-sm text-neutral-500">No updates yet.</div>}
           {items.map((n) => (
             <button
               key={n.id}
               onClick={() => openNotification(n)}
-              className={`block w-full border-b border-neutral-50 px-3 py-2 text-left text-sm hover:bg-neutral-50 ${
+              className={`block min-h-11 w-full border-b border-neutral-50 px-3 py-2 text-left text-sm hover:bg-neutral-50 ${
                 n.read ? "text-neutral-500" : "font-medium text-neutral-900"
               }`}
             >

@@ -89,7 +89,7 @@ export default function ResetPassword() {
 
   if (!ready) return <div className="mx-auto max-w-md space-y-3 text-center">
     <h1 className="text-xl font-semibold">Reset your password</h1>
-    {error ? <><p role="alert" className="text-sm text-red-600">{error}</p><Link href="/auth/forgot-password" className="font-medium text-emerald-700">Request another link</Link></> : <p>Checking your reset link…</p>}
+    {error ? <><p role="alert" className="text-sm text-red-600">{error}</p><Link href="/auth/forgot-password" className="touch-link font-medium text-emerald-700">Request another link</Link></> : <p>Checking your reset link…</p>}
   </div>;
 
   return <form onSubmit={submit} className="mx-auto max-w-md space-y-4">

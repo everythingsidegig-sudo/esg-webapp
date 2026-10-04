@@ -7,7 +7,7 @@ export function safeNext(value: string | null | undefined): string {
     if (/[\\\u0000-\u001f\u007f]/.test(decoded) || decoded.startsWith("//")) return "/";
     const url = new URL(value, "https://esg.invalid");
     if (url.origin !== "https://esg.invalid") return "/";
-    if (!/^\/(?:post|browse|location|my-gigs|profile|need-help)?$/.test(url.pathname)
+    if (!/^\/(?:post|browse|location|my-gigs|profile|need-help|messages)?$/.test(url.pathname)
         && !/^\/gigs\/[0-9a-f-]{36}$/i.test(url.pathname)
         && !/^\/profile\/[A-Za-z0-9_]+$/.test(url.pathname)) return "/";
     return url.pathname + url.search + url.hash;

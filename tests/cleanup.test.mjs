@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
+import * as myGigsLib from "../src/lib/my-gigs.ts";
 import * as moneyLib from "../src/lib/money.ts";
 import { approximateCoordinates, gigInputError, friendlyError, passwordError, registrationError, rpcActionError, safeNext, setupDestination } from "../src/lib/journey.ts";
 
@@ -37,6 +38,7 @@ async function component(path, name, overrides = {}) {
   let cursor = 0, queue = [];
   const hooks = {
     useMemo: (callback) => callback(),
+    useCallback: (callback) => callback,
     Suspense: "suspense",
     useState(initial) {
       const index = cursor++;
@@ -73,7 +75,10 @@ async function component(path, name, overrides = {}) {
     "@/components/AuthGuard": { default: "guard" },
     "@/components/SelectionChip": { default: "selection-chip" },
     "@/components/OptionSheet": { default: "option-sheet" },
+    "@/lib/my-gigs": myGigsLib,
     "@/lib/money": moneyLib,
+    "@/components/LogoutButton": { default: "logout-button" },
+    "@/components/MessagesLink": { default: "messages-link" },
     "@/components/StatusBadge": { default: "badge" },
     "@/components/TagChip": { default: "tag-chip" },
     ...overrides.mocks,
@@ -1065,43 +1070,392 @@ test("Find a Helper combines category, tag, and distance filters together", asyn
   assert.deepEqual(helperUsernames(tree), ["NearSpecialist", "NearLegacy"], "within radius: matching specialist first, legacy fallback still included; far specialist (111 km away) and radius-excluded helpers are gone");
 });
 
-function gigClient(failure) {
-  const calls = [];
-  return { calls, from(table) {
-    let kind = table === "claims" ? "claims" : null;
-    const query = {
-      select() { return query; },
-      eq(field) { if (field === "poster_id") kind = "posted"; return query; },
-      or() { kind = "worked"; return query; },
-      order() { return query; },
-      then(resolve, reject) {
-        calls.push(kind);
-        return Promise.resolve(kind === failure ? { data: null, error: new Error("failed") }
-          : { data: kind === "claims" ? [] : [{ id: `${kind}-gig`, status: "active" }], error: null }).then(resolve, reject);
-      },
-    };
-    return query;
-  } };
+// ---------------------------------------------------------------------------
+// Navigation, My Gigs, Messages, notifications and the gig hub
+// ---------------------------------------------------------------------------
+const sectionLabels = (tree) => nodes(tree, (node) => node.type === "section").map((node) => node.props["aria-label"]);
+const sectionNamed = (tree, label) => nodes(tree, (node) => node.type === "section" && node.props["aria-label"] === label)[0];
+
+// Minimal chainable Supabase fake: `resolve(query, single)` decides each result.
+function fakeDb(resolve) {
+  return {
+    from(table) {
+      const query = { table, eq: {}, in: {}, or: null };
+      const api = {
+        select() { return api; }, order() { return api; }, limit() { return api; }, not() { return api; }, is() { return api; }, neq() { return api; },
+        eq(field, value) { query.eq[field] = value; return api; },
+        in(field, value) { query.in[field] = value; return api; },
+        or(value) { query.or = value; return api; },
+        maybeSingle() { return Promise.resolve(resolve(query, true)); },
+        then(ok, bad) { return Promise.resolve(resolve(query, false)).then(ok, bad); },
+      };
+      return api;
+    },
+    rpc: async () => ({ error: null }),
+    channel() { const channel = { on() { return channel; }, subscribe() { return channel; } }; return channel; },
+    removeChannel() {},
+  };
 }
 
-for (const failure of ["claims", "worked", "posted"]) {
-  test(`My Gigs isolates ${failure} failure and retries only that section`, async () => {
-    const client = gigClient(failure);
-    const app = await component("src/app/my-gigs/page.tsx", "MyGigsInner", { client });
-    app.render(); await flush();
-    let tree = app.render();
-    const goodTab = failure === "posted" ? "Gigs Worked" : "Gigs Posted";
-    button(tree, goodTab).props.onClick(); tree = app.render();
-    assert.equal(nodes(tree, (node) => node.props.role === "alert").length, 0);
-    assert.equal(nodes(tree, (node) => node.props.gigs?.length === 1).length, 1);
-    button(tree, failure === "posted" ? "Gigs Posted" : "Gigs Worked").props.onClick();
-    tree = app.render();
-    assert.equal(nodes(tree, (node) => node.props.role === "alert").length, 1);
-    client.calls.length = 0;
-    button(tree, "Retry").props.onClick(); app.render(); await flush();
-    assert.deepEqual(client.calls, failure === "posted" ? ["posted"] : failure === "claims" ? ["claims"] : ["claims", "worked"]);
+const myGig = (id, fields = {}) => ({ id, title: id, poster_id: user.id, selected_provider_id: null, status: "active", amount: 50, location_text: "Kävlinge", scheduled_at: "2026-10-30T12:00:00Z", gig_tags: [], ...fields });
+function myGigsDb({ fail, calls = [], empty = false } = {}) {
+  const data = empty ? { posted: [], helping: [], myClaims: [], pending: [], profiles: [] } : {
+    posted: [myGig("g-open"), myGig("g-acc", { selected_provider_id: "h1", agreed_amount: 45 }), myGig("g-prog", { status: "in_progress", selected_provider_id: "h1" }),
+      myGig("g-done", { status: "completed", selected_provider_id: "h1" }), myGig("g-draft", { status: "draft" }), myGig("g-cancel", { status: "cancelled" })],
+    helping: [myGig("h-pending", { poster_id: "c1" }), myGig("h-acc", { poster_id: "c1", selected_provider_id: user.id, agreed_amount: 40 }),
+      myGig("h-prog", { poster_id: "c1", status: "in_progress", selected_provider_id: user.id }), myGig("h-done", { poster_id: "c1", status: "completed", selected_provider_id: user.id }),
+      myGig("h-lost", { poster_id: "c1", selected_provider_id: "someone" }), myGig("h-cancelled", { poster_id: "c1", status: "cancelled" })],
+    myClaims: [{ gig_id: "h-pending", state: "pending", offer_amount: 40 }, { gig_id: "h-acc", state: "selected", offer_amount: 40 }, { gig_id: "h-lost", state: "rejected" }, { gig_id: "h-cancelled", state: "rejected" }],
+    pending: [{ gig_id: "g-open" }, { gig_id: "g-open" }],
+    profiles: [{ id: "h1", username: "helper1" }, { id: "c1", username: "customer1" }],
+  };
+  return fakeDb((query) => {
+    let label, rows;
+    if (query.table === "gigs" && query.eq.poster_id) { label = "gigs-posted"; rows = data.posted; }
+    else if (query.table === "gigs" && query.or) { label = "gigs-helping"; rows = data.helping; }
+    else if (query.table === "claims" && query.eq.provider_id) { label = "claims-helping"; rows = data.myClaims; }
+    else if (query.table === "claims") { label = "claims-pending"; rows = data.pending; }
+    else if (query.table === "public_profiles") { label = "profiles"; rows = data.profiles.filter((profile) => query.in.id.includes(profile.id)); }
+    calls.push(label);
+    return label === fail ? { data: null, error: new Error("failed") } : { data: rows, error: null };
   });
 }
+async function openMyGigs(options = {}, mocks = {}) {
+  const app = await component("src/app/my-gigs/page.tsx", "MyGigsInner", { client: myGigsDb(options), mocks });
+  app.render(); await flush();
+  return { app, tree: app.render() };
+}
+
+test("bottom navigation is exactly Home | Explore | My Gigs | Profile; header has Messages and Notifications, no username", async () => {
+  const app = await component("src/components/Nav.tsx", "Nav", { mocks: { "@/components/NotificationsBell": { default: "notifications-bell" } } });
+  const tree = app.render();
+  const header = nodes(tree, (node) => node.type === "header")[0];
+  assert.equal(nodes(header, (node) => node.type === "messages-link").length, 1, "Messages icon in the header");
+  assert.equal(nodes(header, (node) => node.type === "notifications-bell").length, 1, "Notifications icon in the header");
+  assert.equal(nodes(header, (node) => node.type === "a" && node.props.href === "/profile").length, 0, "no username link: Profile is already in the bottom bar");
+  const nav = nodes(tree, (node) => node.type === "nav")[0];
+  const links = nodes(nav, (node) => node.type === "a");
+  assert.deepEqual(links.map((link) => textOf(link.props.children[1])), ["Home", "Explore", "My Gigs", "Profile"]);
+  assert.deepEqual(links.map((link) => link.props.href), ["/location", "/browse", "/my-gigs", "/profile"]);
+  assert.equal(nodes(nav, (node) => node.props.href === "/messages").length, 0, "Messages is not a bottom tab");
+});
+
+test("My Gigs tabs are 'I Need Help' and 'I'm Helping'", async () => {
+  const { tree } = await openMyGigs();
+  const tabs = nodes(tree, (node) => node.props.role === "tab");
+  assert.deepEqual(tabs.map(textOf), ["I Need Help", "I'm Helping"]);
+  assert.deepEqual(tabs.map((tab) => tab.props["aria-selected"]), [true, false]);
+});
+
+test("My Gigs / I Need Help groups posted gigs by the existing statuses, with proposal counts and the selected helper", async () => {
+  const { tree } = await openMyGigs();
+  assert.deepEqual(sectionLabels(tree), ["Open", "Accepted", "In progress", "Completed", "Drafts", "Cancelled"]);
+  const open = sectionNamed(tree, "Open");
+  const openLinks = nodes(open, (node) => node.type === "a");
+  assert.ok(openLinks.some((link) => link.props.href === "/gigs/g-open#proposals" && textOf(link) === "2 proposals"), "proposal count leads to that gig's proposals");
+  assert.ok(openLinks.some((link) => link.props.href === "/gigs/g-open" && textOf(link) === "View gig"));
+  assert.match(textOf(open), /Oct 30 · Kävlinge · Budget 50 SEK/);
+  assert.doesNotMatch(textOf(open), /Helper:/, "no helper before one is selected");
+  assert.match(textOf(sectionNamed(tree, "Accepted")), /Helper: @helper1 · Agreed price: 45 SEK/, "budget stays visible, agreed price is shown once someone is accepted");
+  assert.match(textOf(sectionNamed(tree, "In progress")), /Helper: @helper1/);
+  assert.deepEqual(nodes(sectionNamed(tree, "Accepted"), (node) => node.type === "badge").map((node) => node.props.status), ["active"], "the real gig status is shown");
+  assert.deepEqual(nodes(sectionNamed(tree, "In progress"), (node) => node.type === "badge").map((node) => node.props.status), ["in_progress"]);
+});
+
+test("My Gigs / I'm Helping maps the existing claim and gig lifecycle to sections and badges", async () => {
+  const { app, tree: first } = await openMyGigs();
+  nodes(first, (node) => node.props.role === "tab")[1].props.onClick();
+  const tree = app.render();
+  assert.deepEqual(sectionLabels(tree), ["Proposals", "Accepted", "In progress", "Completed", "Not selected or closed"]);
+  assert.match(textOf(sectionNamed(tree, "Proposals")), /Proposal pending/);
+  assert.match(textOf(sectionNamed(tree, "Proposals")), /Customer: @customer1/);
+  assert.match(textOf(sectionNamed(tree, "Proposals")), /Your offer: 40 SEK/);
+  assert.match(textOf(sectionNamed(tree, "Accepted")), /Accepted/);
+  assert.match(textOf(sectionNamed(tree, "Accepted")), /Agreed price: 40 SEK/);
+  assert.match(textOf(sectionNamed(tree, "In progress")), /In progress/);
+  assert.match(textOf(sectionNamed(tree, "Completed")), /Completed/);
+  const closed = textOf(sectionNamed(tree, "Not selected or closed"));
+  assert.match(closed, /Not selected/);
+  assert.match(closed, /Gig cancelled/);
+  assert.ok(nodes(sectionNamed(tree, "Proposals"), (node) => node.type === "a" && node.props.href === "/gigs/h-pending").length >= 1);
+});
+
+test("My Gigs opens on I'm Helping when linked with ?tab=helping", async () => {
+  const { tree } = await openMyGigs({}, { "next/navigation": { useSearchParams: () => new URLSearchParams("tab=helping") } });
+  assert.deepEqual(nodes(tree, (node) => node.props.role === "tab").map((tab) => tab.props["aria-selected"]), [false, true]);
+  assert.equal(sectionLabels(tree)[0], "Proposals");
+});
+
+test("My Gigs empty states point to Post a gig and Explore", async () => {
+  const { app, tree: first } = await openMyGigs({ empty: true });
+  assert.ok(nodes(first, (node) => node.type === "a" && node.props.href === "/post"));
+  nodes(first, (node) => node.props.role === "tab")[1].props.onClick();
+  assert.ok(nodes(app.render(), (node) => node.type === "a" && node.props.href === "/browse"));
+});
+
+for (const [fail, failingTab] of [["gigs-posted", 0], ["claims-pending", 0], ["claims-helping", 1], ["gigs-helping", 1]]) {
+  test(`My Gigs isolates a ${fail} failure to its tab and retries only that tab`, async () => {
+    const calls = [];
+    const { app, tree: first } = await openMyGigs({ fail, calls });
+    const select = (index) => { nodes(app.render(), (node) => node.props.role === "tab")[index].props.onClick(); return app.render(); };
+    let tree = select(failingTab ? 0 : 1);
+    assert.equal(nodes(tree, (node) => node.props.role === "alert").length, 0, "the other tab is unaffected");
+    assert.ok(sectionLabels(tree).length > 0);
+    tree = select(failingTab);
+    assert.equal(nodes(tree, (node) => node.props.role === "alert").length, 1);
+    calls.length = 0;
+    button(tree, "Retry").props.onClick(); app.render(); await flush();
+    const other = failingTab ? ["gigs-posted", "claims-pending"] : ["claims-helping", "gigs-helping"];
+    assert.ok(calls.length > 0);
+    assert.ok(calls.every((label) => !other.includes(label)), "retry only reloads the failed tab's data");
+    void first;
+  });
+}
+
+test("Messages inbox lists gig conversations newest first with the other person, preview and unread count", async () => {
+  const now = Date.now();
+  const message = (id, gig_id, sender_id, body, ageSeconds, read_at = null) => ({ id, gig_id, sender_id, body, created_at: new Date(now - ageSeconds * 1000).toISOString(), read_at });
+  const client = fakeDb((query) => {
+    if (query.table === "gigs") return { data: [
+      { id: "g1", title: "Yard Cleaning", poster_id: user.id, selected_provider_id: "h1" },
+      { id: "g2", title: "Dog Walking", poster_id: "c2", selected_provider_id: user.id },
+      { id: "g3", title: "No messages yet", poster_id: user.id, selected_provider_id: "h3" },
+    ], error: null };
+    if (query.table === "chat_messages") return { data: [
+      message("m1", "g2", "c2", "Are you free tomorrow?", 30), message("m2", "g2", "c2", "Hello", 300),
+      message("m3", "g1", user.id, "Yes, Thursday at 2 works.", 120),
+    ], error: null };
+    return { data: [{ id: "h1", username: "helper1" }, { id: "c2", username: "customer2" }], error: null };
+  });
+  const app = await component("src/app/messages/page.tsx", "MessagesInner", { client, mocks: { "@/lib/my-gigs": myGigsLib } });
+  app.render(); await flush();
+  const tree = app.render();
+  const rows = nodes(tree, (node) => node.type === "li");
+  assert.equal(rows.length, 2, "only gigs that actually have messages");
+  const [newest, older] = rows.map((row) => nodes(row, (node) => node.type === "a")[0]);
+  assert.equal(newest.props.href, "/gigs/g2#messages");
+  assert.equal(older.props.href, "/gigs/g1#messages");
+  assert.match(textOf(newest), /Dog Walking/); assert.match(textOf(newest), /@customer2/); assert.match(textOf(newest), /Are you free tomorrow\?/);
+  assert.equal(nodes(newest, (node) => node.props.role === "img")[0].props["aria-label"], "2 unread", "unread has an accessible name");
+  assert.match(textOf(older), /You: Yes, Thursday at 2 works\./);
+  assert.match(textOf(older), /@helper1/);
+  assert.equal(nodes(older, (node) => node.props.role === "img").length, 0);
+});
+
+test("Messages inbox explains when there are no conversations", async () => {
+  const app = await component("src/app/messages/page.tsx", "MessagesInner", { client: fakeDb(() => ({ data: [], error: null })), mocks: { "@/lib/my-gigs": myGigsLib } });
+  app.render(); await flush();
+  assert.equal(nodes(app.render(), (node) => /No conversations yet/.test(textOf(node)) && node.type === "p").length, 1);
+});
+
+test("Messages header link carries an accessible unread count and opens the inbox", async () => {
+  for (const [count, label] of [[3, "Messages, 3 unread"], [0, "Messages"]]) {
+    const listeners = [];
+    const client = { ...fakeDb(() => ({ count, error: null })), };
+    const app = await component("src/components/MessagesLink.tsx", "MessagesLink", {
+      client, globals: { window: { addEventListener: (name) => listeners.push(name), removeEventListener() {} } },
+      mocks: { "next/navigation": { usePathname: () => "/browse" } },
+    });
+    app.render(); await flush();
+    const link = nodes(app.render(), (node) => node.type === "a")[0];
+    assert.equal(link.props.href, "/messages");
+    assert.equal(link.props["aria-label"], label);
+    assert.deepEqual(listeners, ["esg:messages-read"], "badge refreshes when a conversation is opened");
+  }
+});
+
+test("Notifications: accessible unread count, and each one opens its gig (new proposals land on the proposals list)", async () => {
+  const items = [
+    { id: "n1", gig_id: "g1", type: "claim_received", message: "New proposal", read: false },
+    { id: "n2", gig_id: "g2", type: "selected", message: "You were selected", read: false },
+    { id: "n3", gig_id: "g3", type: "resolved", message: "Resolved", read: true },
+  ];
+  const pushed = [], updates = [];
+  const query = { select() { return query; }, eq() { return query; }, order() { return query; }, limit() { return Promise.resolve({ data: items }); },
+    update(payload) { updates.push(payload); return { eq: async () => ({ error: null }) }; } };
+  const client = { from: () => query, channel() { const c = { on() { return c; }, subscribe() { return c; } }; return c; }, removeChannel() {} };
+  const app = await component("src/components/NotificationsBell.tsx", "NotificationsBell", { client, mocks: { "next/navigation": { useRouter: () => ({ push: (url) => pushed.push(url) }) } } });
+  app.render(); await flush();
+  let tree = app.render();
+  const bell = () => nodes(tree, (node) => node.type === "button" && /^Notifications/.test(node.props["aria-label"] ?? ""))[0];
+  assert.equal(bell().props["aria-label"], "Notifications, 2 unread");
+  bell().props.onClick(); tree = app.render();
+  const open = (label) => nodes(tree, (node) => node.type === "button" && node.props.children === label)[0];
+  await open("New proposal").props.onClick();
+  await open("You were selected").props.onClick();
+  assert.deepEqual(pushed, ["/gigs/g1#proposals", "/gigs/g2"]);
+  assert.equal(updates.length, 2, "unread notifications are marked read when opened");
+});
+
+test("Chat opening marks the other party's messages read and tells the header badge to refresh", async () => {
+  const updates = [], events = [];
+  const rows = [{ id: "m1", gig_id: "g1", sender_id: "other", body: "Hi", created_at: "2026-10-01T10:00:00Z", read_at: null }];
+  const query = { select() { return query; }, eq() { return query; }, order() { return { then: (ok) => Promise.resolve({ data: rows }).then(ok) }; },
+    update(payload) { updates.push(payload); const chain = { eq() { return chain; }, neq() { return chain; }, is() { return Promise.resolve({ error: null }); } }; return chain; } };
+  const client = { from: () => query, channel() { const c = { on() { return c; }, subscribe() { return c; } }; return c; }, removeChannel() {} };
+  const app = await component("src/components/ChatPanel.tsx", "ChatPanel", {
+    client, globals: { Event: class { constructor(type) { this.type = type; } }, window: { dispatchEvent: (event) => events.push(event.type) } },
+  });
+  app.render({ gigId: "g1", currentUserId: user.id, readOnly: false }); await flush();
+  assert.equal(updates.length, 1);
+  assert.ok(typeof updates[0].read_at === "string");
+  assert.deepEqual(events, ["esg:messages-read"]);
+});
+
+// Gig hub ------------------------------------------------------------------
+function gigHubDb({ gig, claims = [], myClaim = null, address = null, addressQueries = [] }) {
+  return fakeDb((query, single) => {
+    if (query.table === "gigs") return { data: gig, error: null };
+    if (query.table === "gig_private_locations") { addressQueries.push(query.eq.gig_id); return { data: address ? { address_text: address } : null, error: null }; }
+    if (query.table === "public_profiles") return { data: [{ id: "poster-1", username: "customer1" }, { id: "helper-1", username: "helper1" }].filter((row) => query.in.id.includes(row.id)), error: null };
+    if (query.table === "claims" && query.eq.provider_id) return { data: myClaim, error: null };
+    if (query.table === "claims") return { data: claims, error: null };
+    return { data: single ? null : [], error: null };
+  });
+}
+async function openGig(fields, db = {}, asUser = user.id) {
+  const gig = { id: "gig-1", poster_id: "poster-1", selected_provider_id: null, status: "active", title: "Yard Cleaning", description: "Rake leaves", service_type: "Yard Work",
+    photo_url: null, amount: 50, location_text: "Kävlinge", scheduled_at: null, start_requested_at: null, incomplete_choice_phase: false, amount_paid: null, amount_received: null, gig_tags: [], ...fields };
+  const rpcs = [];
+  const client = gigHubDb({ gig, ...db });
+  client.rpc = async (name, args) => { rpcs.push([name, args]); return { error: null }; };
+  const app = await component("src/app/gigs/[id]/page.tsx", "GigDetails", {
+    client, globals: { window: { confirm: () => true, location: { hash: "" } }, document: { getElementById: () => null } },
+    mocks: { "@/components/ChatPanel": { default: "chat-panel" } },
+  });
+  app.auth.user = { id: asUser };
+  app.render({ id: "gig-1" }); await flush();
+  return { app, rpcs, tree: app.render({ id: "gig-1" }), props: { id: "gig-1" } };
+}
+
+test("Gig hub (owner, open): proposals live on the gig, with Accept offer, Cancel and a back link to My Gigs", async () => {
+  const claims = [{ id: "c1", gig_id: "gig-1", provider_id: "helper-1", state: "pending", profile: undefined }];
+  const { app, rpcs, tree, props } = await openGig({ poster_id: user.id }, { claims });
+  assert.ok(nodes(tree, (node) => node.type === "a" && node.props.href === "/my-gigs" && /My Gigs/.test(textOf(node))));
+  const proposals = nodes(tree, (node) => node.props.id === "proposals")[0];
+  assert.ok(proposals, "proposals anchor exists for notification/My Gigs deep links");
+  assert.match(textOf(proposals), /Your budget: 50 SEK · 1 proposal/);
+  await nodes(proposals, (node) => node.type === "button" && textOf(node) === "Accept offer")[0].props.onClick();
+  assert.deepEqual(JSON.parse(JSON.stringify(rpcs[0])), ["select_provider", { p_gig_id: "gig-1", p_claim_id: "c1" }], "uses the existing lifecycle RPC");
+  await nodes(tree, (node) => node.type === "button" && textOf(node) === "Cancel gig")[0].props.onClick();
+  assert.equal(rpcs[1][0], "cancel_gig");
+  void app; void props;
+});
+
+test("Gig hub (owner, draft): offers Publish via the existing RPC", async () => {
+  const { rpcs, tree } = await openGig({ poster_id: user.id, status: "draft" });
+  await nodes(tree, (node) => node.type === "button" && textOf(node) === "Publish gig")[0].props.onClick();
+  assert.deepEqual(JSON.parse(JSON.stringify(rpcs[0])), ["publish_gig", { p_gig_id: "gig-1" }]);
+});
+
+test("Gig hub (owner, helper selected): shows the helper and the gig's messages section", async () => {
+  const { tree } = await openGig({ poster_id: user.id, selected_provider_id: "helper-1" });
+  assert.match(textOf(nodes(tree, (node) => node.type === "p" && /You posted this gig/.test(textOf(node)))[0]), /Helper: @helper1/);
+  const messages = nodes(tree, (node) => node.props.id === "messages")[0];
+  assert.ok(messages && nodes(messages, (node) => node.type === "chat-panel").length === 1, "existing gig-scoped chat is the Messages section");
+});
+
+test("Gig hub (helper): back link goes to I'm Helping and proposal state is explained", async () => {
+  const pending = await openGig({}, { myClaim: { id: "mine", gig_id: "gig-1", provider_id: user.id, state: "pending" } });
+  assert.ok(nodes(pending.tree, (node) => node.type === "a" && node.props.href === "/my-gigs?tab=helping"));
+  assert.ok(nodes(pending.tree, (node) => /Offer sent/.test(textOf(node))).length > 0);
+
+  const accepted = await openGig({ selected_provider_id: user.id }, { myClaim: { id: "mine", gig_id: "gig-1", provider_id: user.id, state: "selected" } });
+  assert.ok(nodes(accepted.tree, (node) => /Your offer was accepted/.test(textOf(node))).length > 0);
+  assert.ok(nodes(accepted.tree, (node) => node.type === "button" && textOf(node) === "START").length === 1, "existing lifecycle action");
+  assert.ok(nodes(accepted.tree, (node) => node.props.id === "messages").length === 1);
+
+  const rejected = await openGig({ selected_provider_id: "other-helper" }, { myClaim: { id: "mine", gig_id: "gig-1", provider_id: user.id, state: "rejected" } });
+  assert.ok(nodes(rejected.tree, (node) => /Not selected/.test(textOf(node))).length > 0);
+});
+
+test("Gig hub (helper, no offer yet): the offer form defaults to the budget and sends amount and message through create_claim", async () => {
+  const { app, rpcs, tree, props } = await openGig({ amount: 50 });
+  const form = nodes(tree, (node) => node.type === "form" && node.props["aria-label"] === "Make an offer")[0];
+  assert.ok(form, "Make an offer form");
+  const amountInput = nodes(form, (node) => node.type === "input")[0];
+  assert.equal(amountInput.props.value, "50", "defaults to the posted budget");
+  assert.match(textOf(form), /budget is 50 SEK/);
+  await form.props.onSubmit({ preventDefault() {} });
+  assert.deepEqual(JSON.parse(JSON.stringify(rpcs[0])), ["create_claim", { p_gig_id: "gig-1", p_offer_amount: 50, p_message: null }]);
+
+  nodes(form, (node) => node.type === "input")[0].props.onChange({ target: { value: "42.5" } });
+  nodes(form, (node) => node.type === "textarea")[0].props.onChange({ target: { value: "  I can come Saturday  " } });
+  const edited = nodes(app.render(props), (node) => node.type === "form" && node.props["aria-label"] === "Make an offer")[0];
+  await edited.props.onSubmit({ preventDefault() {} });
+  assert.deepEqual(JSON.parse(JSON.stringify(rpcs[1])), ["create_claim", { p_gig_id: "gig-1", p_offer_amount: 42.5, p_message: "I can come Saturday" }]);
+});
+
+test("Gig hub (helper): an invalid offer amount is rejected in the UI without calling the server", async () => {
+  const { app, rpcs, tree, props } = await openGig({ amount: 50 });
+  nodes(tree, (node) => node.type === "input")[0].props.onChange({ target: { value: "-5" } });
+  const form = nodes(app.render(props), (node) => node.type === "form")[0];
+  await form.props.onSubmit({ preventDefault() {} });
+  assert.equal(rpcs.length, 0);
+  assert.match(textOf(nodes(app.render(props), (node) => node.props.role === "alert")[0]), /positive offer/);
+});
+
+test("Gig hub (helper, pending offer): shows the offer, can withdraw it, and cannot send a second one", async () => {
+  const { rpcs, tree } = await openGig({}, { myClaim: { id: "mine", gig_id: "gig-1", provider_id: user.id, state: "pending", offer_amount: 42, message: "Saturday works" } });
+  assert.equal(nodes(tree, (node) => node.type === "form").length, 0, "no second offer form");
+  assert.match(textOf(nodes(tree, (node) => /Offer sent/.test(textOf(node)))[0]), /42 SEK/);
+  await nodes(tree, (node) => node.type === "button" && textOf(node) === "Withdraw offer")[0].props.onClick();
+  assert.deepEqual(JSON.parse(JSON.stringify(rpcs[0])), ["withdraw_claim", { p_gig_id: "gig-1" }]);
+});
+
+test("Gig hub (helper, withdrawn offer): offers stay closed because the server never reopens a withdrawn offer", async () => {
+  const { tree } = await openGig({}, { myClaim: { id: "mine", gig_id: "gig-1", provider_id: user.id, state: "withdrawn", offer_amount: 42 } });
+  assert.equal(nodes(tree, (node) => node.type === "form").length, 0);
+  assert.ok(nodes(tree, (node) => /You withdrew your offer/.test(textOf(node))).length > 0);
+});
+
+test("Gig hub (owner, open): each proposal shows username, reputation, offer, message, View profile and Accept offer", async () => {
+  const profile = { id: "helper-1", username: "helper1", wom_count: 3 };
+  const claims = [{ id: "c1", gig_id: "gig-1", provider_id: "helper-1", state: "pending", offer_amount: 40, message: "Bringing my own rake", created_at: "2026-10-01T10:00:00Z" }];
+  const client = gigHubDb({ gig: { id: "gig-1", poster_id: user.id, selected_provider_id: null, status: "active", title: "t", description: "d", service_type: "Yard Work", photo_url: null, amount: 50, location_text: "Kävlinge", scheduled_at: null, gig_tags: [] }, claims });
+  const baseFrom = client.from;
+  client.from = (table) => { const api = baseFrom(table); if (table === "public_profiles") { const then = api.then; api.then = (ok, bad) => then.call(api, (r) => ok({ ...r, data: [profile] }), bad); } return api; };
+  client.rpc = async () => ({ error: null });
+  const app = await component("src/app/gigs/[id]/page.tsx", "GigDetails", { client, globals: { window: { confirm: () => true, location: { hash: "" } }, document: { getElementById: () => null } }, mocks: { "@/components/ChatPanel": { default: "chat-panel" } } });
+  app.render({ id: "gig-1" }); await flush();
+  const text = textOf(nodes(app.render({ id: "gig-1" }), (node) => node.props.id === "proposals")[0]);
+  assert.match(text, /@helper1 · 3 WOM/);
+  assert.match(text, /40 SEK/);
+  assert.match(text, /Bringing my own rake/);
+  assert.match(text, /View profile/);
+  assert.match(text, /Accept offer/);
+});
+
+test("Gig hub (accepted): poster and accepted helper both see agreed price, private address and a Message button", async () => {
+  for (const [asUser, fields, other] of [[user.id, { poster_id: user.id, selected_provider_id: "helper-1" }, "Message helper"], [user.id, { selected_provider_id: user.id }, "Message poster"]]) {
+    const addressQueries = [];
+    const { tree } = await openGig({ amount: 50, agreed_amount: 40, ...fields }, { address: "Storgatan 1, 2tr", addressQueries }, asUser);
+    assert.match(textOf(nodes(tree, (node) => node.props["aria-label"] === "Private address")[0]), /Storgatan 1, 2tr/);
+    assert.match(textOf(tree), /Agreed 40 SEK/);
+    assert.match(textOf(tree), /budget 50 SEK/);
+    assert.ok(nodes(tree, (node) => node.type === "a" && node.props.href === "#messages" && textOf(node) === other).length === 1);
+    assert.deepEqual(addressQueries, ["gig-1"]);
+  }
+});
+
+test("Gig hub: the private address is never requested or rendered for helpers who are not the accepted one", async () => {
+  const addressQueries = [];
+  const open = await openGig({ amount: 50 }, { address: "Secret 9", addressQueries });
+  const rejected = await openGig({ selected_provider_id: "other-helper" }, { address: "Secret 9", addressQueries, myClaim: { id: "mine", gig_id: "gig-1", provider_id: user.id, state: "rejected", offer_amount: 40 } });
+  const pending = await openGig({}, { address: "Secret 9", addressQueries, myClaim: { id: "mine", gig_id: "gig-1", provider_id: user.id, state: "pending", offer_amount: 40 } });
+  assert.deepEqual(addressQueries, [], "no query against gig_private_locations for non-participants");
+  for (const { tree } of [open, rejected, pending]) {
+    assert.equal(nodes(tree, (node) => node.props["aria-label"] === "Private address").length, 0);
+    assert.doesNotMatch(JSON.stringify(tree), /Secret 9/);
+  }
+});
+
+test("Gig hub: a visitor who neither posted nor proposed gets no back link, and a gig is capped to a readable width", async () => {
+  const { tree } = await openGig({});
+  assert.equal(nodes(tree, (node) => node.type === "a" && /My Gigs/.test(textOf(node))).length, 0);
+  assert.match(tree.props.className, /max-w-2xl/);
+});
+
 
 test("AuthGuard retains the same loaded child slot on background refresh failure", async () => {
   const app = await component("src/components/AuthGuard.tsx", "AuthGuardInner");

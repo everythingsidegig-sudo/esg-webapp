@@ -33,7 +33,7 @@ export default function ForgotPassword() {
   if (sent) return <div className="mx-auto max-w-md space-y-3 text-center">
     <h1 className="text-xl font-semibold">Check your email</h1>
     <p className="text-sm text-neutral-600">If an ESG account uses that email, a password-reset link will arrive shortly.</p>
-    <Link href="/auth/sign-in" className="font-medium text-emerald-700">Back to Sign In</Link>
+    <Link href="/auth/sign-in" className="touch-link font-medium text-emerald-700">Back to Sign In</Link>
   </div>;
 
   return <form onSubmit={submit} className="mx-auto max-w-md space-y-4">
@@ -46,6 +46,6 @@ export default function ForgotPassword() {
     <button type="submit" disabled={submitting} className="w-full rounded-lg bg-emerald-600 py-2.5 font-medium text-white disabled:opacity-60">
       {submitting ? "Sending…" : "Send reset link"}
     </button>
-    <p className="text-center text-sm"><Link href="/auth/sign-in" className="font-medium text-emerald-700">Back to Sign In</Link></p>
+    <p className="text-center text-sm"><Link href="/auth/sign-in" className="touch-link font-medium text-emerald-700">Back to Sign In</Link></p>
   </form>;
 }

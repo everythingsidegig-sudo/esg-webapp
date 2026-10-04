@@ -28,6 +28,52 @@ input {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* App-style touch behavior: no double-tap-zoom delay on controls. */
+button,
+a,
+input,
+select,
+textarea,
+label,
+[role="button"],
+[role="checkbox"],
+[role="radio"] {
+  touch-action: manipulation;
+}
+
+/* Minimum 44px touch targets for form fields and buttons (base layer, so any
+   explicit utility can still make a control taller). */
+@layer base {
+  button,
+  [role="button"],
+  select,
+  input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="hidden"]) {
+    min-height: 2.75rem;
+  }
+}
+
+/* Text links that act as standalone controls. */
+.touch-link {
+  display: inline-flex;
+  min-height: 2.75rem;
+  align-items: center;
+}
+
+/* Checkbox/radio rows: the whole row is the target. */
+.check-row {
+  display: flex;
+  min-height: 2.75rem;
+  align-items: center;
+  gap: 0.75rem;
+}
+.check-row input[type="checkbox"],
+.check-row input[type="radio"] {
+  height: 1.25rem;
+  width: 1.25rem;
+  flex-shrink: 0;
+  accent-color: var(--esg-green);
+}
+
 /*
  * Tailwind's Preflight resets native cursor behavior on form controls, so
  * every button in the app needs this explicitly: a hand cursor while

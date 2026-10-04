@@ -113,7 +113,7 @@ function SignUpInner() {
           If this email can be registered, a confirmation link will be sent to <strong>{email}</strong>.
           Open it in this browser to finish setup. Already registered? Try signing in.
         </p>
-        <Link href={`/auth/sign-in?next=${encodeURIComponent(next)}`} className="text-emerald-700 font-medium">
+        <Link href={`/auth/sign-in?next=${encodeURIComponent(next)}`} className="touch-link text-emerald-700 font-medium">
           Go to Sign In
         </Link>
         <button disabled={submitting} onClick={() => void resend()} className="block w-full text-emerald-700">{submitting ? "Sending…" : "Resend confirmation link"}</button>
@@ -198,9 +198,9 @@ function SignUpInner() {
         {submitting ? "Creating account…" : "Create Account"}
       </button>
 
-      <p className="text-center text-sm text-neutral-500">
+      <p className="flex flex-wrap items-center justify-center gap-x-1 text-sm text-neutral-500">
         Already have an account?{" "}
-        <Link href={`/auth/sign-in?next=${encodeURIComponent(next)}`} className="font-medium text-emerald-700">
+        <Link href={`/auth/sign-in?next=${encodeURIComponent(next)}`} className="touch-link font-medium text-emerald-700">
           Sign In
         </Link>
       </p>

@@ -19,6 +19,14 @@ export default function ChatPanel({
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
+  // Opening the conversation marks the other party's messages as read (the only
+  // column clients may update on chat_messages), which drives the Messages badge.
+  async function markRead() {
+    const { error } = await supabase.from("chat_messages").update({ read_at: new Date().toISOString() })
+      .eq("gig_id", gigId).neq("sender_id", currentUserId).is("read_at", null);
+    if (!error) window.dispatchEvent(new Event("esg:messages-read"));
+  }
+
   useEffect(() => {
     let active = true;
     supabase
@@ -27,7 +35,10 @@ export default function ChatPanel({
       .eq("gig_id", gigId)
       .order("created_at", { ascending: true })
       .then(({ data }) => {
-        if (active) setMessages((data as ChatMessage[]) ?? []);
+        if (!active) return;
+        const rows = (data as ChatMessage[]) ?? [];
+        setMessages(rows);
+        if (rows.some((m) => m.sender_id !== currentUserId && !m.read_at)) void markRead();
       });
 
     const channel = supabase
@@ -37,6 +48,7 @@ export default function ChatPanel({
         { event: "INSERT", schema: "public", table: "chat_messages", filter: `gig_id=eq.${gigId}` },
         (payload) => {
           setMessages((prev) => [...prev, payload.new as ChatMessage]);
+          if ((payload.new as ChatMessage).sender_id !== currentUserId) void markRead();
         }
       )
       .subscribe();
@@ -45,7 +57,9 @@ export default function ChatPanel({
       active = false;
       supabase.removeChannel(channel);
     };
-  }, [gigId, supabase]);
+  // markRead only closes over gigId/currentUserId, which are already dependencies.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gigId, currentUserId, supabase]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -86,7 +100,7 @@ export default function ChatPanel({
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && send()}
             placeholder="Message…"
-            className="flex-1 rounded-lg border border-neutral-300 px-3 py-1.5 text-sm"
+            className="flex-1 rounded-lg border border-neutral-300 px-3 py-1.5"
           />
           <button
             onClick={send}

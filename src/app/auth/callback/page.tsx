@@ -48,7 +48,7 @@ function CallbackInner() {
     return () => { alive = false; };
   }, [supabase, router, next]);
   return <div className="space-y-3 p-8 text-center">
-    {error ? <><p role="alert">{error}</p><Link className="text-emerald-700" href={`/auth/sign-in?next=${encodeURIComponent(next)}`}>Sign In</Link>{" · "}<Link href={`/auth/sign-up?next=${encodeURIComponent(next)}`}>Register / request confirmation</Link></> : <p>Confirming your account…</p>}
+    {error ? <><p role="alert">{error}</p><Link className="touch-link text-emerald-700" href={`/auth/sign-in?next=${encodeURIComponent(next)}`}>Sign In</Link>{" · "}<Link className="touch-link" href={`/auth/sign-up?next=${encodeURIComponent(next)}`}>Register / request confirmation</Link></> : <p>Confirming your account…</p>}
   </div>;
 }
 export default function AuthCallback() { return <Suspense fallback={<p>Loading verification…</p>}><CallbackInner /></Suspense>; }

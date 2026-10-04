@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { safeNext, setupDestination, registrationError, passwordError, approximateCoordinates, gigInputError, friendlyError, rpcActionError } from "../src/lib/journey.ts";
 import { generalAreaLabel } from "../src/lib/geocoding.ts";
+import { posterSection, helperSection, helperBadge, proposalCountLabel, timeAgo } from "../src/lib/my-gigs.ts";
 import { SERVICE_TYPES } from "../src/lib/services.ts";
 
 for (const value of [null, "https://evil.invalid", "//evil.invalid", "javascript:alert(1)", "/\\evil.invalid", "/%2f/evil.invalid", "/%255c%255cevil.invalid", "/post\n", "/auth/callback", "/onboarding", "/unknown", "/post?x=%0aevil", "/post?x=%ZZ"]) {
@@ -68,6 +69,61 @@ test("the gig page never renders a raw RPC error message", async () => {
   const source = await readFile(new URL("../src/app/gigs/[id]/page.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(source, /setError\(actionError\.message\)/);
   assert.match(source, /rpcActionError\(actionError\)/);
+});
+test("mobile app shell: full-screen viewport, installable manifest, safe-area padding and 44px touch targets", async () => {
+  const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
+  const layout = await read("../src/app/layout.tsx");
+  assert.match(layout, /viewportFit: "cover"/, "uses the full screen on notched phones");
+  assert.match(layout, /themeColor/);
+  assert.match(layout, /appleWebApp: \{ capable: true/);
+  const manifest = await read("../src/app/manifest.ts");
+  assert.match(manifest, /display: "standalone"/);
+  assert.match(manifest, /start_url: "\/"/);
+  assert.match(manifest, /sizes: "512x512"/);
+  const nav = await read("../src/components/Nav.tsx");
+  assert.match(nav, /pt-\[env\(safe-area-inset-top\)\]/, "header clears the status bar/notch");
+  assert.match(nav, /pb-\[env\(safe-area-inset-bottom\)\]/, "bottom tab bar clears the home indicator");
+  const css = await read("../src/app/globals.css");
+  assert.match(css, /min-height: 2\.75rem/, "buttons and fields are at least 44px tall");
+  assert.match(css, /touch-action: manipulation/);
+  assert.match(css, /\.touch-link/);
+  assert.match(css, /\.check-row/);
+});
+test("My Gigs sections are derived only from existing statuses and claim states", () => {
+  const gig = (status, selected_provider_id = null) => ({ status, selected_provider_id });
+  assert.deepEqual(
+    ["draft", "active", "in_progress", "awaiting_payment", "completed", "incomplete", "disputed", "cancelled"].map((status) => posterSection(gig(status))),
+    ["draft", "open", "in_progress", "in_progress", "completed", "completed", "disputed", "cancelled"]);
+  assert.equal(posterSection(gig("active", "h")), "accepted", "a selected helper on an active gig is 'accepted'");
+  const me = "me";
+  assert.equal(helperSection(gig("active"), "pending", me), "proposals");
+  assert.equal(helperSection(gig("active", me), "selected", me), "accepted");
+  assert.equal(helperSection(gig("in_progress", me), "selected", me), "in_progress");
+  assert.equal(helperSection(gig("awaiting_payment", me), "selected", me), "in_progress");
+  assert.equal(helperSection(gig("incomplete", me), "selected", me), "completed");
+  assert.equal(helperSection(gig("disputed", me), "selected", me), "disputed");
+  assert.equal(helperSection(gig("active", "someone-else"), "rejected", me), "closed", "another helper was chosen");
+  assert.equal(helperSection(gig("cancelled"), "rejected", me), "closed");
+  assert.equal(helperSection(gig("active"), "withdrawn", me), "closed");
+  assert.deepEqual(helperBadge("proposals", gig("active"), "pending"), { label: "Proposal pending", tone: "pending" });
+  assert.equal(helperBadge("closed", gig("cancelled"), "rejected").label, "Gig cancelled");
+  assert.equal(helperBadge("closed", gig("active", "x"), "rejected").label, "Not selected");
+  assert.equal(helperBadge("closed", gig("active"), "withdrawn").label, "Withdrawn");
+  assert.equal(proposalCountLabel(1), "1 proposal");
+  assert.equal(proposalCountLabel(3), "3 proposals");
+});
+test("relative times for the Messages inbox", () => {
+  const now = Date.parse("2026-10-10T12:00:00Z");
+  assert.equal(timeAgo("2026-10-10T11:59:40Z", now), "now");
+  assert.equal(timeAgo("2026-10-10T11:58:00Z", now), "2m");
+  assert.equal(timeAgo("2026-10-10T09:00:00Z", now), "3h");
+  assert.equal(timeAgo("2026-10-08T12:00:00Z", now), "2d");
+});
+test("/messages and My Gigs deep links survive sign-in via next", () => {
+  assert.equal(safeNext("/messages"), "/messages");
+  assert.equal(safeNext("/my-gigs?tab=helping"), "/my-gigs?tab=helping");
+  assert.equal(safeNext("/gigs/12345678-1234-1234-1234-123456789012#proposals"), "/gigs/12345678-1234-1234-1234-123456789012#proposals");
+  assert.equal(safeNext("/messages/../../evil"), "/");
 });
 test("existing catalog retained", () => assert.deepEqual(SERVICE_TYPES, ["Yard Work", "Moving Help", "Cleaning", "Handyman", "Delivery", "Pet Care", "Tech Help", "Other"]));
 test("database validation uses the same POC catalog", async () => {

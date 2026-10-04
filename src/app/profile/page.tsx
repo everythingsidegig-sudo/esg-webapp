@@ -1,6 +1,7 @@
 "use client";
 
 import AuthGuard from "@/components/AuthGuard";
+import LogoutButton from "@/components/LogoutButton";
 import OptionSheet from "@/components/OptionSheet";
 import SelectionChip from "@/components/SelectionChip";
 import { useEffect, useRef, useState } from "react";
@@ -266,7 +267,7 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
         : <div className="flex h-16 w-16 items-center justify-center rounded-full bg-neutral-200 text-xl">👤</div>}
       <div>
         <h1 className="text-lg font-semibold">@{profile.username}</h1>
-        <label className="cursor-pointer text-sm text-emerald-700">Change photo
+        <label className="inline-flex min-h-11 cursor-pointer items-center text-sm text-emerald-700">Change photo
           <input type="file" accept="image/jpeg,image/png,image/webp" disabled={saving} className="hidden" onChange={(e) => { if (e.target.files?.[0]) void uploadPhoto(e.target.files[0]); }} />
         </label>
       </div>
@@ -292,7 +293,7 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
                 <span key={tag.id} className="inline-flex items-center rounded-full bg-neutral-100 pl-3 text-sm text-neutral-800">
                   {tag.name}
                   <button type="button" onClick={() => toggleSpecializationTag(skill, tag.id)} aria-label={`Remove ${tag.name}`}
-                    className="flex h-9 w-9 items-center justify-center rounded-full text-neutral-500 hover:text-neutral-900">✕</button>
+                    className="flex h-11 w-11 items-center justify-center rounded-full text-neutral-500 hover:text-neutral-900">✕</button>
                 </span>
               ))}
               {chosenSpecializations.length === 0 && <span className="text-sm text-neutral-500">None added yet.</span>}
@@ -337,6 +338,10 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
         {locationError && <p role="alert" className="text-sm text-red-600">{locationError}</p>}
       </div>
     )}
+
+    <div className="sm:hidden">
+      <LogoutButton className="flex w-full items-center justify-center rounded-lg border border-neutral-300 bg-white px-4 py-2.5 font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-60" />
+    </div>
 
     <div className="space-y-3 rounded-lg border border-red-200 bg-red-50 p-4">
       <h2 className="text-sm font-semibold text-red-700">Danger zone</h2>

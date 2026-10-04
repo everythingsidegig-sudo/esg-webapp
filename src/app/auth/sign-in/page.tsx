@@ -68,7 +68,7 @@ function SignInInner() {
       <div>
         <div className="mb-1 flex items-center justify-between gap-3">
           <label htmlFor="signin-password" className="text-sm font-medium">Password</label>
-          <Link href="/auth/forgot-password" className="text-sm font-medium text-emerald-700">Forgot password?</Link>
+          <Link href="/auth/forgot-password" className="touch-link text-sm font-medium text-emerald-700">Forgot password?</Link>
         </div>
         <div className="relative">
           <input
@@ -101,9 +101,9 @@ function SignInInner() {
         {submitting ? "Signing in…" : "Sign In"}
       </button>
 
-      <p className="text-center text-sm text-neutral-500">
+      <p className="flex flex-wrap items-center justify-center gap-x-1 text-sm text-neutral-500">
         New user?{" "}
-        <Link href={`/auth/sign-up?next=${encodeURIComponent(next)}`} className="font-medium text-emerald-700">
+        <Link href={`/auth/sign-up?next=${encodeURIComponent(next)}`} className="touch-link font-medium text-emerald-700">
           Register
         </Link>
       </p>
