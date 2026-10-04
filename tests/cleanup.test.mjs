@@ -64,6 +64,7 @@ async function component(path, name, overrides = {}) {
     "@/lib/tags": {
       loadTagCatalog: async () => ({}),
       gigTagNames: (gig) => (gig.gig_tags ?? []).map((link) => link.tag.name),
+      withProfileTags: async (_supabase, rows) => rows,
       profileTagsForCategory: (profile, serviceType) => (profile.profile_tags ?? []).map((link) => link.tag).filter((tag) => tag.service_type === serviceType),
       MAX_GIG_TAGS: 8,
       MAX_PROFILE_TAGS: 8,
@@ -91,6 +92,8 @@ function nodes(tree, predicate) {
   const children = Array.isArray(tree.props?.children) ? tree.props.children.flat(Infinity) : [tree.props?.children];
   return [...(predicate(tree) ? [tree] : []), ...children.flatMap((child) => nodes(child, predicate))];
 }
+const textOf = (node) => [node?.props?.children].flat(Infinity)
+  .map((child) => (typeof child === "string" || typeof child === "number" ? String(child) : child?.props ? textOf(child) : "")).join("");
 const button = (tree, label) => nodes(tree, (node) => node.type === "button" && node.props.children === label)[0];
 // Profile specializations: removable chips in one place, added via a bottom sheet.
 const editSpecializations = (tree) => nodes(tree, (node) => node.type === "button" && node.props["aria-label"] === "Add specializations")[0];
@@ -801,7 +804,7 @@ function helperClient(profiles) {
     then: (resolve, reject) => Promise.resolve({ data: profiles.filter((p) => p.skills.includes(value[0])), error: null }).then(resolve, reject),
   }) }) }) };
 }
-const helperTagsMock = { profileTagsForCategory: (profile, category) => (profile.profile_tags ?? []).map((link) => link.tag).filter((tag) => tag.service_type === category) };
+const helperTagsMock = { withProfileTags: async (_supabase, rows) => rows, profileTagsForCategory: (profile, category) => (profile.profile_tags ?? []).map((link) => link.tag).filter((tag) => tag.service_type === category) };
 // HelperCard is a locally-defined component used via JSX (<HelperCard .../>);
 // this harness never auto-invokes custom function components (only host
 // elements and pre-mocked string types), so — same workaround already used
@@ -1788,3 +1791,89 @@ for (const flow of [
     assert.equal(nodes(app.render(), (node) => node.props.role === "alert").length, 1);
   });
 }
+
+test("withProfileTags attaches tags per profile in the embed shape, in batches, and surfaces query errors", async () => {
+  const source = await readFile(new URL("../src/lib/tags.ts", import.meta.url), "utf8");
+  const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+  const loaded = { exports: {} };
+  runInNewContext(`(function(require, module, exports) { ${code}
+})`, {})((id) => ({}), loaded, loaded.exports);
+  const { withProfileTags } = loaded.exports;
+  const queries = [];
+  const links = [{ profile_id: "p1", tag: { id: "t1", name: "Deep Cleaning", service_type: "Cleaning" } }, { profile_id: "p1", tag: { id: "t2", name: "Kitchen", service_type: "Cleaning" } }];
+  const client = (error) => ({ from: (table) => ({ select: (columns) => ({ in: async (column, ids) => {
+    queries.push({ table, columns, column, count: ids.length });
+    return error ? { data: null, error } : { data: links.filter((link) => ids.includes(link.profile_id)), error: null };
+  } }) }) });
+  const profiles = [{ id: "p1", username: "A" }, { id: "p2", username: "B" }];
+  const result = JSON.parse(JSON.stringify(await withProfileTags(client(null), profiles)));
+  assert.deepEqual(result.map((row) => [row.username, row.profile_tags.map((link) => link.tag.name)]), [["A", ["Deep Cleaning", "Kitchen"]], ["B", []]]);
+  assert.deepEqual(queries[0], { table: "profile_tags", columns: "profile_id, tag:tags(id,name,service_type)", column: "profile_id", count: 2 }, "queries profile_tags directly, never an embed on public_profiles");
+  queries.length = 0;
+  await withProfileTags(client(null), Array.from({ length: 250 }, (_, i) => ({ id: `x${i}` })));
+  assert.deepEqual(queries.map((query) => query.count), [100, 100, 50]);
+  assert.deepEqual(await withProfileTags(client(null), []), []);
+  await assert.rejects(() => withProfileTags(client(new Error("boom")), profiles), /boom/);
+});
+
+test("Find a Helper and public profiles never embed profile_tags in a public_profiles query (no such relationship exists)", async () => {
+  for (const path of ["../src/app/find-helper/page.tsx", "../src/app/profile/[username]/page.tsx"]) {
+    assert.doesNotMatch(await readFile(new URL(path, import.meta.url), "utf8"), /select\("\*, profile_tags/, path);
+  }
+});
+
+// Regression: hosted public_profiles has no relationship to profile_tags, so helpers
+// are loaded in two requests. These tests run the real withProfileTags() against a
+// client that answers each table the way PostgREST does -- public_profiles rows carry
+// no profile_tags field, and a helper with no tags simply has no profile_tags rows.
+async function yardWorkHelperPage(profiles, tagLinks = []) {
+  const source = await readFile(new URL("../src/lib/tags.ts", import.meta.url), "utf8");
+  const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+  const loaded = { exports: {} };
+  runInNewContext(`(function(require, module, exports) { ${code}\n})`, {})(() => ({}), loaded, loaded.exports);
+  const queries = [];
+  const client = { from: (table) => ({ select: (columns) => {
+    queries.push({ table, columns });
+    if (table === "public_profiles") return { contains: (_column, value) => ({
+      then: (resolve, reject) => Promise.resolve({ data: profiles.filter((p) => p.skills.includes(value[0])), error: null }).then(resolve, reject),
+    }) };
+    return { in: async (_column, ids) => ({ data: tagLinks.filter((link) => ids.includes(link.profile_id)), error: null }) };
+  } }) };
+  const app = await component("src/app/find-helper/page.tsx", "FindHelper", {
+    client,
+    mocks: {
+      "@/lib/services": { SERVICE_TYPES: ["Yard Work", "Cleaning"], SPECIALIZATION_PROMPTS: { "Yard Work": "What kind of yard work?" } },
+      "@/lib/tags": { ...loaded.exports, loadTagCatalog: async () => ({}) },
+      "@/lib/location": originLocationMock,
+    },
+  });
+  app.render(); await flush();
+  let tree = app.render();
+  nodes(tree, (node) => node.type === "selection-chip" && node.props.children === "Yard Work")[0].props.onClick();
+  tree = app.render(); await flush();
+  return { app, queries, tree: app.render() };
+}
+const noTagsNoLocationHelper = { id: "b", username: "AccountB", photo_url: null, skills: ["Yard Work"], wom_count: 0, public_location_text: null, public_lat: null, public_lng: null };
+
+test("Find a Helper: a Yard Work helper with no profile_tags and no public location appears for the category with Any distance", async () => {
+  const other = { id: "c", username: "CleaningOnly", photo_url: null, skills: ["Cleaning"], wom_count: 0, public_lat: null, public_lng: null };
+  const { tree, queries } = await yardWorkHelperPage([noTagsNoLocationHelper, other]);
+  assert.equal(nodes(tree, (node) => node.props.role === "alert").length, 0, "no load error");
+  assert.equal(nodes(tree, (node) => /Couldn't load helpers/.test(textOf(node))).length, 0);
+  assert.deepEqual(helperUsernames(tree), ["AccountB"], "found by category skill alone; other categories excluded");
+  assert.equal(nodes(tree, (node) => node.props.children === "Matching specializations").length, 0, "no specialization filter is applied unless one is selected");
+  assert.deepEqual(queries.map((query) => query.table), ["public_profiles", "profile_tags"]);
+  assert.equal(queries[0].columns, "*", "public_profiles is queried without embedding profile_tags");
+});
+
+test("Find a Helper: a helper without public coordinates shows for Any distance and is excluded for 5, 10 and 25 km", async () => {
+  const located = { id: "a", username: "NearHelper", photo_url: null, skills: ["Yard Work"], wom_count: 1, public_lat: 0.01, public_lng: 0 };
+  const { app, tree: first } = await yardWorkHelperPage([noTagsNoLocationHelper, located]);
+  assert.deepEqual(helperUsernames(first).sort(), ["AccountB", "NearHelper"], "Any distance (default) includes the helper with no coordinates");
+  for (const radius of ["5", "10", "25"]) {
+    nodes(app.render(), (node) => node.type === "select")[0].props.onChange({ target: { value: radius } });
+    assert.deepEqual(helperUsernames(app.render()), ["NearHelper"], `${radius} km excludes the helper with no public coordinates`);
+  }
+  nodes(app.render(), (node) => node.type === "select")[0].props.onChange({ target: { value: "" } });
+  assert.deepEqual(helperUsernames(app.render()).sort(), ["AccountB", "NearHelper"], "back to Any distance, the helper returns");
+});

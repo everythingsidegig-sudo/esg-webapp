@@ -5,9 +5,9 @@ import Link from "next/link";
 import SelectionChip from "@/components/SelectionChip";
 import TagChip from "@/components/TagChip";
 import { createClient } from "@/lib/supabase/client";
-import type { PublicProfileWithTags, Tag } from "@/lib/database.types";
+import type { PublicProfile, PublicProfileWithTags, Tag } from "@/lib/database.types";
 import { SERVICE_TYPES, SPECIALIZATION_PROMPTS } from "@/lib/services";
-import { loadTagCatalog, profileTagsForCategory } from "@/lib/tags";
+import { loadTagCatalog, profileTagsForCategory, withProfileTags } from "@/lib/tags";
 import { haversineKm, loadJourneyLocation } from "@/lib/location";
 
 const DISTANCE_OPTIONS = [
@@ -77,12 +77,20 @@ export default function FindHelper() {
     let active = true;
     supabase
       .from("public_profiles")
-      .select("*, profile_tags(tag:tags(id,name,service_type))")
+      .select("*")
       .contains("skills", [category])
-      .then(({ data, error }) => {
+      .then(async ({ data, error }) => {
+        if (error) throw error;
+        return withProfileTags(supabase, (data as PublicProfile[] | null) ?? []);
+      })
+      .then((rows) => {
         if (!active) return;
-        if (error) setError("Couldn't load helpers. Please refresh and try again.");
-        setHelpers((data as PublicProfileWithTags[]) ?? []);
+        setHelpers(rows);
+        setLoading(false);
+      }, () => {
+        if (!active) return;
+        setError("Couldn't load helpers. Please refresh and try again.");
+        setHelpers([]);
         setLoading(false);
       });
     return () => { active = false; };

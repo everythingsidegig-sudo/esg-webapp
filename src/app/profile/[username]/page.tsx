@@ -3,8 +3,8 @@
 import { use, useEffect, useState } from "react";
 import TagChip from "@/components/TagChip";
 import { createClient } from "@/lib/supabase/client";
-import { profileTagsForCategory } from "@/lib/tags";
-import type { PublicProfileWithTags } from "@/lib/database.types";
+import { profileTagsForCategory, withProfileTags } from "@/lib/tags";
+import type { PublicProfile, PublicProfileWithTags } from "@/lib/database.types";
 
 function PublicProfileView({ username }: { username: string }) {
   const supabase = createClient();
@@ -14,15 +14,16 @@ function PublicProfileView({ username }: { username: string }) {
   useEffect(() => {
     supabase
       .from("public_profiles")
-      .select("*, profile_tags(tag:tags(id,name,service_type))")
+      .select("*")
       .eq("username", username)
       .maybeSingle()
       .then(async ({ data }) => {
-        setProfile((data as PublicProfileWithTags) ?? null);
-        if (data) {
-          const { data: stats } = await supabase.rpc("get_public_stats", { p_profile_id: data.id });
-          setGigsWorked(stats?.[0]?.gigs_worked_count ?? 0);
-        }
+        if (!data) { setProfile(null); return; }
+        // A tag lookup failure must not hide the profile itself.
+        const [withTags] = await withProfileTags(supabase, [data as PublicProfile]).catch(() => [{ ...(data as PublicProfile), profile_tags: [] }]);
+        setProfile(withTags);
+        const { data: stats } = await supabase.rpc("get_public_stats", { p_profile_id: data.id });
+        setGigsWorked(stats?.[0]?.gigs_worked_count ?? 0);
       });
   }, [supabase, username]);
 

@@ -52,7 +52,7 @@ export interface ProfileTag {
   tag_id: string;
 }
 
-// PostgREST embed shape: public_profiles.select("*, profile_tags(tag:tags(id,name,service_type))").
+// Shape produced by withProfileTags() in lib/tags.ts (profile_tags cannot be embedded from public_profiles).
 export type PublicProfileWithTags = PublicProfile & { profile_tags?: { tag: { id: string; name: string; service_type: string } }[] };
 
 export interface Gig {
