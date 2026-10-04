@@ -887,9 +887,21 @@ test("Browse tag filter appears after choosing a category and narrows results", 
   assert.deepEqual(results(), ["/gigs/g1"], "selecting a tag narrows to matching gigs");
 });
 
-function helperClient(profiles) {
-  return { from: () => ({ select: () => ({ contains: (_column, value) => ({
-    then: (resolve, reject) => Promise.resolve({ data: profiles.filter((p) => p.skills.includes(value[0])), error: null }).then(resolve, reject),
+// public_profiles.skills is JSONB. Mirrors how postgrest-js serializes .contains() and how
+// PostgREST then treats it, so a wrong argument shape fails here as it does against the
+// real project: an array becomes the PostgreSQL-array literal cs.{Yard Work}, which a jsonb
+// column rejects with 22P02 (HTTP 400); a JSON string becomes cs.["Yard Work"], which works.
+function skillsContains(profiles, filters, column, value) {
+  const serialized = typeof value === "string" ? `cs.${value}` : Array.isArray(value) ? `cs.{${value.join(",")}}` : `cs.${JSON.stringify(value)}`;
+  filters.push(`${column}=${serialized}`);
+  const body = serialized.slice(3);
+  if (column !== "skills" || !body.startsWith("[")) return { data: null, error: { code: "22P02", message: "invalid input syntax for type json" } };
+  const wanted = JSON.parse(body);
+  return { data: profiles.filter((p) => wanted.every((skill) => p.skills.includes(skill))), error: null };
+}
+function helperClient(profiles, filters = []) {
+  return { from: () => ({ select: () => ({ contains: (column, value) => ({
+    then: (resolve, reject) => Promise.resolve(skillsContains(profiles, filters, column, value)).then(resolve, reject),
   }) }) }) };
 }
 const helperTagsMock = { withProfileTags: async (_supabase, rows) => rows, profileTagsForCategory: (profile, category) => (profile.profile_tags ?? []).map((link) => link.tag).filter((tag) => tag.service_type === category) };
@@ -2390,7 +2402,7 @@ test("Find a Helper and public profiles never embed profile_tags in a public_pro
 // are loaded in two requests. These tests run the real withProfileTags() against a
 // client that answers each table the way PostgREST does -- public_profiles rows carry
 // no profile_tags field, and a helper with no tags simply has no profile_tags rows.
-async function yardWorkHelperPage(profiles, tagLinks = []) {
+async function yardWorkHelperPage(profiles, tagLinks = [], filters = []) {
   const source = await readFile(new URL("../src/lib/tags.ts", import.meta.url), "utf8");
   const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   const loaded = { exports: {} };
@@ -2398,8 +2410,8 @@ async function yardWorkHelperPage(profiles, tagLinks = []) {
   const queries = [];
   const client = { from: (table) => ({ select: (columns) => {
     queries.push({ table, columns });
-    if (table === "public_profiles") return { contains: (_column, value) => ({
-      then: (resolve, reject) => Promise.resolve({ data: profiles.filter((p) => p.skills.includes(value[0])), error: null }).then(resolve, reject),
+    if (table === "public_profiles") return { contains: (column, value) => ({
+      then: (resolve, reject) => Promise.resolve(skillsContains(profiles, filters, column, value)).then(resolve, reject),
     }) };
     return { in: async (_column, ids) => ({ data: tagLinks.filter((link) => ids.includes(link.profile_id)), error: null }) };
   } }) };
@@ -2428,6 +2440,18 @@ test("Find a Helper: a Yard Work helper with no profile_tags and no public locat
   assert.equal(nodes(tree, (node) => node.props.children === "Matching specializations").length, 0, "no specialization filter is applied unless one is selected");
   assert.deepEqual(queries.map((query) => query.table), ["public_profiles", "profile_tags"]);
   assert.equal(queries[0].columns, "*", "public_profiles is queried without embedding profile_tags");
+});
+
+test("Find a Helper filters the JSONB skills column with a JSON containment value, never a PostgreSQL array literal", async () => {
+  const filters = [];
+  const { tree } = await yardWorkHelperPage([noTagsNoLocationHelper], [], filters);
+  assert.deepEqual(filters, ["skills=cs.[\"Yard Work\"]"], "exact PostgREST filter sent for category Yard Work");
+  assert.doesNotMatch(filters[0], /cs.{/, "must not be the array form cs.{Yard Work}");
+  assert.deepEqual(helperUsernames(tree), ["AccountB"], "the helper is returned, not a load error");
+  assert.equal(nodes(tree, (node) => node.props.role === "alert").length, 0);
+  // The harness rejects the array form exactly as the hosted jsonb column does.
+  assert.equal(skillsContains([], [], "skills", ["Yard Work"]).error.code, "22P02");
+  assert.equal(skillsContains([], [], "skills", JSON.stringify(["Yard Work"])).error, null);
 });
 
 test("Find a Helper: a helper without public coordinates shows for Any distance and is excluded for 5, 10 and 25 km", async () => {

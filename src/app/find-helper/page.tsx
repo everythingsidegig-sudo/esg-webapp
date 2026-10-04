@@ -78,7 +78,9 @@ export default function FindHelper() {
     supabase
       .from("public_profiles")
       .select("*")
-      .contains("skills", [category])
+      // skills is JSONB: a JS array would be sent as the PostgreSQL array literal cs.{Yard Work}
+      // (22P02 / HTTP 400), so pass the JSON text to get cs.["Yard Work"].
+      .contains("skills", JSON.stringify([category]))
       .then(async ({ data, error }) => {
         if (error) throw error;
         return withProfileTags(supabase, (data as PublicProfile[] | null) ?? []);
