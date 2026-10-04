@@ -11,6 +11,7 @@ import { approximateCoordinates, friendlyError } from "@/lib/journey";
 import { reverseGeocodeGeneralArea, clearGeneralAreaState } from "@/lib/location";
 import { SERVICE_TYPES, SPECIALIZATION_PROMPTS } from "@/lib/services";
 import { loadTagCatalog, MAX_PROFILE_TAGS } from "@/lib/tags";
+import { formatMoney } from "@/lib/money";
 import type { Profile as ProfileRow, Tag } from "@/lib/database.types";
 
 const ALL_SKILLS = "*";
@@ -273,7 +274,7 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
     <div className="grid grid-cols-3 gap-3 text-center">
       <div className="rounded-lg border border-neutral-200 bg-white p-3"><div className="text-lg font-semibold">{total ? `${Math.round(profile.wom_count / total * 100)}%` : "—"}</div><div className="text-xs text-neutral-500">WOM%</div></div>
       <div className="rounded-lg border border-neutral-200 bg-white p-3"><div className="text-lg font-semibold">{profile.lemon_count}</div><div className="text-xs text-neutral-500">Lemons (private)</div></div>
-      <div className="rounded-lg border border-neutral-200 bg-white p-3"><div className="text-lg font-semibold">${Number(profile.money_made).toFixed(2)}</div><div className="text-xs text-neutral-500">Money Made (private)</div></div>
+      <div className="rounded-lg border border-neutral-200 bg-white p-3"><div className="text-lg font-semibold">{formatMoney(profile.money_made)}</div><div className="text-xs text-neutral-500">Money Made (private)</div></div>
     </div>
     <form onSubmit={saveProfile} className="space-y-3 rounded-lg border border-neutral-200 bg-white p-4">
       <fieldset disabled={saving} className="space-y-3">

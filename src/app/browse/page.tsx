@@ -6,6 +6,7 @@ import SelectionChip from "@/components/SelectionChip";
 import TagChip from "@/components/TagChip";
 import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { formatMoney } from "@/lib/money";
 import type { GigWithTags, Tag } from "@/lib/database.types";
 import { SERVICE_TYPES as CATEGORIES } from "@/lib/services";
 import { loadTagCatalog, gigTagNames } from "@/lib/tags";
@@ -127,7 +128,7 @@ function BrowseInner() {
           >
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium uppercase tracking-wide text-emerald-700">{gig.service_type}</span>
-              <span className="font-semibold">${gig.amount}</span>
+              <span className="font-semibold">{formatMoney(gig.amount)}</span>
             </div>
             <div className="mt-1 font-medium">{gig.title}</div>
             <div className="mt-1 text-sm text-neutral-500">

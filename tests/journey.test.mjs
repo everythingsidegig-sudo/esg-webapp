@@ -64,6 +64,11 @@ test("lifecycle RPC errors: only our own raised messages are shown, everything e
     null,
   ]) assert.equal(rpcActionError(error), "Couldn't complete that action. Please try again.");
 });
+test("the gig page never renders a raw RPC error message", async () => {
+  const source = await readFile(new URL("../src/app/gigs/[id]/page.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /setError\(actionError\.message\)/);
+  assert.match(source, /rpcActionError\(actionError\)/);
+});
 test("existing catalog retained", () => assert.deepEqual(SERVICE_TYPES, ["Yard Work", "Moving Help", "Cleaning", "Handyman", "Delivery", "Pet Care", "Tech Help", "Other"]));
 test("database validation uses the same POC catalog", async () => {
   const sql = await readFile(new URL("../supabase/migrations/20240101000004_onboarding_post_gig.sql", import.meta.url), "utf8");

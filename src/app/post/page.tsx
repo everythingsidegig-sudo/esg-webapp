@@ -7,8 +7,9 @@ import SelectionChip from "@/components/SelectionChip";
 import { useAuth } from "@/lib/auth-context";
 import { createClient } from "@/lib/supabase/client";
 import { approximateCoordinates, friendlyError, gigInputError } from "@/lib/journey";
-import { loadJourneyLocation } from "@/lib/location";
+import { loadJourneyLocation, reverseGeocodeGeneralArea } from "@/lib/location";
 import { SERVICE_TYPES } from "@/lib/services";
+import { CURRENCY } from "@/lib/money";
 import { loadTagCatalog, MAX_GIG_TAGS } from "@/lib/tags";
 import type { Tag } from "@/lib/database.types";
 
@@ -16,7 +17,7 @@ interface CreationRequest {
   p_request_id: string; p_service_type: string; p_title: string; p_description: string;
   p_amount: number; p_price_type: string; p_scheduled_at: string | null;
   p_location_text: string; p_lat: number | null; p_lng: number | null;
-  p_photo_url: string | null; p_publish: boolean; p_tag_ids: string[];
+  p_photo_url: string | null; p_publish: boolean; p_tag_ids: string[]; p_private_address?: string | null;
 }
 function readPending(key: string): CreationRequest | null {
   try {
@@ -47,10 +48,13 @@ function PostGigForm() {
   const [scheduledAt, setScheduledAt] = useState(localDate(retained?.p_scheduled_at));
   const [locationText, setLocationText] = useState(retained?.p_location_text ?? (initialLocation.text || params.get("loc") || ""));
   const [coordinates, setCoordinates] = useState({ lat: retained?.p_lat ?? initialLocation.lat, lng: retained?.p_lng ?? initialLocation.lng });
+  const [privateAddress, setPrivateAddress] = useState(retained?.p_private_address ?? "");
   const [photo, setPhoto] = useState<File | null>(null);
   const [uploadedPhoto, setUploadedPhoto] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [locating, setLocating] = useState(false);
+  const [locationNotice, setLocationNotice] = useState<string | null>(null);
   const pending = useRef(false);
   const input = "w-full rounded-lg border border-neutral-300 px-3 py-2";
 
@@ -59,6 +63,27 @@ function PostGigForm() {
     loadTagCatalog(supabase).then((catalog) => { if (active) setTagCatalog(catalog); }).catch(() => {});
     return () => { active = false; };
   }, [supabase]);
+
+  // Same behavior as the profile helper-location button: rounded coordinates
+  // only, resolved to a locality label; never the literal "Current location".
+  function useMyLocation() {
+    if (locating) return;
+    setLocationNotice(null);
+    if (!navigator.geolocation) { setLocationNotice("Geolocation isn't available in this browser. Enter an area manually."); return; }
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(async (position) => {
+      try {
+        const approx = approximateCoordinates(position.coords.latitude, position.coords.longitude) as { lat: number; lng: number };
+        setCoordinates(approx);
+        const label = await reverseGeocodeGeneralArea(approx.lat, approx.lng);
+        if (label) setLocationText(label);
+        else setLocationNotice("Couldn't determine your area automatically. Enter it manually.");
+      } catch {
+        setLocationNotice("Couldn't determine your area automatically. Enter it manually.");
+      } finally { setLocating(false); }
+    }, () => { setLocationNotice("We couldn't access your location. Enter your area manually."); setLocating(false); },
+    { timeout: 10000, maximumAge: 60000 });
+  }
 
   function toggleTag(id: string) {
     setTagIds((current) => current.includes(id) ? current.filter((item) => item !== id)
@@ -92,7 +117,8 @@ function PostGigForm() {
           p_title: title.trim(), p_description: description.trim(), p_amount: Number(amount),
           p_price_type: "fixed", p_scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null,
           p_location_text: locationText.trim(), p_lat: coords.lat, p_lng: coords.lng,
-          p_photo_url: photoUrl, p_publish: publish, p_tag_ids: tagIds };
+          p_photo_url: photoUrl, p_publish: publish, p_tag_ids: tagIds,
+          p_private_address: privateAddress.trim() || null };
         // Preserve the request before sending. Ambiguous network failures reuse this ID/payload.
         try { sessionStorage.setItem(key, JSON.stringify(request)); } catch {
           setError("Browser storage is unavailable. Enable site storage before posting so retries stay safe."); return;
@@ -145,11 +171,15 @@ function PostGigForm() {
       <label className="block">Gig Title<input required maxLength={120} value={title} onChange={(e) => setTitle(e.target.value)} className={input} /></label>
       <label className="block">Brief Description<textarea required maxLength={280} rows={3} value={description} onChange={(e) => setDescription(e.target.value)} className={input} /></label>
       <label className="block">Photo (optional)<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => { setPhoto(e.target.files?.[0] ?? null); setUploadedPhoto(null); }} /></label>
-      <label className="block">Amount ($)<input type="number" min="0.01" step="0.01" required value={amount} onChange={(e) => setAmount(e.target.value)} className={input} /></label>
+      <label className="block">Budget ({CURRENCY})<input type="number" min="0.01" step="0.01" required value={amount} onChange={(e) => setAmount(e.target.value)} className={input} /></label>
       <p className="text-sm">Pricing: Fixed</p>
       <label className="block">Expected Date/Time<input type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} className={input} /></label>
       <label className="block">Approximate Location<input maxLength={200} value={locationText} onChange={(e) => { setLocationText(e.target.value); setCoordinates({ lat: null, lng: null }); }} className={input} /></label>
-      <p className="text-sm text-neutral-500">Use a neighborhood, ZIP or city. Never post your street address. Coordinates, if collected, are rounded to a general area.</p>
+      <button type="button" onClick={useMyLocation} className="text-sm font-medium text-emerald-700">{locating ? "Locating…" : "📍 Use my current location"}</button>
+      {locationNotice && <p role="status" className="text-sm text-neutral-600">{locationNotice}</p>}
+      <p className="text-sm text-neutral-500">Use a neighborhood, ZIP or city here. This is what everyone can see. Coordinates, if collected, are rounded to a general area.</p>
+      <label className="block">Exact address (optional, private)<input maxLength={300} autoComplete="street-address" value={privateAddress} onChange={(e) => setPrivateAddress(e.target.value)} className={input} /></label>
+      <p className="text-sm text-neutral-500">Only you and the helper you accept can see this. It is never shown on the gig page to anyone else.</p>
     </fieldset>
     {error && <p role="alert" className="text-red-600">{error}</p>}
     <div className="flex gap-3">

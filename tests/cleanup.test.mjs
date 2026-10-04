@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
+import * as moneyLib from "../src/lib/money.ts";
 import { approximateCoordinates, gigInputError, friendlyError, passwordError, registrationError, rpcActionError, safeNext, setupDestination } from "../src/lib/journey.ts";
 
 // location.ts has extension-less relative imports (./journey, ./geocoding) that
@@ -72,6 +73,7 @@ async function component(path, name, overrides = {}) {
     "@/components/AuthGuard": { default: "guard" },
     "@/components/SelectionChip": { default: "selection-chip" },
     "@/components/OptionSheet": { default: "option-sheet" },
+    "@/lib/money": moneyLib,
     "@/components/StatusBadge": { default: "badge" },
     "@/components/TagChip": { default: "tag-chip" },
     ...overrides.mocks,
@@ -1217,6 +1219,62 @@ test("Post Gig tag chips load for the category, toggle, clear on category change
   assert.deepEqual(JSON.parse(JSON.stringify(calls[0].payload.p_tag_ids)), ["t-errand"], "only the tag selected under the final category is submitted");
 });
 
+async function postGigLocation({ geolocation, reverse, initialText = "" }) {
+  const calls = [], lookups = [];
+  const app = await component("src/app/post/page.tsx", "PostGigForm", {
+    client: { rpc: async (name, payload) => { calls.push({ name, payload }); return { data: { id: "created", status: "active" }, error: null }; } },
+    storage: { getItem: () => null, setItem() {}, removeItem() {} },
+    globals: { navigator: { geolocation } },
+    mocks: {
+      "@/lib/location": { loadJourneyLocation: () => ({ text: initialText, lat: null, lng: null }), reverseGeocodeGeneralArea: async (lat, lng) => { lookups.push({ lat, lng }); return reverse(); } },
+      "@/lib/tags": { loadTagCatalog: async () => ({}), gigTagNames: () => [], MAX_GIG_TAGS: 8 },
+    },
+  });
+  app.render(); await flush();
+  return { app, calls, lookups, tree: app.render() };
+}
+const locationInput = (tree) => nodes(tree, (node) => node.type === "input" && node.props.maxLength === 200)[0];
+const locateButton = (tree) => nodes(tree, (node) => node.type === "button" && /Use my current location/.test(String(node.props.children)))[0];
+
+test("Post Gig offers 'Use my current location', filling a locality and submitting only rounded coordinates", async () => {
+  const { app, calls, lookups, tree: first } = await postGigLocation({
+    geolocation: { getCurrentPosition: (success) => success({ coords: { latitude: 55.789, longitude: 13.114 } }) },
+    reverse: async () => "Kävlinge, Sweden",
+  });
+  assert.ok(locateButton(first), "the option exists on the Post a Gig form");
+  locateButton(first).props.onClick(); await flush();
+  let tree = app.render();
+  assert.equal(locationInput(tree).props.value, "Kävlinge, Sweden");
+  assert.deepEqual(lookups, [{ lat: 55.79, lng: 13.11 }], "only rounded coordinates leave the browser");
+  for (const [predicate, value] of [
+    [(node) => node.type === "input" && node.props.maxLength === 120, "Test gig"],
+    [(node) => node.type === "textarea", "Test description"],
+    [(node) => node.props.type === "number", "10"],
+    [(node) => node.props.type === "datetime-local", new Date(Date.now() + 86400000).toISOString().slice(0, 16)],
+  ]) nodes(tree, predicate)[0].props.onChange({ target: { value } });
+  tree = app.render(); button(tree, "Post Gig").props.onClick(); await flush();
+  const payload = JSON.parse(JSON.stringify(calls[0].payload));
+  assert.equal(payload.p_location_text, "Kävlinge, Sweden");
+  assert.deepEqual([payload.p_lat, payload.p_lng], [55.79, 13.11]);
+});
+
+test("Post Gig 'Use my current location': denial and lookup failure never write the literal placeholder", async () => {
+  const denied = await postGigLocation({ geolocation: { getCurrentPosition: (_ok, fail) => fail() }, reverse: async () => null });
+  locateButton(denied.tree).props.onClick();
+  let tree = denied.app.render();
+  assert.equal(nodes(tree, (node) => node.props.role === "status" && node.props.children === "We couldn't access your location. Enter your area manually.").length, 1);
+  assert.equal(locationInput(tree).props.value, "");
+
+  const offline = await postGigLocation({
+    geolocation: { getCurrentPosition: (success) => success({ coords: { latitude: 55.789, longitude: 13.114 } }) },
+    reverse: async () => { throw new Error("offline"); }, initialText: "Existing area",
+  });
+  locateButton(offline.tree).props.onClick(); await flush();
+  tree = offline.app.render();
+  assert.equal(nodes(tree, (node) => node.props.role === "status" && node.props.children === "Couldn't determine your area automatically. Enter it manually.").length, 1);
+  assert.equal(locationInput(tree).props.value, "Existing area", "a failed lookup leaves what was there, never 'Current location'");
+});
+
 test("Post Gig tag selection is capped at MAX_GIG_TAGS", async () => {
   const many = Array.from({ length: 10 }, (_, i) => ({ id: `t${i}`, name: `Tag ${i}`, service_type: "Cleaning" }));
   const app = await component("src/app/post/page.tsx", "PostGigForm", {
@@ -1912,6 +1970,37 @@ for (const flow of [
     assert.equal(nodes(app.render(), (node) => node.props.role === "alert").length, 1);
   });
 }
+
+test("Post Gig sends the optional private address separately from the public location, and null when blank", async () => {
+  for (const [typed, expected] of [["  Storgatan 1, 2tr  ", "Storgatan 1, 2tr"], ["   ", null]]) {
+    const calls = [], values = new Map();
+    const app = await component("src/app/post/page.tsx", "PostGigForm", {
+      client: { rpc: async (name, payload) => { calls.push({ name, payload }); return { data: { id: "created", status: "active" }, error: null }; } },
+      storage: { getItem: (key) => values.get(key), setItem: (key, value) => values.set(key, value), removeItem: (key) => values.delete(key) },
+      mocks: { "@/lib/location": { loadJourneyLocation: () => ({ text: "Kävlinge", lat: null, lng: null }) } },
+    });
+    let tree = app.render();
+    for (const [predicate, value] of [
+      [(node) => node.type === "input" && node.props.maxLength === 120, "Test gig"],
+      [(node) => node.type === "textarea", "Test description"],
+      [(node) => node.props.type === "number", "10"],
+      [(node) => node.props.type === "datetime-local", new Date(Date.now() + 86400000).toISOString().slice(0, 16)],
+      [(node) => node.type === "input" && node.props.maxLength === 300, typed],
+    ]) nodes(tree, predicate)[0].props.onChange({ target: { value } });
+    tree = app.render(); button(tree, "Post Gig").props.onClick(); await flush();
+    assert.equal(calls[0].payload.p_private_address, expected);
+    assert.equal(calls[0].payload.p_location_text, "Kävlinge", "public location text is independent of the private address");
+    assert.doesNotMatch(textOf(tree), /undefined/);
+  }
+});
+
+test("money: amounts are shown in the single app currency and offers are validated like the server", () => {
+  assert.equal(moneyLib.formatMoney(50), "50 SEK");
+  assert.equal(moneyLib.formatMoney("1234.5"), "1,234.5 SEK");
+  assert.equal(moneyLib.formatMoney(null), "");
+  for (const bad of ["", "0", "-1", "1.234", "abc", "NaN", "Infinity", "1e3", "99999999999"]) assert.notEqual(moneyLib.offerError(bad), null, `rejects ${bad}`);
+  for (const good of ["0.01", "50", "42.5", "9999999999.99"]) assert.equal(moneyLib.offerError(good), null, `accepts ${good}`);
+});
 
 test("withProfileTags attaches tags per profile in the embed shape, in batches, and surfaces query errors", async () => {
   const source = await readFile(new URL("../src/lib/tags.ts", import.meta.url), "utf8");

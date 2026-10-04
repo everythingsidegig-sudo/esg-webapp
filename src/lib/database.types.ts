@@ -64,6 +64,8 @@ export interface Gig {
   description: string;
   photo_url: string | null;
   amount: number;
+  // Set server-side from the accepted offer when a helper is selected; `amount` stays the posted budget.
+  agreed_amount: number | null;
   price_type: PriceType;
   scheduled_at: string | null;
   location_text: string | null;
@@ -100,6 +102,15 @@ export interface Claim {
   gig_id: string;
   provider_id: string;
   state: ClaimState;
+  offer_amount: number;
+  message: string | null;
+  created_at: string;
+}
+
+// Readable only by the poster and the accepted helper (enforced by RLS).
+export interface GigPrivateLocation {
+  gig_id: string;
+  address_text: string;
   created_at: string;
 }
 
@@ -132,14 +143,16 @@ export interface Database {
       gig_tags: { Row: GigTag; Insert: Partial<GigTag>; Update: Partial<GigTag> };
       profile_tags: { Row: ProfileTag; Insert: Partial<ProfileTag>; Update: Partial<ProfileTag> };
       claims: { Row: Claim; Insert: Partial<Claim>; Update: Partial<Claim> };
+      gig_private_locations: { Row: GigPrivateLocation; Insert: Partial<GigPrivateLocation>; Update: Partial<GigPrivateLocation> };
       chat_messages: { Row: ChatMessage; Insert: Partial<ChatMessage>; Update: Partial<ChatMessage> };
       notifications: { Row: Notification; Insert: Partial<Notification>; Update: Partial<Notification> };
     };
     Functions: {
       ensure_profile: { Args: Record<string, never>; Returns: Profile };
       save_onboarding: { Args: { p_username: string; p_photo_url: string | null; p_location_text: string; p_lat: number | null; p_lng: number | null; p_skills: string[]; p_services: string[] }; Returns: Profile };
-      create_gig: { Args: { p_request_id: string; p_service_type: string; p_title: string; p_description: string; p_amount: number; p_price_type: string; p_scheduled_at: string | null; p_location_text: string; p_lat: number | null; p_lng: number | null; p_photo_url?: string | null; p_publish?: boolean; p_tag_ids?: string[] }; Returns: Gig };
-      create_claim: { Args: { p_gig_id: string }; Returns: Claim };
+      create_gig: { Args: { p_request_id: string; p_service_type: string; p_title: string; p_description: string; p_amount: number; p_price_type: string; p_scheduled_at: string | null; p_location_text: string; p_lat: number | null; p_lng: number | null; p_photo_url?: string | null; p_publish?: boolean; p_tag_ids?: string[]; p_private_address?: string | null }; Returns: Gig };
+      create_claim: { Args: { p_gig_id: string; p_offer_amount?: number | null; p_message?: string | null }; Returns: Claim };
+      withdraw_claim: { Args: { p_gig_id: string }; Returns: void };
       select_provider: { Args: { p_gig_id: string; p_claim_id: string }; Returns: void };
       request_start: { Args: { p_gig_id: string }; Returns: void };
       approve_start: { Args: { p_gig_id: string }; Returns: void };
