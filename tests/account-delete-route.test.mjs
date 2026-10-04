@@ -97,17 +97,32 @@ test("account delete route: account with marketplace history is anonymized and p
   assert.ok(lock.attrs.ban_duration, "a ban is applied so the account can never sign in again");
 });
 
-test("account delete route: a failed deletion RPC leaves the account untouched, never reaches the admin API, and reports an error", async () => {
-  let adminConstructed = false;
+test("account delete route: a failed deletion RPC leaves the account untouched, never calls the admin API, and reports an error", async () => {
+  const admin = noopAdmin(), adminCalls = [];
+  admin.auth.admin.deleteUser = async () => { adminCalls.push("deleteUser"); return { error: null }; };
+  admin.auth.admin.updateUserById = async () => { adminCalls.push("updateUserById"); return { error: null }; };
   const serverClient = {
     auth: { getUser: async () => ({ data: { user: { id: "user-3" } }, error: null }), signOut: async () => ({ error: null }) },
     rpc: async () => ({ data: null, error: new Error("db unavailable") }),
   };
-  const POST = await loadRoute({ serverClient, createAdminClient: () => { adminConstructed = true; return noopAdmin(); } });
+  const POST = await loadRoute({ serverClient, createAdminClient: () => admin });
   const response = await POST();
   assert.equal(response.status, 500);
   assert.match((await response.json()).error, /try again/i);
-  assert.equal(adminConstructed, false, "the service-role client is never touched when the RPC itself fails");
+  assert.deepEqual(adminCalls, [], "no admin operation runs when the RPC itself fails");
+});
+
+test("account delete route: a missing service-role key fails before the deletion RPC, so nothing is anonymized", async () => {
+  const calls = [];
+  const serverClient = {
+    auth: { getUser: async () => ({ data: { user: { id: "user-4" } }, error: null }), signOut: async () => { calls.push("signOut"); return { error: null }; } },
+    rpc: async (name) => { calls.push(name); return { data: true, error: null }; },
+  };
+  const POST = await loadRoute({ serverClient, createAdminClient: () => { throw new Error("SUPABASE_SERVICE_ROLE_KEY is not configured on the server."); } });
+  const response = await POST();
+  assert.equal(response.status, 500);
+  assert.match((await response.json()).error, /isn't available right now/);
+  assert.deepEqual(calls, [], "no RPC and no sign-out when the admin client cannot be built");
 });
 
 test("account delete route: an Admin API failure reports an error and does not sign the caller out", async () => {

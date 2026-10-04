@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { safeNext, setupDestination, registrationError, passwordError, approximateCoordinates, gigInputError, friendlyError } from "../src/lib/journey.ts";
+import { safeNext, setupDestination, registrationError, passwordError, approximateCoordinates, gigInputError, friendlyError, rpcActionError } from "../src/lib/journey.ts";
 import { generalAreaLabel } from "../src/lib/geocoding.ts";
 import { SERVICE_TYPES } from "../src/lib/services.ts";
 
@@ -46,6 +46,24 @@ test("blank area rejected", () => assert.ok(gigInputError("Gig", "Description", 
 test("database internals not shown", () => assert.equal(friendlyError({ code: "42P01", message: "secret SQL details" }), "Something went wrong. Please try again."));
 test("unverified login actionable", () => assert.match(friendlyError({ code: "email_not_confirmed" }), /Verify your email/));
 test("duplicate username actionable", () => assert.match(friendlyError({ code: "23505" }), /username is already taken/));
+test("signup/sign-in errors that were previously generic now say what is wrong", () => {
+  assert.match(friendlyError({ code: "email_address_invalid" }), /email address isn't valid/);
+  assert.match(friendlyError({ code: "user_banned" }), /no longer available/);
+  assert.match(friendlyError({ code: "signup_disabled" }), /Registration is currently unavailable/);
+  assert.match(friendlyError({ code: "unexpected_failure", message: "Database error saving new user" }), /username may have just been taken/);
+  assert.equal(friendlyError({ code: "unexpected_failure", message: "something else with user_id=1" }), "Something went wrong. Please try again.");
+});
+test("lifecycle RPC errors: only our own raised messages are shown, everything else is generic", () => {
+  assert.equal(rpcActionError({ code: "P0001", message: "Gig is not open for claims" }), "Gig is not open for claims");
+  assert.match(rpcActionError({ code: "42501", message: "Not authorized" }), /sign in again/);
+  assert.match(rpcActionError({ code: "429" }), /Too many requests/);
+  for (const error of [
+    { code: "23505", message: 'duplicate key value violates unique constraint "claims_gig_id_provider_id_key"' },
+    { code: "42883", message: "function public.secret_fn does not exist" },
+    { message: "TypeError: Failed to fetch" },
+    null,
+  ]) assert.equal(rpcActionError(error), "Couldn't complete that action. Please try again.");
+});
 test("existing catalog retained", () => assert.deepEqual(SERVICE_TYPES, ["Yard Work", "Moving Help", "Cleaning", "Handyman", "Delivery", "Pet Care", "Tech Help", "Other"]));
 test("database validation uses the same POC catalog", async () => {
   const sql = await readFile(new URL("../supabase/migrations/20240101000004_onboarding_post_gig.sql", import.meta.url), "utf8");

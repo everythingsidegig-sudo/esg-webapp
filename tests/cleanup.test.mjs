@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
-import { approximateCoordinates, gigInputError, friendlyError, passwordError, safeNext, setupDestination } from "../src/lib/journey.ts";
+import { approximateCoordinates, gigInputError, friendlyError, passwordError, registrationError, rpcActionError, safeNext, setupDestination } from "../src/lib/journey.ts";
 
 // location.ts has extension-less relative imports (./journey, ./geocoding) that
 // Node's native ESM+TS loader can't resolve directly, so its exact haversineKm
@@ -59,7 +59,7 @@ async function component(path, name, overrides = {}) {
     "@/lib/auth-context": { useAuth: () => auth },
     "@/lib/supabase/client": { createClient: () => overrides.client },
     "@/lib/services": { SERVICE_TYPES: ["Cleaning", "Other"], SPECIALIZATION_PROMPTS: { Cleaning: "What kind of cleaning?", Handyman: "What kind of handyman work?", Other: "What kind of help?" } },
-    "@/lib/journey": { friendlyError, passwordError, safeNext, setupDestination, approximateCoordinates, gigInputError },
+    "@/lib/journey": { friendlyError, passwordError, registrationError, rpcActionError, safeNext, setupDestination, approximateCoordinates, gigInputError },
     "@/lib/location": { loadJourneyLocation: () => ({ text: "", lat: null, lng: null }), haversineKm, clearGeneralAreaState: () => {} },
     "@/lib/tags": {
       loadTagCatalog: async () => ({}),
@@ -661,6 +661,25 @@ test("Profile Danger zone: backend failure shows the server's error, keeps the d
   assert.deepEqual(destinations, [], "no redirect on failure");
 });
 
+test("Profile Danger zone: a network failure shows a friendly message, not the browser's raw error", async () => {
+  const client = { from: (table) => table === "profile_tags" ? { select: () => ({ eq: async () => ({ data: [], error: null }) }) } : { update: () => ({}) }, auth: { signOut: async () => ({ error: null }) } };
+  const app = await component("src/app/profile/page.tsx", "ProfileEditor", {
+    client,
+    globals: { fetch: async () => { throw new TypeError("Failed to fetch"); } },
+    mocks: { "next/navigation": { useRouter: () => ({ replace() {} }) } },
+  });
+  app.render({ profile }); await flush();
+  let tree = app.render({ profile });
+  nodes(tree, (node) => node.type === "button" && node.props.children === "Delete account" && node.props.disabled === undefined)[0].props.onClick();
+  tree = app.render({ profile });
+  nodes(tree, (node) => node.type === "input" && node.props.autoComplete === "off")[0].props.onChange({ target: { value: "DELETE" } });
+  tree = app.render({ profile });
+  nodes(tree, (node) => node.type === "button" && node.props.children === "Delete account" && node.props.disabled !== undefined)[0].props.onClick();
+  await flush();
+  tree = app.render({ profile });
+  assert.equal(nodes(tree, (node) => node.props.role === "alert" && node.props.children === "Couldn't delete your account. Check your connection and try again.").length, 1);
+});
+
 test("Profile Danger zone: shows a 'Deleting…' loading state, disables Cancel while in flight, and a duplicate click issues only one request", async () => {
   const client = { from: (table) => table === "profile_tags" ? { select: () => ({ eq: async () => ({ data: [], error: null }) }) } : { update: () => ({}) },
     auth: { signOut: async () => ({ error: null }) } };
@@ -720,6 +739,68 @@ test("Onboarding 'Use my current location': reverse-geocoding failure leaves the
   const area = nodes(tree, (node) => node.type === "input" && node.props.maxLength === 200)[0];
   assert.equal(area.props.value, "", "never falls back to the literal 'Current location'");
   assert.equal(nodes(tree, (node) => node.props.role === "status" && node.props.children === "Couldn't determine your area automatically. Enter it manually.").length, 1);
+});
+
+async function onboardingSkillsStep({ rpc, finished = [] }) {
+  const catalog = {
+    Cleaning: [{ id: "c1", name: "Deep Cleaning", service_type: "Cleaning" }, { id: "c2", name: "Kitchen", service_type: "Cleaning" }],
+    Other: [{ id: "o1", name: "Errands", service_type: "Other" }],
+  };
+  const app = await component("src/components/ProfileSetup.tsx", "ProfileSetup", {
+    client: { rpc },
+    mocks: { "@/lib/tags": { loadTagCatalog: async () => catalog, MAX_PROFILE_TAGS: 8 } },
+  });
+  const props = { profile: { ...profile, skills: [], services: [], private_location_text: "Somewhere", private_lat: null, private_lng: null }, onFinish: () => finished.push("done") };
+  app.render(props); await flush();
+  let tree = app.render(props);
+  button(tree, "Continue").props.onClick(); tree = app.render(props);
+  button(tree, "Continue").props.onClick(); tree = app.render(props);
+  return { app, props, tree };
+}
+const skillCheckbox = (tree, name) => nodes(tree, (node) => node.type === "label" && Array.isArray(node.props.children) && node.props.children[2] === name)[0].props.children[0];
+
+test("Onboarding skills step: choosing a skill opens its specializations, picks show as chips, and are saved after the profile", async () => {
+  const calls = [], finished = [];
+  const rpc = async (name, payload) => { calls.push([name, JSON.parse(JSON.stringify(payload))]); return { data: { id: "p" }, error: null }; };
+  const { app, props, tree: initial } = await onboardingSkillsStep({ rpc, finished });
+  assert.equal(nodes(initial, (node) => node.props["aria-label"] === "Add specializations").length, 0, "no section until a skill with options is chosen");
+  skillCheckbox(initial, "Cleaning").props.onChange();
+  let tree = app.render(props);
+  assert.equal(specializationSheet(tree).props.title, "What kind of cleaning?", "selecting a skill opens its options");
+  sheetRow(tree, "Kitchen").props.onClick();
+  tree = app.render(props);
+  specializationSheet(tree).props.onClose();
+  tree = app.render(props);
+  assert.ok(removeSpecialization(tree, "Kitchen"), "the pick appears as a chip");
+  skillCheckbox(tree, "Other").props.onChange(); // chosen but nothing picked
+  tree = app.render(props);
+  specializationSheet(tree).props.onClose();
+  tree = app.render(props);
+
+  button(tree, "Save profile & continue").props.onClick(); await flush();
+  assert.deepEqual(calls.map(([name]) => name), ["save_onboarding", "set_helper_tags"], "profile first, then only skills that have picks");
+  assert.deepEqual(calls[1][1], { p_service_type: "Cleaning", p_tag_ids: ["c2"] });
+  assert.deepEqual(finished, ["done"]);
+});
+
+test("Onboarding: if specializations fail to save after the profile saved, the user stays and can retry", async () => {
+  const calls = [], finished = [];
+  let failTags = true;
+  const rpc = async (name) => { calls.push(name); return name === "set_helper_tags" && failTags ? { data: null, error: { code: "XX000" } } : { data: { id: "p" }, error: null }; };
+  const { app, props, tree: initial } = await onboardingSkillsStep({ rpc, finished });
+  skillCheckbox(initial, "Cleaning").props.onChange();
+  let tree = app.render(props);
+  sheetRow(tree, "Deep Cleaning").props.onClick();
+  tree = app.render(props);
+  specializationSheet(tree).props.onClose();
+  tree = app.render(props);
+  button(tree, "Save profile & continue").props.onClick(); await flush();
+  tree = app.render(props);
+  assert.equal(nodes(tree, (node) => node.props.role === "alert" && /profile saved, but some specializations/.test(String(node.props.children))).length, 1);
+  assert.deepEqual(finished, [], "does not leave onboarding with the picks silently lost");
+  failTags = false;
+  button(tree, "Save profile & continue").props.onClick(); await flush();
+  assert.deepEqual(finished, ["done"]);
 });
 
 test("Public profile displays specialization tags grouped by skill", async () => {
@@ -1448,6 +1529,46 @@ test("authenticated Sign In uses validated next and never renders the form", asy
   const tree = app.render();
   assert.deepEqual(destinations, ["/location"]);
   assert.equal(nodes(tree, (node) => node.type === "form").length, 0);
+});
+
+async function submitSignUp(signUpResult) {
+  const app = await component("src/app/auth/sign-up/page.tsx", "SignUpInner", {
+    client: {
+      from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) }) }),
+      auth: { signUp: async () => signUpResult() },
+    },
+    globals: { window: { location: { origin: "http://localhost:3001" } } },
+  });
+  app.auth.user = null; app.auth.profile = null;
+  let tree = app.render();
+  const field = (id, value) => nodes(tree, (node) => node.props.id === id)[0].props.onChange({ target: { value } });
+  field("signup-email", "person@example.com"); field("signup-username", "NewPerson1");
+  field("signup-password", "Replacement1!"); field("signup-confirm", "Replacement1!");
+  tree = app.render();
+  await nodes(tree, (node) => node.type === "form")[0].props.onSubmit({ preventDefault() {} });
+  return app.render();
+}
+const existsAlert = (tree) => nodes(tree, (node) => node.props.role === "alert" && node.props.children === "An account already exists with this email.");
+
+test("Sign Up tells the user when an account already exists with that email (obfuscated Supabase response), offering sign in / reset", async () => {
+  const tree = await submitSignUp(async () => ({ data: { user: { id: "u", identities: [] }, session: null }, error: null }));
+  assert.equal(existsAlert(tree).length, 1);
+  assert.equal(nodes(tree, (node) => node.props.children === "Check your email").length, 0, "does not claim a confirmation email was sent");
+  const hrefs = nodes(tree, (node) => node.type === "a").map((node) => node.props.href);
+  assert.ok(hrefs.includes("/auth/sign-in?next=%2F") && hrefs.includes("/auth/forgot-password"));
+});
+
+test("Sign Up shows the same message when Supabase returns an explicit already-registered error", async () => {
+  for (const code of ["email_exists", "user_already_exists"]) {
+    const tree = await submitSignUp(async () => ({ data: { user: null, session: null }, error: { code, status: 422 } }));
+    assert.equal(existsAlert(tree).length, 1, code);
+  }
+});
+
+test("Sign Up for a genuinely new email still shows the check-your-email screen", async () => {
+  const tree = await submitSignUp(async () => ({ data: { user: { id: "u", identities: [{ id: "i" }] }, session: null }, error: null }));
+  assert.equal(existsAlert(tree).length, 0);
+  assert.equal(nodes(tree, (node) => node.props.children === "Check your email").length, 1);
 });
 
 test("authenticated Sign Up defaults to Location", async () => {

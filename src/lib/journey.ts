@@ -57,5 +57,21 @@ export function friendlyError(error: unknown, fallback = "Something went wrong. 
   if (value?.code === "429" || value?.code === "over_email_send_rate_limit" || value?.code === "over_request_rate_limit") return "Too many requests. Please wait a few minutes and try again.";
   if (value?.code === "42501") return "Please sign in again before continuing.";
   if (value?.code === "weak_password") return "Choose a stronger password. Your account's password rules may require more characters.";
+  if (value?.code === "email_address_invalid") return "That email address isn't valid. Check it and try again.";
+  if (value?.code === "user_banned") return "This account is no longer available.";
+  if (value?.code === "signup_disabled") return "Registration is currently unavailable. Please try again later.";
+  // Supabase reports a username collision inside its signup trigger (a race with the pre-check) this way.
+  if (value?.message === "Database error saving new user") return "We couldn't create your account. That username may have just been taken -- try another.";
+  return fallback;
+}
+
+// For lifecycle RPCs (claim, select, approve, ...): only messages our own
+// functions raise (SQLSTATE P0001, e.g. "Gig is not open for claims") are shown;
+// anything else (network, grants, constraint names) gets a generic message.
+export function rpcActionError(error: unknown, fallback = "Couldn't complete that action. Please try again.") {
+  const value = error as { code?: string; message?: string };
+  if (value?.code === "P0001" && typeof value.message === "string" && value.message) return value.message;
+  if (value?.code === "42501") return "Please sign in again before continuing.";
+  if (value?.code === "429" || value?.code === "over_request_rate_limit") return "Too many requests. Please wait a few minutes and try again.";
   return fallback;
 }

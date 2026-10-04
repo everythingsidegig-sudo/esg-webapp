@@ -7,6 +7,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { friendlyError, registrationError, safeNext, setupDestination } from "@/lib/journey";
 import { useAuth } from "@/lib/auth-context";
 
+const EMAIL_EXISTS_MESSAGE = "An account already exists with this email.";
+
 function SignUpInner() {
   const supabase = createClient();
   const router = useRouter();
@@ -25,6 +27,7 @@ function SignUpInner() {
   const [submitting, setSubmitting] = useState(false);
   const [confirmationSent, setConfirmationSent] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [emailExists, setEmailExists] = useState(false);
 
   useEffect(() => {
     if (!loading && user) router.replace(authenticatedDestination);
@@ -52,7 +55,7 @@ function SignUpInner() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (pending.current) return;
-    setError(null);
+    setError(null); setEmailExists(false);
 
     const validationError = validate();
     if (validationError) {
@@ -84,9 +87,17 @@ function SignUpInner() {
     });
 
     if (signUpError) throw signUpError;
+    // With email confirmation on, Supabase answers a signup for an already-registered
+    // address with no error and a user that has no identities (it sends no new account).
+    if (data.user && data.user.identities?.length === 0) {
+      setEmailExists(true); setError(EMAIL_EXISTS_MESSAGE);
+      return;
+    }
     if (data.session) router.replace(setupDestination(next));
     else setConfirmationSent(true);
     } catch (error) {
+      const code = (error as { code?: unknown } | null)?.code;
+      if (code === "email_exists" || code === "user_already_exists") { setEmailExists(true); setError(EMAIL_EXISTS_MESSAGE); return; }
       setError(friendlyError(error, "Couldn't create your account. Check your connection, or try signing in if you already registered."));
     } finally {
       pending.current = false;
@@ -171,6 +182,13 @@ function SignUpInner() {
       </div>
 
       {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
+      {emailExists && (
+        <p className="text-sm text-neutral-600">
+          <Link href={`/auth/sign-in?next=${encodeURIComponent(next)}`} className="touch-link font-medium text-emerald-700">Sign in</Link>
+          {" or "}
+          <Link href="/auth/forgot-password" className="touch-link font-medium text-emerald-700">reset your password</Link>.
+        </p>
+      )}
 
       <button
         type="submit"

@@ -241,7 +241,9 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
     if (deleteConfirmText !== "DELETE" || pending.current) return;
     pending.current = true; setDeleting(true); setDeleteError(null);
     try {
-      const response = await fetch("/api/account/delete", { method: "POST" });
+      // A network failure would otherwise surface the browser's raw "Failed to fetch".
+      const response = await fetch("/api/account/delete", { method: "POST" })
+        .catch(() => { throw new Error("Couldn't delete your account. Check your connection and try again."); });
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
         throw new Error(body?.error || "Couldn't delete your account. Please try again.");

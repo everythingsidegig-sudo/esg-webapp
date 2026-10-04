@@ -28,6 +28,16 @@ export async function POST() {
     return NextResponse.json({ error: "Authentication required." }, { status: 401 });
   }
 
+  // Built before anything is changed: a missing service-role key must fail
+  // here, not after delete_own_account() has already anonymized the profile.
+  let admin;
+  try {
+    admin = createAdminClient();
+  } catch {
+    logFailure("createAdminClient", { serviceRoleKeyConfigured: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY) });
+    return NextResponse.json({ error: "Account deletion isn't available right now. Please try again later." }, { status: 500 });
+  }
+
   // Runs as the caller (RLS-scoped to auth.uid()): decides whether this
   // account has marketplace history and, if so, anonymizes the profile in
   // place. See delete_own_account() for the full policy.
@@ -38,14 +48,6 @@ export async function POST() {
       serviceRoleKeyConfigured: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),
     });
     return NextResponse.json({ error: "Couldn't delete your account. Please try again." }, { status: 500 });
-  }
-
-  let admin;
-  try {
-    admin = createAdminClient();
-  } catch {
-    logFailure("createAdminClient", { serviceRoleKeyConfigured: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY) });
-    return NextResponse.json({ error: "Account deletion isn't available right now. Please try again later." }, { status: 500 });
   }
 
   // Best-effort: a leftover photo file is far less harmful than blocking the
