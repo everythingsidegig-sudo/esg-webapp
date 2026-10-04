@@ -151,7 +151,7 @@ select pg_temp.expect_denied('select public.cancel_gig(pg_temp.fixture(''open'')
 select pg_temp.expect_denied('select public.notify(pg_temp.fixture(''poster''), pg_temp.fixture(''open''), ''test'', ''forged'')', 'anonymous cannot invoke notification helper');
 select pg_temp.expect_denied('update public.profiles set wom_count = 999 where id = pg_temp.fixture(''poster'')', 'anonymous cannot modify reputation');
 select pg_temp.expect_denied('update public.chat_messages set read_at = now() where id = pg_temp.fixture(''provider_message'')', 'anonymous cannot modify chat');
-select pg_temp.assert((select count(*) from public.gigs where id in (pg_temp.fixture('open'),pg_temp.fixture('selected'),pg_temp.fixture('draft'),pg_temp.fixture('progress'),pg_temp.fixture('payment'),pg_temp.fixture('completed'),pg_temp.fixture('other_draft'))) = 2, 'anonymous sees active gigs only; gigs SELECT does not recurse');
+select pg_temp.assert((select count(*) from public.gigs where id in (pg_temp.fixture('open'),pg_temp.fixture('selected'),pg_temp.fixture('draft'),pg_temp.fixture('progress'),pg_temp.fixture('payment'),pg_temp.fixture('completed'),pg_temp.fixture('other_draft'))) = 1, 'anonymous sees only open (unassigned) active gigs; gigs SELECT does not recurse');
 select pg_temp.assert((select count(*) from public.claims where id in (select id from pg_temp.security_fixture)) = 0, 'anonymous sees no claims; claims SELECT does not recurse');
 select pg_temp.assert((select count(*) from public.public_profiles where id = pg_temp.fixture('poster') or id = pg_temp.fixture('provider')) = 2, 'public profiles remain readable');
 select * from public.get_public_stats(pg_temp.fixture('provider'));
@@ -197,7 +197,7 @@ select pg_temp.expect_denied('update public.profiles set id = pg_temp.fixture(''
 select pg_temp.expect_denied('update public.profiles set created_at = now() where id = pg_temp.fixture(''unrelated'')', 'own protected profile column denied: created_at');
 with changed as (update public.profiles set photo_url = 'forged' where id = pg_temp.fixture('poster') returning id)
 select pg_temp.assert(count(*) = 0, 'ordinary user cannot modify another profile') from changed;
-select pg_temp.assert((select count(*) from public.gigs where id in (select id from pg_temp.security_fixture)) = 3, 'unrelated user sees public gigs plus own draft only');
+select pg_temp.assert((select count(*) from public.gigs where id in (select id from pg_temp.security_fixture)) = 2, 'unrelated user sees open gigs plus own draft only (an assigned gig is no longer public)');
 select pg_temp.assert((select count(*) from public.claims where id in (select id from pg_temp.security_fixture)) = 0, 'unrelated user sees no other claims');
 select pg_temp.assert((select count(*) from public.chat_messages where gig_id = pg_temp.fixture('progress')) = 0, 'unrelated user cannot read participant chat');
 with changed as (update public.chat_messages set read_at = now() where id = pg_temp.fixture('provider_message') returning id)

@@ -4,7 +4,8 @@ import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
 const root = new URL("../", import.meta.url);
-const deletion = process.argv.includes("--deletion");
+const offers = process.argv.includes("--offers");
+const deletion = process.argv.includes("--deletion") || offers;
 const distance = process.argv.includes("--distance") || deletion;
 const helpers = process.argv.includes("--helpers") || distance;
 const tags = process.argv.includes("--tags") || helpers;
@@ -192,6 +193,40 @@ if (deletion) {
   }
   console.log("PASS: account-deletion migration scope (single zero-arg RPC, explicit auth guard, checks all marketplace-history tables, never touches auth.users or reputation counters, grant-scoped to authenticated)");
 }
+if (offers) {
+  const sql = await readFile(new URL("migrations/20240101000010_offers_and_private_address.sql", root), "utf8");
+  const code = sql.replace(/--.*$/gm, "");
+  const created = [...code.matchAll(/create (?:or replace )?function public\.([a-z_]+)\(/g)].map((entry) => entry[1]).sort();
+  if (created.join(",") !== "create_claim,create_gig,select_provider,withdraw_claim") {
+    throw new Error(`Offers migration must only (re)create create_gig, create_claim, withdraw_claim and select_provider, found: ${created}`);
+  }
+  for (const entry of code.matchAll(/create (?:or replace )?function public\.[a-z_]+\([\s\S]*?\n\$\$;/g)) {
+    if (!entry[0].includes("security definer set search_path = ''") || !/if auth\.uid\(\) is null then\s*raise exception 'Authentication required'/.test(entry[0])) {
+      throw new Error("Every offers RPC must be SECURITY DEFINER with an empty search_path and an explicit authentication guard");
+    }
+  }
+  if (!/drop function public\.create_claim\(uuid\);/.test(code) || !/drop function public\.create_gig\(uuid,text,text,text,numeric,text,timestamptz,text,double precision,double precision,text,boolean,uuid\[\]\);/.test(code)) {
+    throw new Error("Replaced RPC signatures must be dropped, not left as callable overloads");
+  }
+  if (!/alter table public\.gig_private_locations enable row level security/.test(code) || !/revoke all on table public\.gig_private_locations from public, anon, authenticated/.test(code)
+      || !/grant select on table public\.gig_private_locations to authenticated/.test(code)) {
+    throw new Error("The private address table must have RLS on, no anon access, and select-only access for authenticated");
+  }
+  const policy = code.match(/create policy gig_private_locations_select[\s\S]*?\n\);/)?.[0] ?? "";
+  if (!/g\.poster_id = auth\.uid\(\)/.test(policy) || !/g\.selected_provider_id = auth\.uid\(\)/.test(policy) || /\btrue\b/.test(policy)) {
+    throw new Error("Private addresses must be readable only by the poster and the selected helper");
+  }
+  if (!/revoke insert, update, delete on table public\.claims from public, anon, authenticated/.test(code)) {
+    throw new Error("Clients must not write claims (offers) directly");
+  }
+  if (/select_provider\([^)]*p_(amount|price|agreed)/.test(code) || !/agreed_amount = v_claim\.offer_amount/.test(code)) {
+    throw new Error("The agreed price must come from the accepted offer, never from a client argument");
+  }
+  if (/notify\([^;]*address/i.test(code)) {
+    throw new Error("Notifications must never include the private address");
+  }
+  console.log("PASS: offers migration scope (claims evolved with offer amount/message, server-captured agreed price, address behind RLS for poster + accepted helper only, old overloads dropped, no client writes, address never in notifications)");
+}
 if (!runtimePath) {
   console.log("Static verification only. Supply a PGlite dist/index.js path for SQL execution.");
   process.exit(0);
@@ -247,6 +282,7 @@ try {
     ...(helpers ? ["migrations/20240101000007_profile_tags.sql"] : []),
     ...(distance ? ["migrations/20240101000008_helper_location.sql"] : []),
     ...(deletion ? ["migrations/20240101000009_account_deletion.sql"] : []),
+    ...(offers ? ["migrations/20240101000010_offers_and_private_address.sql"] : []),
     "tests/phase1_security.sql",
     ...(phase2a ? ["tests/phase2a_integrity.sql"] : []),
     ...(onboarding ? ["tests/onboarding_post_gig.sql"] : []),
@@ -255,19 +291,20 @@ try {
     ...(helpers ? ["tests/profile_tags.sql"] : []),
     ...(distance ? ["tests/helper_location.sql"] : []),
     ...(deletion ? ["tests/account_deletion.sql"] : []),
+    ...(offers ? ["tests/offers_private_address.sql"] : []),
   ]) {
     const sql = await readFile(new URL(file, root), "utf8");
     await db.exec(sql);
     if (file.startsWith("tests/")) {
       // Every assertion is an unconditional top-level SELECT. Successful SQL
       // execution means every call returned without raising its failure error.
-      const assertions = [...sql.matchAll(/^select pg_temp\.(?:assert|expect_denied|phase2_assert|phase2_expect_error|journey_assert|journey_error_any|journey_error|dw_assert|dw_denied|dw_error|gt_assert|gt_denied|gt_error|pt_assert|pt_denied|pt_error|hl_assert|hl_denied|hl_error|ad_assert|ad_error)\(/gm)].length;
+      const assertions = [...sql.matchAll(/^select pg_temp\.(?:assert|expect_denied|phase2_assert|phase2_expect_error|journey_assert|journey_error_any|journey_error|dw_assert|dw_denied|dw_error|gt_assert|gt_denied|gt_error|pt_assert|pt_denied|pt_error|hl_assert|hl_denied|hl_error|ad_assert|ad_error|of_assert|of_error|of_denied)\(/gm)].length;
       passed += assertions;
       console.log(`PASS: ${file}: ${assertions} assertions`);
     }
     console.log(`Executed ${file}`);
   }
-  const cleanup = await db.query("select to_regclass('pg_temp.security_fixture') is null and to_regclass('pg_temp.phase2_fixture') is null and to_regclass('pg_temp.journey_fixture') is null and to_regclass('pg_temp.dw_fixture') is null and to_regclass('pg_temp.gt_fixture') is null and to_regclass('pg_temp.pt_fixture') is null and to_regclass('pg_temp.hl_fixture') is null and to_regclass('pg_temp.ad_fixture') is null as clean");
+  const cleanup = await db.query("select to_regclass('pg_temp.security_fixture') is null and to_regclass('pg_temp.phase2_fixture') is null and to_regclass('pg_temp.journey_fixture') is null and to_regclass('pg_temp.dw_fixture') is null and to_regclass('pg_temp.gt_fixture') is null and to_regclass('pg_temp.pt_fixture') is null and to_regclass('pg_temp.hl_fixture') is null and to_regclass('pg_temp.ad_fixture') is null and to_regclass('pg_temp.of_fixture') is null as clean");
   if (!cleanup.rows[0].clean) throw new Error("SQL fixtures did not roll back");
   console.log(`PASS: ${passed} security assertions in isolated PostgreSQL/WASM`);
   console.log("Hosted Supabase, PostgREST, Auth, Storage and Realtime integration remain unverified.");
