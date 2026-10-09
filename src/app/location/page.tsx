@@ -1,14 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { lookupZipCode, usZipCode } from "@/lib/zip-location";
 import AuthGuard from "@/components/AuthGuard";
 import { approximateCoordinates } from "@/lib/journey";
 import { LOCATION_KEY, reverseGeocodeGeneralArea } from "@/lib/location";
 
 function LocationEntryInner() {
   const router = useRouter();
+  const locationRequest = useRef(0);
 
   const [locationText, setLocationText] = useState("");
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
@@ -16,7 +18,36 @@ function LocationEntryInner() {
   const [error, setError] = useState<string | null>(null);
   const [locating, setLocating] = useState(false);
 
+  const [lookingUpZip, setLookingUpZip] = useState(false);
+  const [zipArea, setZipArea] = useState<string | null>(null);
+
+  useEffect(() => {
+    const zip = usZipCode(locationText);
+    if (!zip) return;
+    let active = true;
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      try {
+        const area = await lookupZipCode(zip, controller.signal);
+        if (!active) return;
+        setCoords({ lat: area.lat, lng: area.lng });
+        setZipArea(area.label);
+      } catch {
+        if (active) {
+          setCoords(null);
+          setError("Couldn't find that ZIP code. Check it and try again, or use your current location.");
+        }
+      } finally { if (active) setLookingUpZip(false); }
+    }, 450);
+    return () => { active = false; clearTimeout(timer); controller.abort(); };
+  }, [locationText]);
+
   function useMyLocation() {
+    const request = ++locationRequest.current;
+    setLookingUpZip(false);
+    setZipArea(null);
+    setLocationText("Current location");
+    setCoords(null);
     setError(null);
     setLocating(true);
     if (!navigator.geolocation) {
@@ -26,17 +57,19 @@ function LocationEntryInner() {
     }
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
+        if (request !== locationRequest.current) return;
         const approximate = approximateCoordinates(pos.coords.latitude, pos.coords.longitude) as { lat: number; lng: number };
         setCoords(approximate);
         setLocationText("Current location");
         try {
           const label = await reverseGeocodeGeneralArea(approximate.lat, approximate.lng);
-          if (label) setLocationText(label);
+          if (label && request === locationRequest.current) setLocationText(label);
         } catch {
           // Coordinates remain valid and authoritative when the optional label lookup fails.
-        } finally { setLocating(false); }
+        } finally { if (request === locationRequest.current) setLocating(false); }
       },
       () => {
+        if (request !== locationRequest.current) return;
         setError("Location permission denied. Enter a location manually below.");
         setLocating(false);
       },
@@ -45,12 +78,16 @@ function LocationEntryInner() {
   }
 
   function continueJourney() {
-    if (locating) return;
+    if (locating || lookingUpZip) return;
+    if (usZipCode(locationText) && !coords) {
+      setError("Wait for the ZIP code to appear on the map, or choose another location.");
+      return;
+    }
     if (!locationText.trim() || locationText.trim().length > 200) {
       setError("Enter a general area of 1–200 characters or use your current location.");
       return;
     }
-    try { sessionStorage.setItem(LOCATION_KEY, JSON.stringify({ text: locationText.trim(), ...coords })); }
+    try { sessionStorage.setItem(LOCATION_KEY, JSON.stringify({ text: zipArea ?? locationText.trim(), ...coords })); }
     catch { setError("Enable site storage in your browser to continue."); return; }
     setConfirmed(true);
   }
@@ -69,7 +106,7 @@ function LocationEntryInner() {
       <div className="space-y-2">
         <p className="text-sm font-semibold text-emerald-700">You&apos;re all set</p>
         <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">What would you like to do?</h1>
-        <p className="text-sm leading-6 text-neutral-500">Choose a journey for {locationText.trim()}.</p>
+        <p className="text-sm leading-6 text-neutral-500">Choose a journey for {zipArea ?? locationText.trim()}.</p>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         <Link href="/need-help" className="flex min-h-36 flex-col items-start justify-center rounded-2xl border border-neutral-200 bg-white p-5 text-left shadow-sm transition hover:border-emerald-200 hover:shadow-md">
@@ -113,12 +150,30 @@ function LocationEntryInner() {
         maxLength={200}
         value={locationText}
         onChange={(e) => {
+          locationRequest.current++;
+          setLocating(false);
+          setError(null);
+          setZipArea(null);
+          setLookingUpZip(!!usZipCode(e.target.value));
           setLocationText(e.target.value);
           setCoords(null);
         }}
         placeholder="Enter a general area"
         className="app-input"
       />
+      {lookingUpZip && <p role="status" className="mt-3 text-sm text-neutral-500">Finding ZIP code…</p>}
+      {coords && (
+        <div className="mt-4 overflow-hidden rounded-xl border border-neutral-200">
+          <iframe
+            title="Map of your selected area"
+            src={`https://www.openstreetmap.org/export/embed.html?bbox=${encodeURIComponent([coords.lng - 0.04, coords.lat - 0.025, coords.lng + 0.04, coords.lat + 0.025].join(","))}&layer=mapnik&marker=${encodeURIComponent(`${coords.lat},${coords.lng}`)}`}
+            className="h-64 w-full border-0"
+            loading="lazy"
+            referrerPolicy="no-referrer"
+          />
+          <p role="status" className="bg-white px-3 py-2 text-sm text-neutral-600">{zipArea ?? locationText} — approximate area</p>
+        </div>
+      )}
       <p className="mt-2 text-xs leading-5 text-neutral-400">
         Location names © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer" className="underline">OpenStreetMap contributors</a>
       </p>
@@ -129,7 +184,7 @@ function LocationEntryInner() {
 
       <button
         onClick={continueJourney}
-        disabled={locating}
+        disabled={locating || lookingUpZip || (!!usZipCode(locationText) && !coords)}
         className="touch-control mt-7 w-full border border-emerald-700 bg-white px-4 font-semibold text-emerald-700 transition hover:bg-emerald-50 disabled:cursor-wait disabled:opacity-60"
       >
         Continue
@@ -145,3 +200,4 @@ export default function LocationEntry() {
     </AuthGuard>
   );
 }
+
