@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { searchAreas, type AreaMatch } from "@/lib/area-search";
+import { lookupZipCode, usZipCode } from "@/lib/zip-location";
 import OptionSheet from "@/components/OptionSheet";
 import { useAuth } from "@/lib/auth-context";
 import { createClient } from "@/lib/supabase/client";
@@ -20,6 +22,10 @@ export default function ProfileSetup({ profile, onFinish }: { profile: Profile; 
   const [username, setUsername] = useState(profile.username);
   const [photoUrl, setPhotoUrl] = useState(profile.photo_url);
   const [area, setArea] = useState(profile.private_location_text ?? "");
+  const resolvedArea = useRef(profile.private_location_text ?? "");
+  const [areaMatches, setAreaMatches] = useState<AreaMatch[]>([]);
+  const [searchingArea, setSearchingArea] = useState(false);
+  const [areaError, setAreaError] = useState<string | null>(null);
   const [coords, setCoords] = useState({ lat: profile.private_lat, lng: profile.private_lng });
   const [skills, setSkills] = useState(profile.skills);
   const [services, setServices] = useState(profile.services);
@@ -32,6 +38,7 @@ export default function ProfileSetup({ profile, onFinish }: { profile: Profile; 
   const [message, setMessage] = useState<string | null>(null);
   const pending = useRef(false);
   const catalog = [...new Set<string>([...SERVICE_TYPES, ...profile.skills, ...profile.services])];
+  const mapCoords = approximateCoordinates(coords.lat, coords.lng);
   const input = "w-full rounded-lg border border-neutral-300 px-3 py-2";
   const toggle = (values: string[], value: string) => values.includes(value) ? values.filter((item) => item !== value) : [...values, value];
 
@@ -40,6 +47,37 @@ export default function ProfileSetup({ profile, onFinish }: { profile: Profile; 
     loadTagCatalog(supabase).then((result) => { if (active) setTagCatalog(result); }).catch(() => {});
     return () => { active = false; };
   }, [supabase]);
+
+  useEffect(() => {
+    if (locating || step !== 1 || area === resolvedArea.current || area.trim().length < 3) return;
+    let active = true;
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      try {
+        const zip = usZipCode(area);
+        let results: AreaMatch[];
+        if (zip) {
+          const result = await lookupZipCode(zip, controller.signal);
+          results = [{ ...result, areaLabel: result.label }];
+        } else results = await searchAreas(area, controller.signal);
+        if (!active) return;
+        setAreaMatches(results);
+        if (!results.length) setAreaError("No matching neighborhood or address found. Try adding the city and state.");
+      } catch {
+        if (active) setAreaError("Location search is unavailable. Try again or use your current location.");
+      } finally { if (active) setSearchingArea(false); }
+    }, 650);
+    return () => { active = false; clearTimeout(timer); controller.abort(); };
+  }, [area, step, locating]);
+
+  function chooseArea(match: AreaMatch) {
+    resolvedArea.current = match.label;
+    setArea(match.label);
+    setCoords({ lat: match.lat, lng: match.lng });
+    setAreaMatches([]);
+    setAreaError(null);
+    setSearchingArea(false);
+  }
 
   // Specializations (optional) for every chosen skill, picked in a sheet and
   // shown together as removable chips -- same pattern as the profile page.
@@ -82,6 +120,10 @@ export default function ProfileSetup({ profile, onFinish }: { profile: Profile; 
     if (locating) return;
     setError(null);
     if (!navigator.geolocation) { setError("Location isn't available. Enter an address or area manually."); return; }
+    resolvedArea.current = area;
+    setAreaMatches([]);
+    setAreaError(null);
+    setSearchingArea(false);
     setLocating(true);
     navigator.geolocation.getCurrentPosition(async (position) => {
       setCoords({ lat: position.coords.latitude, lng: position.coords.longitude });
@@ -90,7 +132,7 @@ export default function ProfileSetup({ profile, onFinish }: { profile: Profile; 
         // the exact private coordinates above are untouched.
         const rounded = approximateCoordinates(position.coords.latitude, position.coords.longitude) as { lat: number; lng: number };
         const label = await reverseGeocodeGeneralArea(rounded.lat, rounded.lng);
-        if (label) setArea((current) => current || label);
+        if (label) { resolvedArea.current = label; setArea(label); }
         else setMessage("Couldn't determine your area automatically. Enter it manually.");
       } catch {
         setMessage("Couldn't determine your area automatically. Enter it manually.");
@@ -141,10 +183,31 @@ export default function ProfileSetup({ profile, onFinish }: { profile: Profile; 
         {photoUrl && <p className="text-sm">A profile photo is selected.</p>}
       </>}
       {step === 1 && <>
-        <label className="block">Address or general area<input maxLength={200} value={area} onChange={(e) => { setArea(e.target.value); setCoords({ lat: null, lng: null }); }} className={input} /></label>
+        <label className="block">Address or general area<input maxLength={200} value={area} autoComplete="off" placeholder="e.g. Downtown Sunnyvale, CA" onChange={(e) => {
+          resolvedArea.current = "";
+          setArea(e.target.value);
+          setCoords({ lat: null, lng: null });
+          setAreaMatches([]);
+          setAreaError(null);
+          setSearchingArea(e.target.value.trim().length >= 3);
+        }} className={input} /></label>
+        {searchingArea && <p role="status" className="text-sm text-neutral-500">Finding neighborhoods and addresses…</p>}
+        {areaError && <p role="status" className="text-sm text-red-600">{areaError}</p>}
+        {areaMatches.length > 0 && (
+          <ul aria-label="Matching neighborhoods and addresses" className="divide-y divide-neutral-100 overflow-hidden rounded-xl border border-neutral-200">
+            {areaMatches.map((match, index) => <li key={index}>
+              <button type="button" onClick={() => chooseArea(match)} className="w-full px-4 py-3 text-left text-sm hover:bg-emerald-50 focus:bg-emerald-50">{match.label}</button>
+            </li>)}
+          </ul>
+        )}
+        <p className="text-xs text-neutral-500">Select a match. Include your city for more accurate neighborhood results. Location data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer" className="underline">OpenStreetMap contributors</a>.</p>
         <p className="text-sm text-neutral-500">This location stays private. Public gigs use a separate general area; never enter a street address on a gig.</p>
         <button type="button" onClick={locate} className="text-emerald-700">{locating ? "Locating…" : "Use my current location"}</button>
-        {coords.lat != null && <p className="text-sm">Current location collected.</p>}
+        {mapCoords.lat != null && mapCoords.lng != null && <div className="overflow-hidden rounded-xl border border-neutral-200">
+          <iframe title="Map of selected neighborhood" className="h-56 w-full border-0" loading="lazy" referrerPolicy="no-referrer"
+            src={`https://www.openstreetmap.org/export/embed.html?bbox=${encodeURIComponent([mapCoords.lng - 0.04, mapCoords.lat - 0.025, mapCoords.lng + 0.04, mapCoords.lat + 0.025].join(","))}&layer=mapnik&marker=${encodeURIComponent(`${mapCoords.lat},${mapCoords.lng}`)}`} />
+          <p className="px-3 py-2 text-sm text-neutral-500">Selected area — approximate map location.</p>
+        </div>}
       </>}
       {step === 2 && <>
         <fieldset><legend className="font-medium">Skills I can use to make money</legend>{catalog.map((item) => <label key={item} className="check-row"><input type="checkbox" checked={skills.includes(item)} onChange={() => toggleSkill(item)} /> {item}</label>)}</fieldset>
@@ -172,7 +235,7 @@ export default function ProfileSetup({ profile, onFinish }: { profile: Profile; 
     {message && <p role="status" className="text-emerald-700">{message}</p>}
     <div className="flex gap-3">
       {step > 0 && <button disabled={busy || locating} onClick={() => { setStep(step - 1); setError(null); }} className="rounded-lg border px-4 py-2">Back</button>}
-      <button disabled={busy || locating} onClick={step < 2 ? nextStep : save} className="rounded-lg bg-emerald-600 px-4 py-2 text-white disabled:opacity-60">{busy ? "Saving…" : step < 2 ? "Continue" : "Save profile & continue"}</button>
+      <button disabled={busy || locating || (step === 1 && searchingArea)} onClick={step < 2 ? nextStep : save} className="rounded-lg bg-emerald-600 px-4 py-2 text-white disabled:opacity-60">{busy ? "Saving…" : step < 2 ? "Continue" : "Save profile & continue"}</button>
     </div>
     {step === 2 && sheetSkills.length > 0 && (
       <OptionSheet title={sheetScope === ALL_SKILLS ? "Add specializations" : (SPECIALIZATION_PROMPTS[sheetSkills[0]] ?? `What kind of ${sheetSkills[0].toLowerCase()}?`)}
@@ -201,3 +264,4 @@ export default function ProfileSetup({ profile, onFinish }: { profile: Profile; 
     )}
   </div>;
 }
+
