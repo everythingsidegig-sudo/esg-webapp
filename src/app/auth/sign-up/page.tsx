@@ -23,6 +23,8 @@ function SignUpInner() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [confirmationSent, setConfirmationSent] = useState(false);
@@ -156,29 +158,51 @@ function SignUpInner() {
 
       <div>
         <label htmlFor="signup-password" className="mb-1 block text-sm font-medium">Password</label>
-        <input
-          id="signup-password"
-          autoComplete="new-password"
-          type="password"
-          required
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder="10+ chars, letter + number + symbol"
-          className="w-full rounded-lg border border-neutral-300 px-3 py-2"
-        />
+        <div className="relative">
+          <input
+            id="signup-password"
+            autoComplete="new-password"
+            type={showPassword ? "text" : "password"}
+            required
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="10+ chars, letter + number + symbol"
+            className="w-full rounded-lg border border-neutral-300 px-3 py-2 pr-16"
+          />
+          <button
+            type="button"
+            onClick={() => setShowPassword((current) => !current)}
+            aria-label={showPassword ? "Hide password" : "Show password"}
+            aria-controls="signup-password"
+            className="absolute inset-y-0 right-0 px-3 text-sm font-medium text-emerald-700"
+          >
+            {showPassword ? "Hide" : "Show"}
+          </button>
+        </div>
       </div>
 
       <div>
         <label htmlFor="signup-confirm" className="mb-1 block text-sm font-medium">Confirm Password</label>
-        <input
-          id="signup-confirm"
-          autoComplete="new-password"
-          type="password"
-          required
-          value={confirm}
-          onChange={(e) => setConfirm(e.target.value)}
-          className="w-full rounded-lg border border-neutral-300 px-3 py-2"
-        />
+        <div className="relative">
+          <input
+            id="signup-confirm"
+            autoComplete="new-password"
+            type={showConfirm ? "text" : "password"}
+            required
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+            className="w-full rounded-lg border border-neutral-300 px-3 py-2 pr-16"
+          />
+          <button
+            type="button"
+            onClick={() => setShowConfirm((current) => !current)}
+            aria-label={showConfirm ? "Hide confirm password" : "Show confirm password"}
+            aria-controls="signup-confirm"
+            className="absolute inset-y-0 right-0 px-3 text-sm font-medium text-emerald-700"
+          >
+            {showConfirm ? "Hide" : "Show"}
+          </button>
+        </div>
       </div>
 
       {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
