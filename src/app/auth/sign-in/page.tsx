@@ -17,7 +17,7 @@ function SignInInner() {
   const { user, loading } = useAuth();
   const pending = useRef(false);
 
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,11 +37,36 @@ function SignInInner() {
     setError(null);
 
     try {
-      const { error: signInError } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-      if (signInError) throw signInError;
+      const login = identifier.trim();
+      if (login.includes("@")) {
+        const { error: signInError } = await supabase.auth.signInWithPassword({ email: login, password });
+        if (signInError) throw signInError;
+      } else {
+        const response = await fetch("/api/auth/sign-in", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: login, password }),
+          signal: AbortSignal.timeout(20000),
+        });
+        const result = await response.json();
+        if (!response.ok) {
+          if (result.code === "username_signin_unavailable") {
+            setError("Username sign-in is temporarily unavailable. Please use your email to sign in.");
+            return;
+          }
+          throw { code: result.code };
+        }
+        const { error: sessionError } = await supabase.auth.setSession({
+          access_token: result.access_token,
+          refresh_token: result.refresh_token,
+        });
+        if (sessionError) throw sessionError;
+      }
       router.replace(setupDestination(next));
     } catch (error) {
-      setError(friendlyError(error, "Couldn't sign in. Check your connection and try again."));
+      setError((error as { code?: string })?.code === "invalid_credentials"
+        ? "That email, username, or password isn't right."
+        : friendlyError(error, "Couldn't sign in. Check your connection and try again."));
     } finally {
       pending.current = false;
       setSubmitting(false);
@@ -53,14 +78,16 @@ function SignInInner() {
       <h1 className="text-xl font-semibold">Sign In</h1>
 
       <div>
-        <label htmlFor="signin-email" className="mb-1 block text-sm font-medium">Email</label>
+        <label htmlFor="signin-identifier" className="mb-1 block text-sm font-medium">Email or username</label>
         <input
-          id="signin-email"
-          autoComplete="email"
-          type="email"
+          id="signin-identifier"
+          autoComplete="username"
+          autoCapitalize="none"
+          spellCheck={false}
+          type="text"
           required
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          value={identifier}
+          onChange={(e) => setIdentifier(e.target.value)}
           className="w-full rounded-lg border border-neutral-300 px-3 py-2"
         />
       </div>
