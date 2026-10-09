@@ -17,6 +17,7 @@ export default function Home() {
           href="/need-help"
           className="rounded-xl border border-neutral-200 bg-white p-6 shadow-sm transition hover:shadow-md"
         >
+          <div className="mb-3 text-4xl" aria-hidden="true">🙋</div>
           <div className="font-semibold">I Need Help</div>
           <div className="mt-1 text-sm text-neutral-500">Post a gig or find a helper nearby.</div>
         </Link>
@@ -24,6 +25,7 @@ export default function Home() {
           href="/browse"
           className="rounded-xl border border-neutral-200 bg-white p-6 shadow-sm transition hover:shadow-md"
         >
+          <div className="mb-3 text-4xl" aria-hidden="true">💪</div>
           <div className="font-semibold">Help &amp; Make Money</div>
           <div className="mt-1 text-sm text-neutral-500">Browse gigs nearby and start earning.</div>
         </Link>
