@@ -2117,58 +2117,57 @@ test("authenticated Sign In uses validated next and never renders the form", asy
   assert.equal(nodes(tree, (node) => node.type === "form").length, 0);
 });
 
-async function submitSignUp(signUpResult) {
+// ESG-AUTH-002 v0.5 §4: email-link registration, BR-REG-002 checked via
+// email_registered() before anything is sent -- no password is collected here
+// at all anymore (that moved to /auth/register, after email verification).
+async function signUpApp(emailRegistered, { signInWithOtp = async () => ({ error: null }) } = {}) {
   const app = await component("src/app/auth/sign-up/page.tsx", "SignUpInner", {
-    client: {
-      from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) }) }),
-      auth: { signUp: async () => signUpResult() },
-    },
+    client: { rpc: async () => ({ data: emailRegistered, error: null }), auth: { signInWithOtp } },
     globals: { window: { location: { origin: "http://localhost:3001" } } },
   });
   app.auth.user = null; app.auth.profile = null;
   let tree = app.render();
-  const field = (id, value) => nodes(tree, (node) => node.props.id === id)[0].props.onChange({ target: { value } });
-  field("signup-email", "person@example.com"); field("signup-username", "NewPerson1");
-  field("signup-password", "Replacement1!"); field("signup-confirm", "Replacement1!");
+  nodes(tree, (node) => node.props.id === "signup-email")[0].props.onChange({ target: { value: "person@example.com" } });
   tree = app.render();
   await nodes(tree, (node) => node.type === "form")[0].props.onSubmit({ preventDefault() {} });
   return app.render();
 }
-const existsAlert = (tree) => nodes(tree, (node) => node.props.role === "alert" && node.props.children === "An account already exists with this email.");
+const existsAlert = (tree) => nodes(tree, (node) => node.props.role === "alert" && node.props.children === "This email is already registered.");
 
-test("Sign Up tells the user when an account already exists with that email (obfuscated Supabase response), offering sign in / reset", async () => {
-  const tree = await submitSignUp(async () => ({ data: { user: { id: "u", identities: [] }, session: null }, error: null }));
+test("Sign Up tells the user when the email is already registered, offering Sign In / Use Another Email, and never sends a link", async () => {
+  const sent = [];
+  const tree = await signUpApp(true, { signInWithOtp: async (args) => { sent.push(args); return { error: null }; } });
   assert.equal(existsAlert(tree).length, 1);
-  assert.equal(nodes(tree, (node) => node.props.children === "Check your email").length, 0, "does not claim a confirmation email was sent");
-  const hrefs = nodes(tree, (node) => node.type === "a").map((node) => node.props.href);
-  assert.ok(hrefs.includes("/auth/sign-in?next=%2F") && hrefs.includes("/auth/forgot-password"));
+  assert.equal(nodes(tree, (node) => node.props.children === "Check Your Email").length, 0, "does not claim a link was sent");
+  assert.deepEqual(sent, [], "never calls signInWithOtp for an already-registered email");
+  assert.ok(nodes(tree, (node) => node.type === "a" && node.props.href === "/auth/sign-in").length, "offers Sign In");
+  assert.ok(nodes(tree, (node) => node.type === "button" && node.props.children === "Use Another Email").length);
 });
 
-test("Sign Up shows the same message when Supabase returns an explicit already-registered error", async () => {
-  for (const code of ["email_exists", "user_already_exists"]) {
-    const tree = await submitSignUp(async () => ({ data: { user: null, session: null }, error: { code, status: 422 } }));
-    assert.equal(existsAlert(tree).length, 1, code);
-  }
-});
-
-test("Sign Up for a genuinely new email still shows the check-your-email screen", async () => {
-  const tree = await submitSignUp(async () => ({ data: { user: { id: "u", identities: [{ id: "i" }] }, session: null }, error: null }));
+test("Sign Up for a genuinely new email sends a verification link (no password collected) and shows Check Your Email", async () => {
+  const sent = [];
+  const tree = await signUpApp(false, { signInWithOtp: async (args) => { sent.push(args); return { error: null }; } });
   assert.equal(existsAlert(tree).length, 0);
-  assert.equal(nodes(tree, (node) => node.props.children === "Check your email").length, 1);
+  assert.equal(nodes(tree, (node) => node.props.children === "Check Your Email").length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(sent)), [{
+    email: "person@example.com",
+    options: { emailRedirectTo: "http://localhost:3001/auth/callback?flow=register", shouldCreateUser: true },
+  }]);
+  assert.equal(nodes(tree, (node) => node.type === "input" && node.props.type === "password").length, 0, "no password field exists on this screen");
 });
 
-test("authenticated Sign Up defaults to Location", async () => {
-  const destinations = [];
-  const app = await component("src/app/auth/sign-up/page.tsx", "SignUpInner", {
-    client: {},
-    mocks: { "next/navigation": {
-      useSearchParams: () => new URLSearchParams(),
-      useRouter: () => ({ replace: (url) => destinations.push(url) }),
-    } },
-  });
-  const tree = app.render();
-  assert.deepEqual(destinations, ["/location"]);
-  assert.equal(nodes(tree, (node) => node.type === "form").length, 0);
+test("authenticated Sign Up resumes registration (incomplete profile) or goes Home (already finished)", async () => {
+  for (const [onboarding_completed_at, expected] of [[null, "/auth/register"], ["2026-01-01", "/"]]) {
+    const destinations = [];
+    const app = await component("src/app/auth/sign-up/page.tsx", "SignUpInner", {
+      client: {},
+      mocks: { "next/navigation": { useRouter: () => ({ replace: (url) => destinations.push(url) }) } },
+    });
+    app.auth.profile = { ...profile, onboarding_completed_at };
+    const tree = app.render();
+    assert.deepEqual(destinations, [expected]);
+    assert.equal(nodes(tree, (node) => node.type === "form").length, 0);
+  }
 });
 
 test("auth-entry pages wait for session restoration before deciding", async () => {

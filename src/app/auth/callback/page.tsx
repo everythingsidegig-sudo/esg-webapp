@@ -11,7 +11,11 @@ let exchange: { code: string; promise: Promise<unknown> } | null = null;
 function CallbackInner() {
   const supabase = createClient();
   const router = useRouter();
-  const next = safeNext(useSearchParams().get("next"));
+  const searchParams = useSearchParams();
+  const next = safeNext(searchParams.get("next"));
+  // ESG-AUTH-002 v0.5 §4: a verified Registration link continues at Username,
+  // never restoring a prior journey (unlike a normal sign-in confirmation).
+  const isRegisterFlow = searchParams.get("flow") === "register";
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
@@ -36,7 +40,7 @@ function CallbackInner() {
       if (error || !data.session) throw new Error("No verified session was established. Please sign in with your verified account.");
       if (alive) {
         window.history.replaceState(null, "", `/auth/callback?next=${encodeURIComponent(next)}`);
-        router.replace(setupDestination(next));
+        router.replace(isRegisterFlow ? "/auth/register" : setupDestination(next));
       }
     }
     void confirm().catch((error: Error) => {
@@ -46,7 +50,7 @@ function CallbackInner() {
       }
     });
     return () => { alive = false; };
-  }, [supabase, router, next]);
+  }, [supabase, router, next, isRegisterFlow]);
   return <div className="space-y-3 p-8 text-center">
     {error ? <><p role="alert">{error}</p><Link className="touch-link text-emerald-700" href={`/auth/sign-in?next=${encodeURIComponent(next)}`}>Sign In</Link>{" · "}<Link className="touch-link" href={`/auth/sign-up?next=${encodeURIComponent(next)}`}>Register / request confirmation</Link></> : <p>Confirming your account…</p>}
   </div>;

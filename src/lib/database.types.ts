@@ -35,6 +35,9 @@ export interface Profile {
   public_lng: number | null;
   onboarding_completed_at: string | null;
   phone: string | null;
+  terms_accepted_at: string | null;
+  skills_other_text: string | null;
+  services_other_text: string | null;
 }
 
 export interface PublicProfile {
@@ -165,6 +168,15 @@ export interface Database {
       cancel_gig: { Args: { p_gig_id: string }; Returns: void };
       get_public_stats: { Args: { p_profile_id: string }; Returns: { gigs_worked_count: number; wom_count: number; wom_percentage: number | null }[] };
       check_deletion_eligibility: { Args: Record<string, never>; Returns: { eligible: boolean; active_gigs_count: number; open_disputes_count: number }[] };
+      email_registered: { Args: { p_email: string }; Returns: boolean };
+      complete_registration: {
+        Args: {
+          p_username: string; p_photo_url: string | null; p_phone: string | null;
+          p_skills: string[]; p_services: string[]; p_skills_other: string | null; p_services_other: string | null;
+          p_terms_accepted: boolean;
+        };
+        Returns: Profile;
+      };
       set_helper_tags: { Args: { p_service_type: string; p_tag_ids: string[] }; Returns: void };
       set_helper_location: { Args: { p_location_text: string | null; p_lat: number | null; p_lng: number | null }; Returns: Profile };
     };

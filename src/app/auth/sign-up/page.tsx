@@ -2,135 +2,100 @@
 
 import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { useRouter, useSearchParams } from "next/navigation";
-import { friendlyError, registrationError, safeNext, setupDestination } from "@/lib/journey";
 import { useAuth } from "@/lib/auth-context";
+import { friendlyError } from "@/lib/journey";
 
-const EMAIL_EXISTS_MESSAGE = "An account already exists with this email.";
-
+// ESG-AUTH-002 v0.5 screens 2-3: Registration Email -> Check Your Email.
+// Email verification is link-based (BR-REG-003) -- no OTP here. A verified
+// click lands on /auth/callback?flow=register, which continues at
+// /auth/register (Username onward). No `next` is threaded through
+// registration: §13 is explicit that Registration never restores a prior
+// protected journey, it always ends at Home.
 function SignUpInner() {
   const supabase = createClient();
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const requestedNext = searchParams.get("next");
-  const next = safeNext(requestedNext);
-  const authenticatedDestination = requestedNext ? next : "/location";
-  const { user, loading } = useAuth();
+  const { user, profile, loading } = useAuth();
   const pending = useRef(false);
 
   const [email, setEmail] = useState("");
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [sent, setSent] = useState(false);
+  const [alreadyRegistered, setAlreadyRegistered] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [confirmationSent, setConfirmationSent] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [emailExists, setEmailExists] = useState(false);
 
+  // Already signed in: a finished account goes Home; an account that
+  // verified its email but never finished Username-onward resumes there.
   useEffect(() => {
-    if (!loading && user) router.replace(authenticatedDestination);
-  }, [loading, user, router, authenticatedDestination]);
+    if (loading || !user) return;
+    router.replace(profile?.onboarding_completed_at ? "/" : "/auth/register");
+  }, [loading, user, profile, router]);
 
-  if (loading || user) return <p className="text-center text-neutral-500">Loading your account…</p>;
+  if (loading || user) return <p className="text-center text-neutral-500">Loading…</p>;
 
-  async function resend() {
-    if (pending.current) return;
-    pending.current = true; setSubmitting(true); setError(null); setNotice(null);
-    try {
-      const { error } = await supabase.auth.resend({ type: "signup", email: email.trim(), options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
-      } });
-      if (error) throw error;
-      setNotice("If confirmation is needed, another link will arrive shortly. Check spam too.");
-    } catch (error) { setError(friendlyError(error, "Couldn't resend the link. Wait a few minutes, then try again.")); }
-    finally { pending.current = false; setSubmitting(false); }
-  }
-
-  function validate(): string | null {
-    return registrationError(username, password, confirm);
+  async function sendLink() {
+    const { error: linkError } = await supabase.auth.signInWithOtp({
+      email: email.trim(),
+      options: { emailRedirectTo: `${window.location.origin}/auth/callback?flow=register`, shouldCreateUser: true },
+    });
+    if (linkError) throw linkError;
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (pending.current) return;
-    setError(null); setEmailExists(false);
+    setError(null); setAlreadyRegistered(false);
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { setError("Enter a valid email address."); return; }
 
-    const validationError = validate();
-    if (validationError) {
-      setError(validationError);
-      return;
-    }
-
-    pending.current = true;
-    setSubmitting(true);
+    pending.current = true; setSubmitting(true);
     try {
-    const { data: existing, error: lookupError } = await supabase
-      .from("public_profiles")
-      .select("id")
-      .eq("username", username)
-      .maybeSingle();
-    if (lookupError) throw lookupError;
-    if (existing) {
-      setError("That username is already taken.");
-      return;
-    }
-
-    const { data, error: signUpError } = await supabase.auth.signUp({
-      email: email.trim(),
-      password,
-      options: {
-        data: { username },
-        emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
-      },
-    });
-
-    if (signUpError) throw signUpError;
-    // With email confirmation on, Supabase answers a signup for an already-registered
-    // address with no error and a user that has no identities (it sends no new account).
-    if (data.user && data.user.identities?.length === 0) {
-      setEmailExists(true); setError(EMAIL_EXISTS_MESSAGE);
-      return;
-    }
-    if (data.session) router.replace(setupDestination(next));
-    else setConfirmationSent(true);
+      const { data: registered, error: checkError } = await supabase.rpc("email_registered", { p_email: email.trim() });
+      if (checkError) throw checkError;
+      if (registered) { setAlreadyRegistered(true); setError("This email is already registered."); return; }
+      await sendLink();
+      setSent(true);
     } catch (error) {
-      const code = (error as { code?: unknown } | null)?.code;
-      if (code === "email_exists" || code === "user_already_exists") { setEmailExists(true); setError(EMAIL_EXISTS_MESSAGE); return; }
-      setError(friendlyError(error, "Couldn't create your account. Check your connection, or try signing in if you already registered."));
+      setError(friendlyError(error, "Couldn't send a verification link. Check your connection and try again."));
     } finally {
-      pending.current = false;
-      setSubmitting(false);
+      pending.current = false; setSubmitting(false);
     }
   }
 
-  if (confirmationSent) {
+  async function resend() {
+    if (pending.current) return;
+    pending.current = true; setSubmitting(true); setError(null); setNotice(null);
+    try {
+      await sendLink();
+      setNotice("Another verification link is on its way. Check spam too.");
+    } catch (error) {
+      setError(friendlyError(error, "Couldn't resend the link. Wait a few minutes, then try again."));
+    } finally {
+      pending.current = false; setSubmitting(false);
+    }
+  }
+
+  if (sent) {
     return (
       <div className="mx-auto max-w-md space-y-3 text-center">
-        <h1 className="text-xl font-semibold">Check your email</h1>
-        <p className="text-sm text-neutral-600">
-          If this email can be registered, a confirmation link will be sent to <strong>{email}</strong>.
-          Open it in this browser to finish setup. Already registered? Try signing in.
-        </p>
-        <Link href={`/auth/sign-in?next=${encodeURIComponent(next)}`} className="touch-link text-emerald-700 font-medium">
-          Go to Sign In
-        </Link>
-        <button disabled={submitting} onClick={() => void resend()} className="block w-full text-emerald-700">{submitting ? "Sending…" : "Resend confirmation link"}</button>
-        {error && <p role="alert" className="text-red-600">{error}</p>}
-        {notice && <p role="status">{notice}</p>}
+        <h1 className="text-xl font-semibold">Check Your Email</h1>
+        <p className="text-sm text-neutral-600">Verification link sent to {email.trim()}.</p>
+        <p className="text-sm text-neutral-600">Click the link to verify your email, then continue registration at Username.</p>
+        <button disabled={submitting} onClick={() => void resend()} className="block w-full text-emerald-700">
+          {submitting ? "Sending…" : "Resend Verification Link"}
+        </button>
+        {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
+        {notice && <p role="status" className="text-sm text-neutral-600">{notice}</p>}
       </div>
     );
   }
 
   return (
     <form onSubmit={handleSubmit} className="mx-auto max-w-md space-y-4">
-      <h1 className="text-xl font-semibold">Create your ESG account</h1>
-
+      <h1 className="text-xl font-semibold">Create Account</h1>
       <div>
-        <label htmlFor="signup-email" className="mb-1 block text-sm font-medium">Email</label>
+        <label htmlFor="signup-email" className="mb-1 block text-sm font-medium">Email Address</label>
         <input
           id="signup-email"
           autoComplete="email"
@@ -142,75 +107,14 @@ function SignUpInner() {
         />
       </div>
 
-      <div>
-        <label htmlFor="signup-username" className="mb-1 block text-sm font-medium">Username</label>
-        <input
-          id="signup-username"
-          autoComplete="username"
-          maxLength={40}
-          required
-          value={username}
-          onChange={(e) => setUsername(e.target.value.replace(/\s/g, ""))}
-          placeholder="at least 6 letters/numbers"
-          className="w-full rounded-lg border border-neutral-300 px-3 py-2"
-        />
-      </div>
-
-      <div>
-        <label htmlFor="signup-password" className="mb-1 block text-sm font-medium">Password</label>
-        <div className="relative">
-          <input
-            id="signup-password"
-            autoComplete="new-password"
-            type={showPassword ? "text" : "password"}
-            required
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="10+ chars, letter + number + symbol"
-            className="w-full rounded-lg border border-neutral-300 px-3 py-2 pr-16"
-          />
-          <button
-            type="button"
-            onClick={() => setShowPassword((current) => !current)}
-            aria-label={showPassword ? "Hide password" : "Show password"}
-            aria-controls="signup-password"
-            className="absolute inset-y-0 right-0 px-3 text-sm font-medium text-emerald-700"
-          >
-            {showPassword ? "Hide" : "Show"}
-          </button>
-        </div>
-      </div>
-
-      <div>
-        <label htmlFor="signup-confirm" className="mb-1 block text-sm font-medium">Confirm Password</label>
-        <div className="relative">
-          <input
-            id="signup-confirm"
-            autoComplete="new-password"
-            type={showConfirm ? "text" : "password"}
-            required
-            value={confirm}
-            onChange={(e) => setConfirm(e.target.value)}
-            className="w-full rounded-lg border border-neutral-300 px-3 py-2 pr-16"
-          />
-          <button
-            type="button"
-            onClick={() => setShowConfirm((current) => !current)}
-            aria-label={showConfirm ? "Hide confirm password" : "Show confirm password"}
-            aria-controls="signup-confirm"
-            className="absolute inset-y-0 right-0 px-3 text-sm font-medium text-emerald-700"
-          >
-            {showConfirm ? "Hide" : "Show"}
-          </button>
-        </div>
-      </div>
-
       {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
-      {emailExists && (
+      {alreadyRegistered && (
         <p className="text-sm text-neutral-600">
-          <Link href={`/auth/sign-in?next=${encodeURIComponent(next)}`} className="touch-link font-medium text-emerald-700">Sign in</Link>
+          <Link href="/auth/sign-in" className="touch-link font-medium text-emerald-700">Sign In</Link>
           {" or "}
-          <Link href="/auth/forgot-password" className="touch-link font-medium text-emerald-700">reset your password</Link>.
+          <button type="button" onClick={() => { setEmail(""); setError(null); setAlreadyRegistered(false); }} className="touch-link font-medium text-emerald-700">
+            Use Another Email
+          </button>
         </p>
       )}
 
@@ -219,14 +123,12 @@ function SignUpInner() {
         disabled={submitting}
         className="w-full rounded-lg bg-emerald-600 py-2.5 font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
       >
-        {submitting ? "Creating account…" : "Create Account"}
+        {submitting ? "Sending…" : "Send Verification Link"}
       </button>
 
       <p className="flex flex-wrap items-center justify-center gap-x-1 text-sm text-neutral-500">
         Already have an account?{" "}
-        <Link href={`/auth/sign-in?next=${encodeURIComponent(next)}`} className="touch-link font-medium text-emerald-700">
-          Sign In
-        </Link>
+        <Link href="/auth/sign-in" className="touch-link font-medium text-emerald-700">Sign In</Link>
       </p>
     </form>
   );
