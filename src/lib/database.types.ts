@@ -162,7 +162,8 @@ export interface Database {
       submit_feedback: { Args: { p_gig_id: string; p_type: FeedbackType }; Returns: void };
       publish_gig: { Args: { p_gig_id: string }; Returns: void };
       cancel_gig: { Args: { p_gig_id: string }; Returns: void };
-      get_public_stats: { Args: { p_profile_id: string }; Returns: { gigs_worked_count: number; wom_count: number }[] };
+      get_public_stats: { Args: { p_profile_id: string }; Returns: { gigs_worked_count: number; wom_count: number; wom_percentage: number | null }[] };
+      check_deletion_eligibility: { Args: Record<string, never>; Returns: { eligible: boolean; active_gigs_count: number; open_disputes_count: number }[] };
       set_helper_tags: { Args: { p_service_type: string; p_tag_ids: string[] }; Returns: void };
       set_helper_location: { Args: { p_location_text: string | null; p_lat: number | null; p_lng: number | null }; Returns: Profile };
     };

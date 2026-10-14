@@ -10,6 +10,9 @@ function PublicProfileView({ username }: { username: string }) {
   const supabase = createClient();
   const [profile, setProfile] = useState<PublicProfileWithTags | null | undefined>(undefined);
   const [gigsWorked, setGigsWorked] = useState<number | null>(null);
+  // Lemon count (the other half of this ratio) is private and never leaves
+  // get_public_stats() -- only the pre-computed percentage does. ESG-FDBK-001.
+  const [womPercentage, setWomPercentage] = useState<number | null>(null);
 
   useEffect(() => {
     supabase
@@ -24,6 +27,7 @@ function PublicProfileView({ username }: { username: string }) {
         setProfile(withTags);
         const { data: stats } = await supabase.rpc("get_public_stats", { p_profile_id: data.id });
         setGigsWorked(stats?.[0]?.gigs_worked_count ?? 0);
+        setWomPercentage(stats?.[0]?.wom_percentage ?? null);
       });
   }, [supabase, username]);
 
@@ -43,8 +47,8 @@ function PublicProfileView({ username }: { username: string }) {
 
       <div className="grid grid-cols-2 gap-3 text-center">
         <div className="rounded-lg border border-neutral-200 bg-white p-3">
-          <div className="text-lg font-semibold">{profile.wom_count}</div>
-          <div className="text-xs text-neutral-500">WOM</div>
+          <div className="text-lg font-semibold">{womPercentage != null ? `${womPercentage}%` : "—"}</div>
+          <div className="text-xs text-neutral-500">WOM% ({profile.wom_count})</div>
         </div>
         <div className="rounded-lg border border-neutral-200 bg-white p-3">
           <div className="text-lg font-semibold">{gigsWorked ?? "—"}</div>

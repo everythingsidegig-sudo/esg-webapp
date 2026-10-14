@@ -880,6 +880,29 @@ test("Public profile hides Specializations section for a legacy profile with no 
   assert.equal(nodes(tree, (node) => node.type === "tag-chip").length, 0);
 });
 
+test("Public profile shows the pre-computed WOM% (never the raw lemon_count, which stays private) and falls back to '—' when it's null", async () => {
+  const withPercentage = { id: "helper-1", username: "HelperOne", photo_url: null, skills: [], wom_count: 4, profile_tags: [] };
+  const client = {
+    from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: withPercentage, error: null }) }) }) }),
+    rpc: async () => ({ data: [{ gigs_worked_count: 2, wom_count: 4, wom_percentage: 80 }], error: null }),
+  };
+  const app = await component("src/app/profile/[username]/page.tsx", "PublicProfileView", { client });
+  app.render({ username: "HelperOne" }); await flush();
+  let tree = app.render({ username: "HelperOne" });
+  assert.equal(nodes(tree, (node) => node.props.children === "80%").length, 1, "shows the server-computed percentage");
+  assert.equal(nodes(tree, (node) => String(node.props.children).includes("lemon")).length, 0, "lemon_count is never requested or rendered here");
+
+  const noSignal = { ...withPercentage, wom_count: 0 };
+  const clientNull = {
+    from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: noSignal, error: null }) }) }) }),
+    rpc: async () => ({ data: [{ gigs_worked_count: 0, wom_count: 0, wom_percentage: null }], error: null }),
+  };
+  const app2 = await component("src/app/profile/[username]/page.tsx", "PublicProfileView", { client: clientNull });
+  app2.render({ username: "HelperOne" }); await flush();
+  tree = app2.render({ username: "HelperOne" });
+  assert.equal(nodes(tree, (node) => node.props.children === "—").length, 1, "no WOM/Lemon signal yet falls back to an em dash, not 0%/NaN");
+});
+
 test("Browse chips select one existing category and All Services restores results", async () => {
   const gigs = ["Cleaning", "Other"].map((service_type) => ({ id: service_type, service_type, title: service_type, amount: 10 }));
   const client = { from: () => ({ select: () => ({ eq: () => ({ order: async () => ({ data: gigs, error: null }) }) }) }) };
