@@ -20,17 +20,20 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
--- 1. tags.service_type CHECK constraint: widen from the old 8 to the approved
---    13 (+ Other) FIRST, before any row is renamed to a value the old
---    constraint wouldn't yet accept. Constraint name is Postgres's default
---    for an unnamed single-column CHECK; if this errors with "constraint
---    does not exist", find the real name via \d tags in the SQL Editor.
+-- 1. tags.service_type CHECK constraint: expand -> migrate -> contract.
+--    ADD CONSTRAINT validates every existing row immediately, so a straight
+--    swap to the final 13(+Other) list fails on rows still saying 'Delivery'.
+--    Widen to a temporary superset (old 8 + new 13 + Other) first, rename the
+--    data, then narrow to the real final list once no row says 'Delivery'.
+--    Constraint name is Postgres's default for an unnamed single-column
+--    CHECK; if this errors with "constraint does not exist", find the real
+--    name via \d tags in the SQL Editor.
 -- ---------------------------------------------------------------------------
 alter table public.tags drop constraint if exists tags_service_type_check;
 alter table public.tags add constraint tags_service_type_check check (
   service_type = any(array[
-    'Moving Help','Cleaning','Handyman','Furniture Assembly','Yard Work','Delivery / Pickup',
-    'Errands','Auto Help','Tech Help','Pet Care','Cooking / Catering','Tutoring','Event Help','Other'
+    'Yard Work','Moving Help','Cleaning','Handyman','Delivery','Pet Care','Tech Help',
+    'Furniture Assembly','Delivery / Pickup','Errands','Auto Help','Cooking / Catering','Tutoring','Event Help','Other'
   ])
 );
 
@@ -56,6 +59,15 @@ set services = (
   from pg_catalog.jsonb_array_elements_text(services) as value
 )
 where services @> '["Delivery"]'::jsonb;
+
+-- Now safe to contract to the real final list (no row can say 'Delivery' anymore).
+alter table public.tags drop constraint tags_service_type_check;
+alter table public.tags add constraint tags_service_type_check check (
+  service_type = any(array[
+    'Moving Help','Cleaning','Handyman','Furniture Assembly','Yard Work','Delivery / Pickup',
+    'Errands','Auto Help','Tech Help','Pet Care','Cooking / Catering','Tutoring','Event Help','Other'
+  ])
+);
 
 -- ---------------------------------------------------------------------------
 -- 3. create_gig(): same signature as 0010, approved category list, ~50-char
