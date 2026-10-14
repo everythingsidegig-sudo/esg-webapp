@@ -562,55 +562,94 @@ test("Profile: Update profile is disabled and inert until something actually cha
   assert.equal(update().props.disabled, false, "a skill change enables it");
 });
 
-test("Profile Danger zone: Delete account opens a confirmation dialog, disabled until DELETE is typed exactly", async () => {
-  const client = { from: (table) => table === "profile_tags" ? { select: () => ({ eq: async () => ({ data: [], error: null }) }) } : { update: () => ({}) } };
-  const app = await component("src/app/profile/page.tsx", "ProfileEditor", { client });
+// ESG-AUTH-004 v1.0: Delete account -> eligibility pre-check -> Outstanding
+// Gigs popup (blocked) or Warning screen (eligible) -> Final Confirmation
+// with password re-authentication (not an arbitrary typed word) -> delete.
+const eligibleClient = (overrides = {}) => ({
+  from: (table) => table === "profile_tags" ? { select: () => ({ eq: async () => ({ data: [], error: null }) }) } : { update: () => ({}) },
+  rpc: async () => ({ data: [{ eligible: true, active_gigs_count: 0, open_disputes_count: 0 }], error: null }),
+  ...overrides,
+});
+
+async function openToConfirmStage(app) {
+  app.render({ profile }); await flush();
+  let tree = app.render({ profile });
+  const trigger = nodes(tree, (node) => node.type === "button" && node.props.children === "Delete account")[0];
+  trigger.props.onClick();
+  await flush();
+  tree = app.render({ profile });
+  button(tree, "Continue to Delete").props.onClick();
+  tree = app.render({ profile });
+  return tree;
+}
+
+test("Profile Danger zone: a blocked account sees the Outstanding Gigs popup with counts, and View Gigs/Cancel never call delete", async () => {
+  const calls = [];
+  const client = eligibleClient({
+    rpc: async () => ({ data: [{ eligible: false, active_gigs_count: 2, open_disputes_count: 1 }], error: null }),
+  });
+  const destinations = [];
+  const app = await component("src/app/profile/page.tsx", "ProfileEditor", {
+    client, globals: { fetch: async () => { calls.push("fetch"); return { ok: true, json: async () => ({ ok: true }) }; } },
+    mocks: { "next/navigation": { useRouter: () => ({ replace: (url) => destinations.push(url), push: (url) => destinations.push(url) }) } },
+  });
+  app.render({ profile }); await flush();
+  let tree = app.render({ profile });
+  nodes(tree, (node) => node.type === "button" && node.props.children === "Delete account")[0].props.onClick();
+  await flush();
+  tree = app.render({ profile });
+  assert.equal(nodes(tree, (node) => node.props.children === "You have Gigs that need attention").length, 1);
+  assert.ok(nodes(tree, (node) => node.type === "li" && textOf(node) === "Active or in-progress Gigs: 2").length, "shows the active-gigs count");
+  assert.ok(nodes(tree, (node) => node.type === "li" && textOf(node) === "Open Disputes: 1").length, "shows the open-disputes count");
+  assert.equal(nodes(tree, (node) => node.type === "button" && node.props.children === "Continue to Delete").length, 0, "no path to Warning/Confirm while blocked");
+  button(tree, "View Gigs").props.onClick();
+  assert.deepEqual(destinations, ["/my-gigs"]);
+  assert.deepEqual(calls, [], "never calls the delete endpoint while blocked");
+});
+
+test("Profile Danger zone: an eligible account proceeds through the Warning screen to Final Confirmation", async () => {
+  const app = await component("src/app/profile/page.tsx", "ProfileEditor", { client: eligibleClient() });
   app.render({ profile }); await flush();
   let tree = app.render({ profile });
   assert.equal(nodes(tree, (node) => node.props.role === "dialog").length, 0, "no dialog before Delete account is clicked");
-  const trigger = nodes(tree, (node) => node.type === "button" && node.props.children === "Delete account" && node.props.disabled === undefined)[0];
-  trigger.props.onClick();
+  nodes(tree, (node) => node.type === "button" && node.props.children === "Delete account")[0].props.onClick();
+  await flush();
   tree = app.render({ profile });
-  assert.equal(nodes(tree, (node) => node.props.role === "dialog").length, 1, "confirmation dialog opens");
-  assert.equal(nodes(tree, (node) => node.props.children === "Delete your account?").length, 1);
-  assert.equal(nodes(tree, (node) => node.props.children === "This action cannot be undone.").length, 1);
-  const confirmButton = () => nodes(tree, (node) => node.type === "button" && node.props.children === "Delete account" && node.props.disabled !== undefined)[0];
-  assert.equal(confirmButton().props.disabled, true, "disabled until DELETE is typed");
-  const input = nodes(tree, (node) => node.type === "input" && node.props.autoComplete === "off")[0];
-  input.props.onChange({ target: { value: "delete" } });
+  assert.equal(nodes(tree, (node) => node.props.children === "Delete Account").length, 1, "Warning screen title");
+  assert.match(String(nodes(tree, (node) => node.type === "p" && /permanently remove/.test(String(node.props.children)))[0]?.props.children), /permanently remove your access/);
+  button(tree, "Continue to Delete").props.onClick();
   tree = app.render({ profile });
-  assert.equal(confirmButton().props.disabled, true, "must match DELETE exactly (case-sensitive)");
-  input.props.onChange({ target: { value: "DELETE" } });
+  assert.equal(nodes(tree, (node) => node.props.children === "Permanently Delete Account?").length, 1, "Final Confirmation title");
+  const confirmButton = () => nodes(tree, (node) => node.type === "button" && node.props.children === "Delete My Account")[0];
+  assert.equal(confirmButton().props.disabled, true, "disabled until a password is entered");
+  nodes(tree, (node) => node.type === "input" && node.props.type === "password")[0].props.onChange({ target: { value: "CurrentPass1!" } });
   tree = app.render({ profile });
-  assert.equal(confirmButton().props.disabled, false, "enabled once DELETE is typed exactly");
+  assert.equal(confirmButton().props.disabled, false, "enabled once a password is entered");
 });
 
-test("Profile Danger zone: Cancel closes the dialog without deleting anything", async () => {
+test("Profile Danger zone: Cancel/Keep My Account closes the dialog without deleting anything", async () => {
   const calls = [];
-  const client = {
-    from: (table) => table === "profile_tags" ? { select: () => ({ eq: async () => ({ data: [], error: null }) }) } : { update: (payload) => { calls.push(payload); return {}; } },
-    rpc: async (name, payload) => { calls.push({ name, payload }); return { data: null, error: null }; },
-  };
-  const app = await component("src/app/profile/page.tsx", "ProfileEditor", { client });
-  app.render({ profile }); await flush();
-  let tree = app.render({ profile });
-  const trigger = nodes(tree, (node) => node.type === "button" && node.props.children === "Delete account" && node.props.disabled === undefined)[0];
-  trigger.props.onClick();
+  const client = eligibleClient({ auth: { signInWithPassword: async () => { calls.push("reauth"); return { error: null }; } } });
+  const app = await component("src/app/profile/page.tsx", "ProfileEditor", {
+    client,
+    globals: { fetch: async () => { calls.push("fetch"); return { ok: true, json: async () => ({ ok: true }) }; } },
+  });
+  let tree = await openToConfirmStage(app);
+  nodes(tree, (node) => node.type === "input" && node.props.type === "password")[0].props.onChange({ target: { value: "CurrentPass1!" } });
   tree = app.render({ profile });
-  const input = nodes(tree, (node) => node.type === "input" && node.props.autoComplete === "off")[0];
-  input.props.onChange({ target: { value: "DELETE" } });
-  tree = app.render({ profile });
-  button(tree, "Cancel").props.onClick();
+  button(tree, "Keep My Account").props.onClick();
   tree = app.render({ profile });
   assert.equal(nodes(tree, (node) => node.props.role === "dialog").length, 0, "dialog closes");
-  assert.equal(calls.length, 0, "no request of any kind was made");
+  assert.deepEqual(calls, [], "no request of any kind was made");
 });
 
-test("Profile Danger zone: successful deletion signs out, clears ESG session state, and redirects home", async () => {
-  const client = {
-    from: (table) => table === "profile_tags" ? { select: () => ({ eq: async () => ({ data: [], error: null }) }) } : { update: () => ({}) },
-    auth: { signOut: async () => ({ error: null }) },
-  };
+test("Profile Danger zone: successful deletion re-authenticates, signs out, clears ESG session state, and redirects home with the deleted-account flag", async () => {
+  const client = eligibleClient({
+    auth: {
+      signInWithPassword: async (args) => ({ _args: args, error: null }),
+      signOut: async () => ({ error: null }),
+    },
+  });
   const destinations = [];
   const cleared = [];
   let fetchCalls = 0;
@@ -623,43 +662,49 @@ test("Profile Danger zone: successful deletion signs out, clears ESG session sta
       "@/lib/location": { reverseGeocodeGeneralArea: async () => null, clearGeneralAreaState: () => cleared.push("cleared") },
     },
   });
-  app.render({ profile }); await flush();
-  let tree = app.render({ profile });
-  const trigger = nodes(tree, (node) => node.type === "button" && node.props.children === "Delete account" && node.props.disabled === undefined)[0];
-  trigger.props.onClick();
+  app.auth.user = { ...user, email: "person@example.com" };
+  let tree = await openToConfirmStage(app);
+  nodes(tree, (node) => node.type === "input" && node.props.type === "password")[0].props.onChange({ target: { value: "CurrentPass1!" } });
   tree = app.render({ profile });
-  const input = nodes(tree, (node) => node.type === "input" && node.props.autoComplete === "off")[0];
-  input.props.onChange({ target: { value: "DELETE" } });
-  tree = app.render({ profile });
-  const confirmButton = nodes(tree, (node) => node.type === "button" && node.props.children === "Delete account" && node.props.disabled !== undefined)[0];
-  confirmButton.props.onClick();
+  button(tree, "Delete My Account").props.onClick();
   await flush();
   assert.equal(fetchCalls, 1);
   assert.equal(requestedUrl, "/api/account/delete");
   assert.equal(requestedMethod, "POST");
-  assert.deepEqual(destinations, ["/"], "redirects home after successful deletion");
+  assert.deepEqual(destinations, ["/?accountDeleted=1"], "redirects home with the confirmation flag after successful deletion");
   assert.deepEqual(cleared, ["cleared"], "ESG-specific session state (general area, geocode cache) is cleared");
 });
 
+test("Profile Danger zone: a failed re-authentication never calls the delete endpoint", async () => {
+  const calls = [];
+  const client = eligibleClient({ auth: { signInWithPassword: async () => ({ error: { code: "invalid_credentials" } }) } });
+  const app = await component("src/app/profile/page.tsx", "ProfileEditor", {
+    client, globals: { fetch: async () => { calls.push("fetch"); return { ok: true, json: async () => ({ ok: true }) }; } },
+  });
+  app.auth.user = { ...user, email: "person@example.com" };
+  let tree = await openToConfirmStage(app);
+  nodes(tree, (node) => node.type === "input" && node.props.type === "password")[0].props.onChange({ target: { value: "WrongPass1!" } });
+  tree = app.render({ profile });
+  button(tree, "Delete My Account").props.onClick();
+  await flush();
+  tree = app.render({ profile });
+  assert.deepEqual(calls, [], "the delete endpoint is never reached");
+  assert.equal(String(nodes(tree, (node) => node.props.role === "alert")[0].props.children), "We couldn't verify your account. Please check your details and try again.");
+});
+
 test("Profile Danger zone: backend failure shows the server's error, keeps the dialog open, and does not sign out or redirect", async () => {
-  const client = { from: (table) => table === "profile_tags" ? { select: () => ({ eq: async () => ({ data: [], error: null }) }) } : { update: () => ({}) },
-    auth: { signOut: async () => { throw new Error("should not be called"); } } };
+  const client = eligibleClient({ auth: { signInWithPassword: async () => ({ error: null }), signOut: async () => { throw new Error("should not be called"); } } });
   const destinations = [];
   const app = await component("src/app/profile/page.tsx", "ProfileEditor", {
     client,
     globals: { fetch: async () => ({ ok: false, json: async () => ({ error: "Couldn't finish deleting your account. Please try again." }) }) },
     mocks: { "next/navigation": { useRouter: () => ({ replace: (url) => destinations.push(url) }) } },
   });
-  app.render({ profile }); await flush();
-  let tree = app.render({ profile });
-  const trigger = nodes(tree, (node) => node.type === "button" && node.props.children === "Delete account" && node.props.disabled === undefined)[0];
-  trigger.props.onClick();
+  app.auth.user = { ...user, email: "person@example.com" };
+  let tree = await openToConfirmStage(app);
+  nodes(tree, (node) => node.type === "input" && node.props.type === "password")[0].props.onChange({ target: { value: "CurrentPass1!" } });
   tree = app.render({ profile });
-  const input = nodes(tree, (node) => node.type === "input" && node.props.autoComplete === "off")[0];
-  input.props.onChange({ target: { value: "DELETE" } });
-  tree = app.render({ profile });
-  const confirmButton = nodes(tree, (node) => node.type === "button" && node.props.children === "Delete account" && node.props.disabled !== undefined)[0];
-  confirmButton.props.onClick();
+  button(tree, "Delete My Account").props.onClick();
   await flush();
   tree = app.render({ profile });
   assert.equal(nodes(tree, (node) => node.props.role === "dialog").length, 1, "dialog stays open after a failure");
@@ -668,48 +713,41 @@ test("Profile Danger zone: backend failure shows the server's error, keeps the d
 });
 
 test("Profile Danger zone: a network failure shows a friendly message, not the browser's raw error", async () => {
-  const client = { from: (table) => table === "profile_tags" ? { select: () => ({ eq: async () => ({ data: [], error: null }) }) } : { update: () => ({}) }, auth: { signOut: async () => ({ error: null }) } };
+  const client = eligibleClient({ auth: { signInWithPassword: async () => ({ error: null }), signOut: async () => ({ error: null }) } });
   const app = await component("src/app/profile/page.tsx", "ProfileEditor", {
     client,
     globals: { fetch: async () => { throw new TypeError("Failed to fetch"); } },
     mocks: { "next/navigation": { useRouter: () => ({ replace() {} }) } },
   });
-  app.render({ profile }); await flush();
-  let tree = app.render({ profile });
-  nodes(tree, (node) => node.type === "button" && node.props.children === "Delete account" && node.props.disabled === undefined)[0].props.onClick();
+  app.auth.user = { ...user, email: "person@example.com" };
+  let tree = await openToConfirmStage(app);
+  nodes(tree, (node) => node.type === "input" && node.props.type === "password")[0].props.onChange({ target: { value: "CurrentPass1!" } });
   tree = app.render({ profile });
-  nodes(tree, (node) => node.type === "input" && node.props.autoComplete === "off")[0].props.onChange({ target: { value: "DELETE" } });
-  tree = app.render({ profile });
-  nodes(tree, (node) => node.type === "button" && node.props.children === "Delete account" && node.props.disabled !== undefined)[0].props.onClick();
+  button(tree, "Delete My Account").props.onClick();
   await flush();
   tree = app.render({ profile });
   assert.equal(nodes(tree, (node) => node.props.role === "alert" && node.props.children === "Couldn't delete your account. Check your connection and try again.").length, 1);
 });
 
-test("Profile Danger zone: shows a 'Deleting…' loading state, disables Cancel while in flight, and a duplicate click issues only one request", async () => {
-  const client = { from: (table) => table === "profile_tags" ? { select: () => ({ eq: async () => ({ data: [], error: null }) }) } : { update: () => ({}) },
-    auth: { signOut: async () => ({ error: null }) } };
+test("Profile Danger zone: shows a 'Deleting…' loading state, disables Keep My Account while in flight, and a duplicate click issues only one request", async () => {
+  const client = eligibleClient({ auth: { signInWithPassword: async () => ({ error: null }), signOut: async () => ({ error: null }) } });
   let fetchCalls = 0;
   const app = await component("src/app/profile/page.tsx", "ProfileEditor", {
     client,
     globals: { fetch: async () => { fetchCalls++; return { ok: true, json: async () => ({ ok: true }) }; } },
     mocks: { "next/navigation": { useRouter: () => ({ replace() {} }) }, "@/lib/location": { clearGeneralAreaState: () => {} } },
   });
-  app.render({ profile }); await flush();
-  let tree = app.render({ profile });
-  const trigger = nodes(tree, (node) => node.type === "button" && node.props.children === "Delete account" && node.props.disabled === undefined)[0];
-  trigger.props.onClick();
+  app.auth.user = { ...user, email: "person@example.com" };
+  let tree = await openToConfirmStage(app);
+  nodes(tree, (node) => node.type === "input" && node.props.type === "password")[0].props.onChange({ target: { value: "CurrentPass1!" } });
   tree = app.render({ profile });
-  const input = nodes(tree, (node) => node.type === "input" && node.props.autoComplete === "off")[0];
-  input.props.onChange({ target: { value: "DELETE" } });
-  tree = app.render({ profile });
-  const confirmButton = () => nodes(tree, (node) => node.type === "button" && node.props.children === "Delete account" && node.props.disabled !== undefined)[0];
-  confirmButton().props.onClick();
+  const confirmButton = () => nodes(tree, (node) => node.type === "button" && node.props.children === "Delete My Account")[0];
+  const first = confirmButton().props.onClick();
   confirmButton().props.onClick(); // duplicate click before the first request settles
   tree = app.render({ profile });
   assert.ok(nodes(tree, (node) => node.type === "button" && node.props.children === "Deleting…")[0], "shows a distinct loading label while deleting");
-  assert.equal(button(tree, "Cancel").props.disabled, true, "Cancel is disabled while deleting");
-  await flush();
+  assert.equal(button(tree, "Keep My Account").props.disabled, true, "Keep My Account is disabled while deleting");
+  await first; await flush();
   assert.equal(fetchCalls, 1, "the pending guard drops the duplicate submission");
 });
 
@@ -1883,7 +1921,7 @@ test("landing page: I Need Help and Help & Make Money are public links for every
     { user, profile: { ...profile, onboarding_completed_at: "2026-01-01" } },
     { user, profile: { ...profile, onboarding_completed_at: null } },
   ]) {
-    const app = await component("src/app/page.tsx", "Home");
+    const app = await component("src/app/page.tsx", "HomeInner");
     app.auth.user = state.user; app.auth.profile = state.profile;
     const tree = app.render();
     assert.equal(nodes(tree, (node) => node.props.children === "I Need Help").length, 1);

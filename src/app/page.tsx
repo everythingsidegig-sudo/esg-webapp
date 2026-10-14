@@ -1,13 +1,23 @@
 "use client";
 
+import { Suspense } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 
 // Both landing options are public entry points. Authentication is requested
 // only at the point an account is actually needed: Post a Gig (its own
 // AuthGuard) and opening a specific gig (gigs/[id]'s AuthGuard).
-export default function Home() {
+function HomeInner() {
+  // ESG-AUTH-004 v1.0 §10: Account Deleted confirmation, shown once on the
+  // signed-out Home a deletion redirects to.
+  const deleted = useSearchParams().get("accountDeleted") === "1";
   return (
     <div className="flex flex-col items-center gap-8 py-12 text-center">
+      {deleted && (
+        <p role="status" className="rounded-lg bg-neutral-100 px-4 py-2 text-sm text-neutral-700">
+          Account Deleted — Your ESG account has been deleted.
+        </p>
+      )}
       <div>
         <h1 className="text-4xl font-bold text-emerald-700">ESG</h1>
         <p className="mt-2 text-neutral-600">Everything SideGig — post a gig, or find work nearby.</p>
@@ -32,4 +42,8 @@ export default function Home() {
       </div>
     </div>
   );
+}
+
+export default function Home() {
+  return <Suspense><HomeInner /></Suspense>;
 }
