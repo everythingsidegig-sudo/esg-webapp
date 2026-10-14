@@ -2067,15 +2067,34 @@ test("auth-entry pages wait for session restoration before deciding", async () =
   assert.deepEqual(destinations, ["/location"]);
 });
 
-test("forgot-password requests a recovery link without exposing account existence, disabling submit while pending", async () => {
+// ESG-AUTH-003 v1.0: email -> 6-digit code (no reset link, no PKCE) -> new password.
+async function forgotPasswordPage({ client, destinations = [] }) {
+  return component("src/app/auth/forgot-password/page.tsx", "ForgotPassword", {
+    client,
+    mocks: { "next/navigation": { useRouter: () => ({ replace: (url) => destinations.push(url) }) } },
+  });
+}
+
+test("forgot-password validates email format client-side before sending anything", async () => {
+  const sent = [];
+  const app = await forgotPasswordPage({ client: { auth: { resetPasswordForEmail: async (email) => { sent.push(email); return { error: null }; } } } });
+  let tree = app.render();
+  nodes(tree, (node) => node.props.id === "recovery-email")[0].props.onChange({ target: { value: "not-an-email" } });
+  tree = app.render();
+  await nodes(tree, (node) => node.type === "form")[0].props.onSubmit({ preventDefault() {} });
+  tree = app.render();
+  assert.deepEqual(sent, [], "an invalid email never reaches Supabase");
+  assert.equal(String(nodes(tree, (node) => node.props.role === "alert")[0].props.children), "Enter a valid email address.");
+});
+
+test("forgot-password sends a recovery code without exposing account existence, disabling submit while pending, then shows the code step", async () => {
   const requests = [];
   let resolveRequest;
-  const app = await component("src/app/auth/forgot-password/page.tsx", "ForgotPassword", {
-    client: { auth: { resetPasswordForEmail: async (email, options) => {
-      requests.push({ email, options });
+  const app = await forgotPasswordPage({
+    client: { auth: { resetPasswordForEmail: async (email) => {
+      requests.push(email);
       return new Promise((resolve) => { resolveRequest = () => resolve({ error: null }); });
     } } },
-    globals: { window: { location: { origin: "http://localhost:3001" } } },
   });
   let tree = app.render();
   nodes(tree, (node) => node.props.id === "recovery-email")[0].props.onChange({ target: { value: "person@example.com" } });
@@ -2086,58 +2105,109 @@ test("forgot-password requests a recovery link without exposing account existenc
   resolveRequest();
   await submission;
   tree = app.render();
-  assert.deepEqual(JSON.parse(JSON.stringify(requests)), [{ email: "person@example.com", options: { redirectTo: "http://localhost:3001/auth/reset-password" } }]);
-  assert.equal(nodes(tree, (node) => String(node.props.children).includes("If an ESG account uses that email")).length, 1);
+  assert.deepEqual(requests, ["person@example.com"]);
+  assert.equal(nodes(tree, (node) => String(node.props.children).includes("If an ESG account exists for this email")).length, 1);
+  assert.ok(nodes(tree, (node) => node.props.id === "recovery-code").length, "moves to the code-entry step");
   assert.equal(event.defaultPrevented, true);
 });
 
-async function recoveryPage({ href, client, destinations = [], replaced = [], createClient }) {
+async function codeStep(client, destinations = []) {
+  const app = await forgotPasswordPage({ client, destinations });
+  let tree = app.render();
+  nodes(tree, (node) => node.props.id === "recovery-email")[0].props.onChange({ target: { value: "person@example.com" } });
+  tree = app.render();
+  await nodes(tree, (node) => node.type === "form")[0].props.onSubmit({ preventDefault() {} });
+  return { app, destinations };
+}
+
+test("forgot-password code step requires exactly 6 digits before calling Supabase", async () => {
+  const verifies = [];
+  const { app } = await codeStep({ auth: {
+    resetPasswordForEmail: async () => ({ error: null }),
+    verifyOtp: async (args) => { verifies.push(args); return { error: null }; },
+  } });
+  let tree = app.render();
+  nodes(tree, (node) => node.props.id === "recovery-code")[0].props.onChange({ target: { value: "123" } });
+  tree = app.render();
+  await nodes(tree, (node) => node.type === "form")[0].props.onSubmit({ preventDefault() {} });
+  tree = app.render();
+  assert.deepEqual(verifies, []);
+  assert.equal(String(nodes(tree, (node) => node.props.role === "alert")[0].props.children), "Enter the 6-digit verification code.");
+});
+
+test("forgot-password verifies the code via email+token (no token_hash, no PKCE) and redirects to reset-password", async () => {
+  const verifies = [];
+  const { app, destinations } = await codeStep({ auth: {
+    resetPasswordForEmail: async () => ({ error: null }),
+    verifyOtp: async (args) => { verifies.push(args); return { error: null }; },
+  } });
+  let tree = app.render();
+  nodes(tree, (node) => node.props.id === "recovery-code")[0].props.onChange({ target: { value: "123456" } });
+  tree = app.render();
+  await nodes(tree, (node) => node.type === "form")[0].props.onSubmit({ preventDefault() {} });
+  assert.deepEqual(JSON.parse(JSON.stringify(verifies)), [{ email: "person@example.com", token: "123456", type: "recovery" }]);
+  assert.deepEqual(destinations, ["/auth/reset-password"]);
+});
+
+test("forgot-password: an invalid or expired code shows an error and stays on the code step", async () => {
+  const { app, destinations } = await codeStep({ auth: {
+    resetPasswordForEmail: async () => ({ error: null }),
+    verifyOtp: async () => ({ error: { code: "otp_expired", message: "Token has expired or is invalid" } }),
+  } });
+  let tree = app.render();
+  nodes(tree, (node) => node.props.id === "recovery-code")[0].props.onChange({ target: { value: "000000" } });
+  tree = app.render();
+  await nodes(tree, (node) => node.type === "form")[0].props.onSubmit({ preventDefault() {} });
+  tree = app.render();
+  assert.deepEqual(destinations, [], "a failed verification does not navigate away");
+  assert.equal(String(nodes(tree, (node) => node.props.role === "alert")[0].props.children), "Verification code expired.");
+  assert.ok(nodes(tree, (node) => node.props.id === "recovery-code").length, "still on the code step for another attempt");
+});
+
+test("forgot-password: resend code re-sends and updates the notice", async () => {
+  const requests = [];
+  const { app } = await codeStep({ auth: { resetPasswordForEmail: async (email) => { requests.push(email); return { error: null }; } } });
+  let tree = app.render();
+  nodes(tree, (node) => node.type === "button" && node.props.children === "Resend code")[0].props.onClick();
+  await flush();
+  tree = app.render();
+  assert.deepEqual(requests, ["person@example.com", "person@example.com"]);
+  assert.equal(nodes(tree, (node) => String(node.props.children).includes("we've sent a new verification code")).length, 1);
+});
+
+async function recoveryPage({ client, destinations = [] }) {
   return component("src/app/auth/reset-password/page.tsx", "ResetPassword", {
     client,
-    globals: { window: { location: { href }, history: { replaceState: (_s, _t, url) => replaced.push(url) } } },
-    mocks: {
-      "next/navigation": { useRouter: () => ({ replace: (url) => destinations.push(url) }) },
-      ...(createClient ? { "@/lib/supabase/client": { createClient } } : {}),
-    },
+    mocks: { "next/navigation": { useRouter: () => ({ replace: (url) => destinations.push(url) }) } },
   });
 }
 const recoveryForm = (tree) => nodes(tree, (node) => node.type === "form")[0];
 const recoveryAlert = (tree) => nodes(tree, (node) => node.props.role === "alert")[0];
 
-test("reset-password verifies a token_hash recovery link (no PKCE verifier involved), cleans the URL, then updates the password", async () => {
-  const calls = [], destinations = [], replaced = [];
-  const app = await recoveryPage({
-    href: "http://localhost:3001/auth/reset-password?token_hash=recovery-hash&type=recovery",
-    destinations, replaced,
-    client: { auth: {
-      verifyOtp: async (params) => { calls.push(["verify", JSON.parse(JSON.stringify(params))]); return { data: { session: { user: { id: "test-user" } } }, error: null }; },
-      exchangeCodeForSession: async () => { throw new Error("PKCE exchange must not be used for recovery"); },
-      getSession: async () => { calls.push(["session"]); return { data: { session: { user: { id: "test-user" } } }, error: null }; },
-      updateUser: async ({ password }) => { calls.push(["update", password]); return { error: null }; },
-    } },
-  });
+test("reset-password shows the password form once an existing recovery session is confirmed", async () => {
+  const app = await recoveryPage({ client: { auth: { getSession: async () => ({ data: { session: { user: { id: "u" } } }, error: null }) } } });
   let tree = app.render();
-  assert.equal(recoveryForm(tree), undefined, "no password form before verification completes");
+  assert.equal(recoveryForm(tree), undefined, "no form before the session check resolves");
   await flush();
   tree = app.render();
-  assert.deepEqual(replaced, ["/auth/reset-password"], "token_hash is removed from the URL once verified");
-  const inputs = nodes(tree, (node) => node.type === "input");
-  inputs[0].props.onChange({ target: { value: "Replacement1!" } });
-  inputs[1].props.onChange({ target: { value: "Replacement1!" } });
-  tree = app.render();
-  await recoveryForm(tree).props.onSubmit({ preventDefault() {} });
-  assert.deepEqual(calls, [["verify", { token_hash: "recovery-hash", type: "recovery" }], ["session"], ["update", "Replacement1!"]], "verify first, then session check, then password update");
-  assert.deepEqual(destinations, ["/"]);
+  assert.ok(recoveryForm(tree), "form appears once a recovery session is confirmed");
+});
+
+test("reset-password: no session asks to request another code, never showing the form", async () => {
+  const app = await recoveryPage({ client: { auth: { getSession: async () => ({ data: { session: null }, error: null }) } } });
+  app.render(); await flush();
+  const tree = app.render();
+  assert.equal(recoveryForm(tree), undefined);
+  assert.match(String(recoveryAlert(tree).props.children), /Verify your email code again/);
 });
 
 async function submitNewPassword(updateUser, { password = "Replacement1!", confirm = password } = {}) {
-  const updates = [];
+  const updates = []; const signOuts = [];
   const app = await recoveryPage({
-    href: "http://localhost:3001/auth/reset-password?token_hash=pw-hash&type=recovery",
     client: { auth: {
-      verifyOtp: async () => ({ error: null }),
       getSession: async () => ({ data: { session: { user: { id: "u" } } }, error: null }),
       updateUser: async (args) => { updates.push(args.password); return updateUser(); },
+      signOut: async () => { signOuts.push(true); },
     } },
   });
   app.render(); await flush();
@@ -2148,7 +2218,7 @@ async function submitNewPassword(updateUser, { password = "Replacement1!", confi
   tree = app.render();
   await recoveryForm(tree).props.onSubmit({ preventDefault() {} });
   tree = app.render();
-  return { tree, updates, alert: recoveryAlert(tree) ? String(recoveryAlert(tree).props.children) : null };
+  return { tree, updates, signOuts, alert: recoveryAlert(tree) ? String(recoveryAlert(tree).props.children) : null };
 }
 
 test("reset-password: a same-as-current password shows a specific message, not the generic one", async () => {
@@ -2190,112 +2260,12 @@ test("reset-password: a password mismatch is still caught client-side, without c
   assert.deepEqual(weak.updates, []);
 });
 
-test("reset-password: a successful update still redirects home with no error shown", async () => {
-  const destinations = [];
-  const app = await recoveryPage({
-    href: "http://localhost:3001/auth/reset-password?token_hash=ok-hash&type=recovery", destinations,
-    client: { auth: {
-      verifyOtp: async () => ({ error: null }),
-      getSession: async () => ({ data: { session: { user: { id: "u" } } }, error: null }),
-      updateUser: async () => ({ error: null }),
-    } },
-  });
-  app.render(); await flush();
-  let tree = app.render();
-  const inputs = nodes(tree, (node) => node.type === "input");
-  inputs[0].props.onChange({ target: { value: "Replacement1!" } });
-  inputs[1].props.onChange({ target: { value: "Replacement1!" } });
-  tree = app.render();
-  await recoveryForm(tree).props.onSubmit({ preventDefault() {} });
-  assert.deepEqual(destinations, ["/"]);
-  assert.equal(recoveryAlert(app.render()), undefined);
-});
-
-test("reset-password always verifies as type recovery, ignoring any type in the URL", async () => {
-  const sent = [];
-  const app = await recoveryPage({
-    href: "http://localhost:3001/auth/reset-password?token_hash=h1&type=signup",
-    client: { auth: {
-      verifyOtp: async (params) => { sent.push(params.type); return { error: null }; },
-      getSession: async () => ({ data: { session: { user: { id: "u" } } }, error: null }),
-    } },
-  });
-  app.render(); await flush();
-  assert.deepEqual(sent, ["recovery"]);
-});
-
-test("reset-password: an invalid, expired or already-used token_hash fails safely -- no form, URL cleaned, token never shown, no session lookup", async () => {
-  const replaced = [];
-  const app = await recoveryPage({
-    href: "http://localhost:3001/auth/reset-password?token_hash=SECRET-HASH&type=recovery",
-    replaced,
-    client: { auth: {
-      verifyOtp: async () => ({ error: { code: "otp_expired", status: 403, message: "Email link is invalid or has expired SECRET-HASH" } }),
-      getSession: async () => { throw new Error("Session lookup must not run"); },
-    } },
-  });
-  app.render(); await flush();
-  const tree = app.render();
-  assert.equal(recoveryForm(tree), undefined, "the password form never appears");
-  const message = String(recoveryAlert(tree).props.children);
-  assert.match(message, /invalid, expired, or has already been used/);
-  assert.ok(!message.includes("SECRET-HASH"), "the token is never echoed");
-  assert.deepEqual(replaced, ["/auth/reset-password"], "the token is removed from the URL on failure too");
-});
-
-test("reset-password: a token_hash that was already consumed in another tab is rejected on its second use", async () => {
-  const used = new Set();
-  const client = { auth: {
-    verifyOtp: async ({ token_hash }) => { if (used.has(token_hash)) return { error: { code: "otp_expired" } }; used.add(token_hash); return { error: null }; },
-    getSession: async () => ({ data: { session: { user: { id: "u" } } }, error: null }),
-  } };
-  const href = "http://localhost:3001/auth/reset-password?token_hash=one-time&type=recovery";
-  const first = await recoveryPage({ href, client });
-  first.render(); await flush();
-  assert.ok(recoveryForm(first.render()), "first use shows the form");
-  const second = await recoveryPage({ href, client });
-  second.render(); await flush();
-  const tree = second.render();
-  assert.equal(recoveryForm(tree), undefined);
-  assert.match(String(recoveryAlert(tree).props.children), /already been used/);
-});
-
-test("reset-password verifies a token_hash once even when the effect runs twice (React Strict Mode)", async () => {
-  let verifies = 0;
-  const makeClient = () => ({ auth: {
-    verifyOtp: async () => { verifies++; return { error: null }; },
-    getSession: async () => ({ data: { session: { user: { id: "u" } } }, error: null }),
-  } });
-  // A fresh client object per render re-triggers the effect, like Strict Mode's second pass.
-  const app = await recoveryPage({ href: "http://localhost:3001/auth/reset-password?token_hash=strict&type=recovery", client: {}, createClient: makeClient });
-  app.render(); app.render();
-  await flush();
-  assert.equal(verifies, 1, "the single-use token is consumed exactly once");
-});
-
-test("reset-password: a provider error is reported before any verification, in the query or the hash", async () => {
-  for (const href of [
-    "http://localhost:3001/auth/reset-password?error=access_denied&error_code=otp_expired&token_hash=h",
-    "http://localhost:3001/auth/reset-password#error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired",
-  ]) {
-    const app = await recoveryPage({ href, client: { auth: {
-      verifyOtp: async () => { throw new Error("verification must not run"); },
-      getSession: async () => { throw new Error("Session lookup must not run"); },
-    } } });
-    app.render(); await flush();
-    assert.match(String(recoveryAlert(app.render()).props.children), /invalid or expired/i);
-  }
-});
-
-test("reset-password with no recovery link and no session asks to open the link from the email, never showing the form", async () => {
-  const app = await recoveryPage({ href: "http://localhost:3001/auth/reset-password", client: { auth: {
-    verifyOtp: async () => { throw new Error("verification must not run"); },
-    getSession: async () => ({ data: { session: null }, error: null }),
-  } } });
-  app.render(); await flush();
-  const tree = app.render();
-  assert.equal(recoveryForm(tree), undefined);
-  assert.match(String(recoveryAlert(tree).props.children), /Open the password-reset link from your email/);
+test("reset-password: a successful update signs out (BR-AUTH3-008: no auto sign-in) and shows the Sign In link, no error", async () => {
+  const { tree, signOuts } = await submitNewPassword(async () => ({ error: null }));
+  assert.equal(signOuts.length, 1, "the recovery session is signed out after a successful reset");
+  assert.ok(nodes(tree, (node) => node.props.children === "Your password was successfully reset.").length, 1);
+  assert.ok(nodes(tree, (node) => node.type === "a" && node.props.href === "/auth/sign-in").length, 1);
+  assert.equal(recoveryAlert(tree), undefined);
 });
 test("signup callback exchanges a fresh code then redirects to onboarding with the requested destination", async () => {
   const calls = [], destinations = [];

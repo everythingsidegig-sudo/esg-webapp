@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { passwordError } from "@/lib/journey";
 
@@ -15,56 +14,29 @@ function passwordUpdateError(error: unknown) {
   }
   if (code === "weak_password") return "Choose a stronger password. Your account's password rules may require more characters.";
   if (code === "over_request_rate_limit" || code === "429") return "Too many requests. Please wait a few minutes and try again.";
-  if (code === "session_expired" || code === "session_not_found") return "Your reset session has expired. Request a new link and try again.";
+  if (code === "session_expired" || code === "session_not_found") return "Your reset session has expired. Request a new code and try again.";
   return "Couldn't update your password. Please try again.";
 }
 
-// One verification per token across React Strict Mode remounts: the token is single-use.
-let recoveryVerification: { tokenHash: string; promise: Promise<unknown> } | null = null;
-
+// This page only follows a successful code verification on /auth/forgot-password
+// (ESG-AUTH-003 v1.0) -- no link/token parsing here, that session already exists.
 export default function ResetPassword() {
   const supabase = createClient();
-  const router = useRouter();
   const pending = useRef(false);
   const [ready, setReady] = useState(false);
+  const [sessionError, setSessionError] = useState<string | null>(null);
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
 
   useEffect(() => {
     let alive = true;
-    async function establishRecoverySession() {
-      const url = new URL(window.location.href);
-      const hash = new URLSearchParams(url.hash.slice(1));
-      if (url.searchParams.has("error") || url.searchParams.has("error_code") || hash.has("error") || hash.has("error_code")) {
-        throw new Error("This password-reset link is invalid or expired. Request another link.");
-      }
-      const tokenHash = url.searchParams.get("token_hash");
-      if (tokenHash) {
-        // Verified server-side by the one-time token alone, so the link works
-        // in any browser/device (no PKCE verifier needed). The type is fixed
-        // here and never read from the URL.
-        if (recoveryVerification?.tokenHash !== tokenHash) recoveryVerification = { tokenHash, promise: supabase.auth.verifyOtp({ token_hash: tokenHash, type: "recovery" }).then(({ error }) => {
-          if (error) throw new Error("This password-reset link is invalid, expired, or has already been used. Request another link.");
-        }) };
-        await recoveryVerification.promise;
-      } else if (hash.has("access_token") && hash.has("refresh_token")) {
-        const { error } = await supabase.auth.setSession({ access_token: hash.get("access_token")!, refresh_token: hash.get("refresh_token")! });
-        if (error) throw new Error("This password-reset link is invalid or expired. Request another link.");
-      }
-      const { data, error } = await supabase.auth.getSession();
-      if (error || !data.session) throw new Error("Open the password-reset link from your email before choosing a new password.");
-      if (alive) {
-        window.history.replaceState(null, "", "/auth/reset-password");
-        setReady(true);
-      }
-    }
-    void establishRecoverySession().catch((error: Error) => {
-      if (alive) {
-        window.history.replaceState(null, "", "/auth/reset-password");
-        setError(error.message);
-      }
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (!alive) return;
+      if (error || !data.session) setSessionError("Verify your email code again before choosing a new password.");
+      else setReady(true);
     });
     return () => { alive = false; };
   }, [supabase]);
@@ -79,7 +51,9 @@ export default function ResetPassword() {
     try {
       const { error } = await supabase.auth.updateUser({ password });
       if (error) throw error;
-      router.replace("/");
+      // BR-AUTH3-008: reset does not sign the user in -- they authenticate fresh.
+      await supabase.auth.signOut();
+      setDone(true);
     } catch (error) {
       setError(passwordUpdateError(error));
     } finally {
@@ -87,9 +61,15 @@ export default function ResetPassword() {
     }
   }
 
+  if (done) return <div className="mx-auto max-w-md space-y-3 text-center">
+    <h1 className="text-xl font-semibold">Password reset</h1>
+    <p className="text-sm text-neutral-600">Your password was successfully reset.</p>
+    <Link href="/auth/sign-in" className="touch-link font-medium text-emerald-700">Sign In</Link>
+  </div>;
+
   if (!ready) return <div className="mx-auto max-w-md space-y-3 text-center">
     <h1 className="text-xl font-semibold">Reset your password</h1>
-    {error ? <><p role="alert" className="text-sm text-red-600">{error}</p><Link href="/auth/forgot-password" className="touch-link font-medium text-emerald-700">Request another link</Link></> : <p>Checking your reset link…</p>}
+    {sessionError ? <><p role="alert" className="text-sm text-red-600">{sessionError}</p><Link href="/auth/forgot-password" className="touch-link font-medium text-emerald-700">Request another code</Link></> : <p>Checking your session…</p>}
   </div>;
 
   return <form onSubmit={submit} className="mx-auto max-w-md space-y-4">
@@ -102,7 +82,7 @@ export default function ResetPassword() {
       onChange={(e) => setConfirm(e.target.value)} className="w-full rounded-lg border border-neutral-300 px-3 py-2" />
     {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
     <button type="submit" disabled={saving} className="w-full rounded-lg bg-emerald-600 py-2.5 font-medium text-white disabled:opacity-60">
-      {saving ? "Updating…" : "Update password"}
+      {saving ? "Updating…" : "Reset Password"}
     </button>
   </form>;
 }
