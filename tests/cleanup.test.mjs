@@ -880,6 +880,68 @@ test("Public profile hides Specializations section for a legacy profile with no 
   assert.equal(nodes(tree, (node) => node.type === "tag-chip").length, 0);
 });
 
+test("Settings: shows username read-only, lets email/phone be edited independently, and updates the password", async () => {
+  const updates = []; const profileUpdates = [];
+  const client = {
+    from: () => ({ update: (payload) => { profileUpdates.push(payload); return { eq: () => ({ select: () => ({ single: async () => ({ error: null }) }) }) }; } }),
+    auth: { updateUser: async (args) => { updates.push(args); return { error: null }; } },
+  };
+  const app = await component("src/app/settings/page.tsx", "SettingsInner", { client });
+  app.auth.user = { ...user, email: "current@example.com" };
+  app.auth.profile = { ...profile, phone: null };
+  let tree = app.render();
+  assert.match(textOf(nodes(tree, (node) => String(node.props.children).includes("cannot be changed"))[0]), /@Tester123/, "username is shown read-only");
+  assert.ok(nodes(tree, (node) => node.props.children === "current@example.com").length, "current email is shown");
+
+  // Edit email: invalid format never reaches Supabase.
+  nodes(tree, (node) => node.type === "button" && node.props.children === "Edit")[0].props.onClick();
+  tree = app.render();
+  const emailInput = nodes(tree, (node) => node.type === "input" && node.props.type === "email")[0];
+  emailInput.props.onChange({ target: { value: "not-an-email" } });
+  tree = app.render();
+  button(tree, "Save").props.onClick(); await flush();
+  tree = app.render();
+  assert.deepEqual(updates, [], "an invalid email never reaches Supabase");
+  assert.equal(String(nodes(tree, (node) => node.props.role === "alert")[0].props.children), "Enter a valid email address.");
+
+  emailInput.props.onChange({ target: { value: " new@example.com " } });
+  tree = app.render();
+  button(tree, "Save").props.onClick(); await flush();
+  tree = app.render();
+  assert.deepEqual(JSON.parse(JSON.stringify(updates)), [{ email: "new@example.com" }], "the email is trimmed before Supabase's own secure-email-change flow runs");
+  assert.match(String(nodes(tree, (node) => node.props.role === "status")[0].props.children), /Check your new email/);
+
+  // Edit phone: non-10-digit input is rejected; a formatted 10-digit number is stripped before saving.
+  // Email's own "Edit" button is back (its section closed after saving), so take the last match (phone's).
+  const editButtons = nodes(tree, (node) => node.type === "button" && node.props.children === "Edit");
+  editButtons[editButtons.length - 1].props.onClick();
+  tree = app.render();
+  const phoneInput = nodes(tree, (node) => node.type === "input" && node.props.type === "tel")[0];
+  phoneInput.props.onChange({ target: { value: "555-123" } });
+  tree = app.render();
+  button(tree, "Save").props.onClick(); await flush();
+  tree = app.render();
+  assert.deepEqual(profileUpdates, [], "an incomplete phone number never reaches Supabase");
+  phoneInput.props.onChange({ target: { value: "(555) 123-4567" } });
+  tree = app.render();
+  button(tree, "Save").props.onClick(); await flush();
+  assert.deepEqual(JSON.parse(JSON.stringify(profileUpdates)), [{ phone: "5551234567" }], "formatting characters are stripped before saving");
+
+  // Change password: mismatch is caught client-side; a match calls updateUser.
+  tree = app.render();
+  const [newPw, confirmPw] = nodes(tree, (node) => node.type === "input" && node.props.type === "password");
+  newPw.props.onChange({ target: { value: "NewPassword1!" } });
+  confirmPw.props.onChange({ target: { value: "Different1!" } });
+  tree = app.render();
+  await nodes(tree, (node) => node.type === "form")[0].props.onSubmit({ preventDefault() {} });
+  tree = app.render();
+  assert.equal(String(nodes(tree, (node) => node.props.role === "alert")[0].props.children), "Passwords don't match.");
+  confirmPw.props.onChange({ target: { value: "NewPassword1!" } });
+  tree = app.render();
+  await nodes(tree, (node) => node.type === "form")[0].props.onSubmit({ preventDefault() {} });
+  assert.deepEqual(JSON.parse(JSON.stringify(updates[updates.length - 1])), { password: "NewPassword1!" });
+});
+
 test("Public profile shows the pre-computed WOM% (never the raw lemon_count, which stays private) and falls back to '—' when it's null", async () => {
   const withPercentage = { id: "helper-1", username: "HelperOne", photo_url: null, skills: [], wom_count: 4, profile_tags: [] };
   const client = {

@@ -34,6 +34,7 @@ export interface Profile {
   public_lat: number | null;
   public_lng: number | null;
   onboarding_completed_at: string | null;
+  phone: string | null;
 }
 
 export interface PublicProfile {

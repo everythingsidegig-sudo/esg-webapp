@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import AuthGuard from "@/components/AuthGuard";
 import LogoutButton from "@/components/LogoutButton";
 import OptionSheet from "@/components/OptionSheet";
@@ -284,15 +285,19 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
 
   const total = profile.wom_count + profile.lemon_count;
   return <div className="mx-auto max-w-lg space-y-6">
-    <div className="flex items-center gap-4">
-      {profile.photo_url ? <img src={profile.photo_url} alt="Profile photo" className="h-16 w-16 rounded-full object-cover" />
-        : <div className="flex h-16 w-16 items-center justify-center rounded-full bg-neutral-200 text-xl">👤</div>}
-      <div>
-        <h1 className="text-lg font-semibold">@{profile.username}</h1>
-        <label className="inline-flex min-h-11 cursor-pointer items-center text-sm text-emerald-700">Change photo
-          <input type="file" accept="image/jpeg,image/png,image/webp" disabled={saving} className="hidden" onChange={(e) => { if (e.target.files?.[0]) void uploadPhoto(e.target.files[0]); }} />
-        </label>
+    <div className="flex items-center justify-between gap-4">
+      <div className="flex items-center gap-4">
+        {profile.photo_url ? <img src={profile.photo_url} alt="Profile photo" className="h-16 w-16 rounded-full object-cover" />
+          : <div className="flex h-16 w-16 items-center justify-center rounded-full bg-neutral-200 text-xl">👤</div>}
+        <div>
+          <h1 className="text-lg font-semibold">@{profile.username}</h1>
+          <label className="inline-flex min-h-11 cursor-pointer items-center text-sm text-emerald-700">Change photo
+            <input type="file" accept="image/jpeg,image/png,image/webp" disabled={saving} className="hidden" onChange={(e) => { if (e.target.files?.[0]) void uploadPhoto(e.target.files[0]); }} />
+          </label>
+        </div>
       </div>
+      {/* ESG-SET-002 entry point: Home (Signed In) -> Profile -> Account Settings. */}
+      <Link href="/settings" aria-label="Account Settings" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-xl text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900">⚙️</Link>
     </div>
     <div className="grid grid-cols-3 gap-3 text-center">
       <div className="rounded-lg border border-neutral-200 bg-white p-3"><div className="text-lg font-semibold">{total ? `${Math.round(profile.wom_count / total * 100)}%` : "—"}</div><div className="text-xs text-neutral-500">WOM%</div></div>
