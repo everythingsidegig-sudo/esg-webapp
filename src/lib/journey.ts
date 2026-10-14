@@ -39,7 +39,7 @@ export function approximateCoordinates(lat: number | null, lng: number | null) {
 
 export function gigInputError(title: string, description: string, amount: string, date: string, area: string, publish: boolean): string | null {
   if (!title.trim() || title.trim().length > 120) return "Enter a title of 1–120 characters.";
-  if (!description.trim() || description.trim().length > 280) return "Enter a description of 1–280 characters.";
+  if (!description.trim() || description.trim().length > 50) return "Enter a description of 1–50 characters.";
   if (!area.trim() || area.trim().length > 200) return "Enter a general area of 1–200 characters, not a street address.";
   const price = Number(amount);
   if (!Number.isFinite(price) || price <= 0 || price > 9999999999.99 || !/^\d+(\.\d{1,2})?$/.test(amount)) return "Enter a positive amount with at most two decimal places.";

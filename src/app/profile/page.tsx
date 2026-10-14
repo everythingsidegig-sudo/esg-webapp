@@ -27,7 +27,6 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
   const supabase = createClient();
   const router = useRouter();
   const { refreshProfile } = useAuth();
-  const [username, setUsername] = useState(profile.username);
   const [skills, setSkills] = useState(profile.skills);
   const [services, setServices] = useState(profile.services);
   const [saving, setSaving] = useState(false);
@@ -52,9 +51,9 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
   const [helperDataLoaded, setHelperDataLoaded] = useState(false);
 
   // "Update profile" is only actionable once something differs from what's saved.
+  // Username is fixed after account creation (ESG-AUTH-002 v0.5) and isn't editable here.
   const sameItems = (a: string[], b: string[]) => a.length === b.length && a.every((item) => b.includes(item));
-  const dirty = username !== profile.username
-    || !sameItems(skills, profile.skills)
+  const dirty = !sameItems(skills, profile.skills)
     || !sameItems(services, profile.services)
     || (helperDataLoaded && skills.some((category) => !sameItems(specializationTags[category] ?? [], savedSpecializations[category] ?? [])));
 
@@ -193,7 +192,6 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
     e.preventDefault();
     if (pending.current || !dirty) return;
     setError(null); setMessage(null);
-    if (!/^[A-Za-z0-9]{6,40}$/.test(username)) { setError("Username must be 6–40 letters/numbers."); return; }
     pending.current = true; setSaving(true);
     let profileSaved = false;
     try {
@@ -203,7 +201,7 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
           if (clearError) throw clearError;
         }
       }
-      const { error: profileError } = await supabase.from("profiles").update({ username, skills, services }).eq("id", profile.id).select("id").single();
+      const { error: profileError } = await supabase.from("profiles").update({ skills, services }).eq("id", profile.id).select("id").single();
       if (profileError) throw profileError;
       profileSaved = true;
       if (helperDataLoaded) {
@@ -279,10 +277,6 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
     </div>
     <form onSubmit={saveProfile} className="space-y-3 rounded-lg border border-neutral-200 bg-white p-4">
       <fieldset disabled={saving} className="space-y-3">
-        <div>
-          <label className="block text-sm font-medium">Username<input required maxLength={40} aria-describedby="username-hint" value={username} onChange={(e) => setUsername(e.target.value)} className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2" /></label>
-          <p id="username-hint" className="mt-1 text-xs text-neutral-500">6–40 letters or numbers, no spaces or symbols.</p>
-        </div>
         <fieldset className="min-w-0"><legend className="text-sm font-medium">Skills I can use to make money</legend>
           <div className="mt-2 flex flex-wrap gap-2">{catalog.map((item) => <SelectionChip key={item} selected={skills.includes(item)} onClick={() => toggleSkill(item)}>{item}</SelectionChip>)}</div>
         </fieldset>

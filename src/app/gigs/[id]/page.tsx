@@ -213,7 +213,7 @@ function GigDetails({ id }: { id: string }) {
           }}
         >
           <h2 className="font-medium">Make an offer</h2>
-          <label className="block text-sm">Your offer (SEK)
+          <label className="block text-sm">Your offer (CAD)
             <input type="number" inputMode="decimal" min="0.01" step="0.01" required value={offerValue} onChange={(e) => setOfferAmount(e.target.value)}
               className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2" />
           </label>

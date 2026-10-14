@@ -125,18 +125,21 @@ test("/messages and My Gigs deep links survive sign-in via next", () => {
   assert.equal(safeNext("/gigs/12345678-1234-1234-1234-123456789012#proposals"), "/gigs/12345678-1234-1234-1234-123456789012#proposals");
   assert.equal(safeNext("/messages/../../evil"), "/");
 });
-test("existing catalog retained", () => assert.deepEqual(SERVICE_TYPES, ["Yard Work", "Moving Help", "Cleaning", "Handyman", "Delivery", "Pet Care", "Tech Help", "Other"]));
-test("database validation uses the same POC catalog", async () => {
-  const sql = await readFile(new URL("../supabase/migrations/20240101000004_onboarding_post_gig.sql", import.meta.url), "utf8");
-  const catalogs = [...sql.matchAll(/array\[('Yard Work'[^\]]+)\]/g)];
-  assert.equal(catalogs.length, 2);
-  for (const [, catalog] of catalogs) assert.deepEqual(catalog.split(",").map((label) => label.slice(1, -1)), [...SERVICE_TYPES]);
-});
-test("gig tags migration validates against the same POC catalog", async () => {
-  const sql = await readFile(new URL("../supabase/migrations/20240101000006_gig_tags.sql", import.meta.url), "utf8");
-  const catalogs = [...sql.matchAll(/array\[('Yard Work'[^\]]+)\]/g)];
-  assert.equal(catalogs.length, 2);
-  for (const [, catalog] of catalogs) assert.deepEqual(catalog.split(",").map((label) => label.slice(1, -1)), [...SERVICE_TYPES]);
+test("existing catalog retained", () => assert.deepEqual(SERVICE_TYPES, [
+  "Moving Help", "Cleaning", "Handyman", "Furniture Assembly", "Yard Work", "Delivery / Pickup",
+  "Errands", "Auto Help", "Tech Help", "Pet Care", "Cooking / Catering", "Tutoring", "Event Help", "Other",
+]));
+// 20240101000011 is the current authoritative source for these four server-side copies
+// of the catalog (create_gig, save_onboarding, validate_profile_edit, tags' CHECK
+// constraint) -- earlier migrations (0004/0006/0010) are frozen history and
+// intentionally still contain whatever catalog was approved when each was written.
+test("database validation uses the same approved catalog", async () => {
+  const sql = await readFile(new URL("../supabase/migrations/20240101000011_taxonomy_and_identity.sql", import.meta.url), "utf8");
+  const catalogs = [...sql.matchAll(/array\[\s*('Moving Help'[^\]]+)\]/g)];
+  assert.equal(catalogs.length, 4, "create_gig, save_onboarding, validate_profile_edit, and the tags CHECK constraint");
+  for (const [, catalog] of catalogs) {
+    assert.deepEqual(catalog.split(",").map((label) => label.trim().slice(1, -1)), [...SERVICE_TYPES]);
+  }
 });
 test("seeded tag catalog only uses approved categories and excludes scheduling/location terms", async () => {
   const sql = await readFile(new URL("../supabase/migrations/20240101000006_gig_tags.sql", import.meta.url), "utf8");

@@ -134,7 +134,7 @@ test("profile chips restore saved and legacy values, toggle independently, and s
   chips(tree)[4].props.onClick();
   tree = app.render({ profile: original });
   await nodes(tree, (node) => node.type === "form")[0].props.onSubmit({ preventDefault() {} });
-  assert.deepEqual(JSON.parse(JSON.stringify(saved)), { username: profile.username, skills: ["Legacy skill", "Other"], services: [] });
+  assert.deepEqual(JSON.parse(JSON.stringify(saved)), { skills: ["Legacy skill", "Other"], services: [] });
   const refreshed = await component("src/app/profile/page.tsx", "ProfileEditor", { client });
   assert.deepEqual(chips(refreshed.render({ profile: { ...original, ...saved } })).filter((node) => node.props.selected).map((node) => node.props.children), ["Other", "Legacy skill"]);
 });
@@ -278,7 +278,7 @@ test("Profile Save persists skill/service changes and specializations together, 
   assert.equal(rpcCalls[1].payload.p_service_type, "Cleaning");
   assert.deepEqual(JSON.parse(JSON.stringify(rpcCalls[1].payload.p_tag_ids)).sort(), ["t1", "t3"], "remaining skill's specializations (existing + newly added) are saved");
   assert.ok(calls.indexOf(rpcCalls[1]) > profileUpdateIndex, "syncing the remaining skill happens after the profile update confirms it");
-  assert.deepEqual(JSON.parse(JSON.stringify(calls[profileUpdateIndex].payload)), { username: profile.username, skills: ["Cleaning"], services: profile.services });
+  assert.deepEqual(JSON.parse(JSON.stringify(calls[profileUpdateIndex].payload)), { skills: ["Cleaning"], services: profile.services });
 });
 
 test("Profile Save reports a distinct message when the profile saves but specialization sync fails afterward", async () => {
@@ -296,7 +296,7 @@ test("Profile Save reports a distinct message when the profile saves but special
   });
   app.render({ profile: withSkill }); await flush();
   let tree = app.render({ profile: withSkill });
-  nodes(tree, (node) => node.type === "input" && node.props.required === true)[0].props.onChange({ target: { value: "ChangedName1" } });
+  nodes(tree, (node) => node.type === "selection-chip" && node.props.children === "Other")[0].props.onClick();
   tree = app.render({ profile: withSkill });
   await nodes(tree, (node) => node.type === "form")[0].props.onSubmit({ preventDefault() {} });
   tree = app.render({ profile: withSkill });
@@ -446,8 +446,8 @@ test("Profile: existing profile values prepopulate the edit form", async () => {
   const app = await component("src/app/profile/page.tsx", "ProfileEditor", { client });
   app.render({ profile: existing }); await flush();
   const tree = app.render({ profile: existing });
-  const usernameInput = nodes(tree, (node) => node.type === "input" && node.props.required === true)[0];
-  assert.equal(usernameInput.props.value, "ExistingUser1", "username is prepopulated from the existing profile");
+  const heading = nodes(tree, (node) => node.type === "h1")[0];
+  assert.equal(textOf(heading), "@ExistingUser1", "username is shown read-only from the existing profile, not as an editable field");
   const chips = nodes(tree, (node) => node.type === "selection-chip");
   assert.deepEqual(chips.filter((node) => node.props.selected).map((node) => node.props.children), ["Cleaning", "Other"],
     "existing skills and services are preselected");
@@ -460,12 +460,13 @@ test("Profile: primary action is 'Update profile', shows 'Updating…' while sav
     from: (table) => table === "profile_tags"
       ? { select: () => ({ eq: async () => ({ data: [], error: null }) }) }
       : { update: (payload) => { calls.push(payload); return { eq: () => ({ select: () => ({ single: async () => ({ error: null }) }) }) }; } },
+    rpc: async () => ({ data: null, error: null }),
   };
   const app = await component("src/app/profile/page.tsx", "ProfileEditor", { client });
   app.render({ profile: soloProfile }); await flush();
   let tree = app.render({ profile: soloProfile });
   assert.ok(button(tree, "Update profile"), "primary action is labeled Update profile, not Save");
-  nodes(tree, (node) => node.type === "input" && node.props.required === true)[0].props.onChange({ target: { value: "ChangedName1" } });
+  nodes(tree, (node) => node.type === "selection-chip" && node.props.children === "Other")[0].props.onClick();
   tree = app.render({ profile: soloProfile });
   const submit = () => nodes(tree, (node) => node.type === "form")[0].props.onSubmit({ preventDefault() {} });
   const first = submit();
@@ -533,16 +534,14 @@ test("Profile: Update profile is disabled and inert until something actually cha
   assert.equal(update().props.disabled, true, "nothing changed yet");
   const hint = () => nodes(tree, (node) => node.type === "p" && /changes/.test(String(node.props.children)))[0].props.children;
   assert.equal(hint(), "No changes yet.");
-  assert.equal(nodes(tree, (node) => node.props.id === "username-hint").length, 1, "username rules are shown up front");
   await nodes(tree, (node) => node.type === "form")[0].props.onSubmit({ preventDefault() {} });
   assert.deepEqual(calls, [], "submitting an unchanged form (e.g. Enter key) saves nothing");
 
-  const username = () => nodes(tree, (node) => node.type === "input" && node.props.required === true)[0];
-  username().props.onChange({ target: { value: "ChangedName1" } });
+  chip("Other").props.onClick();
   tree = app.render({ profile: withSkill });
-  assert.equal(update().props.disabled, false, "a username change enables it");
+  assert.equal(update().props.disabled, false, "a skill change enables it");
   assert.equal(hint(), "You have unsaved changes.");
-  username().props.onChange({ target: { value: withSkill.username } });
+  chip("Other").props.onClick();
   tree = app.render({ profile: withSkill });
   assert.equal(update().props.disabled, true, "reverting the change disables it again");
 
@@ -1204,9 +1203,9 @@ test("My Gigs / I Need Help groups posted gigs by the existing statuses, with pr
   const openLinks = nodes(open, (node) => node.type === "a");
   assert.ok(openLinks.some((link) => link.props.href === "/gigs/g-open#proposals" && textOf(link) === "2 proposals"), "proposal count leads to that gig's proposals");
   assert.ok(openLinks.some((link) => link.props.href === "/gigs/g-open" && textOf(link) === "View gig"));
-  assert.match(textOf(open), /Oct 30 · Kävlinge · Budget 50 SEK/);
+  assert.match(textOf(open), /Oct 30 · Kävlinge · Budget 50 CAD/);
   assert.doesNotMatch(textOf(open), /Helper:/, "no helper before one is selected");
-  assert.match(textOf(sectionNamed(tree, "Accepted")), /Helper: @helper1 · Agreed price: 45 SEK/, "budget stays visible, agreed price is shown once someone is accepted");
+  assert.match(textOf(sectionNamed(tree, "Accepted")), /Helper: @helper1 · Agreed price: 45 CAD/, "budget stays visible, agreed price is shown once someone is accepted");
   assert.match(textOf(sectionNamed(tree, "In progress")), /Helper: @helper1/);
   assert.deepEqual(nodes(sectionNamed(tree, "Accepted"), (node) => node.type === "badge").map((node) => node.props.status), ["active"], "the real gig status is shown");
   assert.deepEqual(nodes(sectionNamed(tree, "In progress"), (node) => node.type === "badge").map((node) => node.props.status), ["in_progress"]);
@@ -1219,9 +1218,9 @@ test("My Gigs / I'm Helping maps the existing claim and gig lifecycle to section
   assert.deepEqual(sectionLabels(tree), ["Proposals", "Accepted", "In progress", "Completed", "Not selected or closed"]);
   assert.match(textOf(sectionNamed(tree, "Proposals")), /Proposal pending/);
   assert.match(textOf(sectionNamed(tree, "Proposals")), /Customer: @customer1/);
-  assert.match(textOf(sectionNamed(tree, "Proposals")), /Your offer: 40 SEK/);
+  assert.match(textOf(sectionNamed(tree, "Proposals")), /Your offer: 40 CAD/);
   assert.match(textOf(sectionNamed(tree, "Accepted")), /Accepted/);
-  assert.match(textOf(sectionNamed(tree, "Accepted")), /Agreed price: 40 SEK/);
+  assert.match(textOf(sectionNamed(tree, "Accepted")), /Agreed price: 40 CAD/);
   assert.match(textOf(sectionNamed(tree, "In progress")), /In progress/);
   assert.match(textOf(sectionNamed(tree, "Completed")), /Completed/);
   const closed = textOf(sectionNamed(tree, "Not selected or closed"));
@@ -1384,7 +1383,7 @@ test("Gig hub (owner, open): proposals live on the gig, with Accept offer, Cance
   assert.ok(nodes(tree, (node) => node.type === "a" && node.props.href === "/my-gigs" && /My Gigs/.test(textOf(node))));
   const proposals = nodes(tree, (node) => node.props.id === "proposals")[0];
   assert.ok(proposals, "proposals anchor exists for notification/My Gigs deep links");
-  assert.match(textOf(proposals), /Your budget: 50 SEK · 1 proposal/);
+  assert.match(textOf(proposals), /Your budget: 50 CAD · 1 proposal/);
   await nodes(proposals, (node) => node.type === "button" && textOf(node) === "Accept offer")[0].props.onClick();
   assert.deepEqual(JSON.parse(JSON.stringify(rpcs[0])), ["select_provider", { p_gig_id: "gig-1", p_claim_id: "c1" }], "uses the existing lifecycle RPC");
   await nodes(tree, (node) => node.type === "button" && textOf(node) === "Cancel gig")[0].props.onClick();
@@ -1425,7 +1424,7 @@ test("Gig hub (helper, no offer yet): the offer form defaults to the budget and 
   assert.ok(form, "Make an offer form");
   const amountInput = nodes(form, (node) => node.type === "input")[0];
   assert.equal(amountInput.props.value, "50", "defaults to the posted budget");
-  assert.match(textOf(form), /budget is 50 SEK/);
+  assert.match(textOf(form), /budget is 50 CAD/);
   await form.props.onSubmit({ preventDefault() {} });
   assert.deepEqual(JSON.parse(JSON.stringify(rpcs[0])), ["create_claim", { p_gig_id: "gig-1", p_offer_amount: 50, p_message: null }]);
 
@@ -1448,7 +1447,7 @@ test("Gig hub (helper): an invalid offer amount is rejected in the UI without ca
 test("Gig hub (helper, pending offer): shows the offer, can withdraw it, and cannot send a second one", async () => {
   const { rpcs, tree } = await openGig({}, { myClaim: { id: "mine", gig_id: "gig-1", provider_id: user.id, state: "pending", offer_amount: 42, message: "Saturday works" } });
   assert.equal(nodes(tree, (node) => node.type === "form").length, 0, "no second offer form");
-  assert.match(textOf(nodes(tree, (node) => /Offer sent/.test(textOf(node)))[0]), /42 SEK/);
+  assert.match(textOf(nodes(tree, (node) => /Offer sent/.test(textOf(node)))[0]), /42 CAD/);
   await nodes(tree, (node) => node.type === "button" && textOf(node) === "Withdraw offer")[0].props.onClick();
   assert.deepEqual(JSON.parse(JSON.stringify(rpcs[0])), ["withdraw_claim", { p_gig_id: "gig-1" }]);
 });
@@ -1470,7 +1469,7 @@ test("Gig hub (owner, open): each proposal shows username, reputation, offer, me
   app.render({ id: "gig-1" }); await flush();
   const text = textOf(nodes(app.render({ id: "gig-1" }), (node) => node.props.id === "proposals")[0]);
   assert.match(text, /@helper1 · 3 WOM/);
-  assert.match(text, /40 SEK/);
+  assert.match(text, /40 CAD/);
   assert.match(text, /Bringing my own rake/);
   assert.match(text, /View profile/);
   assert.match(text, /Accept offer/);
@@ -1481,8 +1480,8 @@ test("Gig hub (accepted): poster and accepted helper both see agreed price, priv
     const addressQueries = [];
     const { tree } = await openGig({ amount: 50, agreed_amount: 40, ...fields }, { address: "Storgatan 1, 2tr", addressQueries }, asUser);
     assert.match(textOf(nodes(tree, (node) => node.props["aria-label"] === "Private address")[0]), /Storgatan 1, 2tr/);
-    assert.match(textOf(tree), /Agreed 40 SEK/);
-    assert.match(textOf(tree), /budget 50 SEK/);
+    assert.match(textOf(tree), /Agreed 40 CAD/);
+    assert.match(textOf(tree), /budget 50 CAD/);
     assert.ok(nodes(tree, (node) => node.type === "a" && node.props.href === "#messages" && textOf(node) === other).length === 1);
     assert.deepEqual(addressQueries, ["gig-1"]);
   }
@@ -1534,20 +1533,22 @@ for (const fails of [false, true]) {
           return { select: () => ({ single: async () => ({ error: fails ? new Error("denied") : null }) }) };
         } };
       } };
-    } };
+    }, rpc: async () => ({ data: null, error: null }) };
     const app = await component("src/app/profile/page.tsx", "ProfileEditor", { client });
+    app.render({ profile }); await flush();
     let tree = app.render({ profile });
-    const input = nodes(tree, (node) => node.type === "input" && node.props.value === profile.username)[0];
-    input.props.onChange({ target: { value: "Edited123" } });
+    // The test harness's default "@/lib/services" mock only offers Cleaning/Other.
+    const chip = (label) => nodes(tree, (node) => node.type === "selection-chip" && node.props.children === label)[0];
+    chip("Other").props.onClick(); // the first "Other" chip belongs to the skills group
     tree = app.render({ profile });
     await nodes(tree, (node) => node.type === "form")[0].props.onSubmit({ preventDefault() {} });
     tree = app.render({ profile });
-    assert.deepEqual(JSON.parse(JSON.stringify(updates)), [{ username: "Edited123", skills: ["Cleaning"], services: ["Other"] }]);
+    assert.deepEqual(JSON.parse(JSON.stringify(updates)), [{ skills: ["Cleaning", "Other"], services: ["Other"] }]);
     assert.equal(nodes(tree, (node) => node.props.role === "status").length, fails ? 0 : 1);
     assert.equal(nodes(tree, (node) => node.props.role === "alert").length, fails ? 1 : 0);
     app.auth.profileError = "Refresh failed";
     tree = app.render({ profile: { ...profile, username: "Server123" } });
-    assert.equal(nodes(tree, (node) => node.type === "input" && node.props.value === "Edited123").length, 1);
+    assert.ok(chip("Other"), "unrelated background refresh failure does not blow away the unsaved skill selection");
   });
 }
 
@@ -2399,8 +2400,8 @@ test("Post Gig sends the optional private address separately from the public loc
 });
 
 test("money: amounts are shown in the single app currency and offers are validated like the server", () => {
-  assert.equal(moneyLib.formatMoney(50), "50 SEK");
-  assert.equal(moneyLib.formatMoney("1234.5"), "1,234.5 SEK");
+  assert.equal(moneyLib.formatMoney(50), "50 CAD");
+  assert.equal(moneyLib.formatMoney("1234.5"), "1,234.5 CAD");
   assert.equal(moneyLib.formatMoney(null), "");
   for (const bad of ["", "0", "-1", "1.234", "abc", "NaN", "Infinity", "1e3", "99999999999"]) assert.notEqual(moneyLib.offerError(bad), null, `rejects ${bad}`);
   for (const good of ["0.01", "50", "42.5", "9999999999.99"]) assert.equal(moneyLib.offerError(good), null, `accepts ${good}`);
