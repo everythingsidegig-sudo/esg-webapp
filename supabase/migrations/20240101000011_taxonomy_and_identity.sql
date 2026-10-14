@@ -38,7 +38,63 @@ alter table public.tags add constraint tags_service_type_check check (
 );
 
 -- ---------------------------------------------------------------------------
--- 2. Rename the one category whose approved name changed ("Delivery" ->
+-- 2. validate_profile_edit(): approved category list, plus the username lock.
+--    Replaced BEFORE any data rename below, because that rename UPDATEs
+--    profiles.skills/services and this BEFORE UPDATE trigger fires on every
+--    such statement -- the old function body (checking the old 8-category
+--    list) would otherwise reject the new "Delivery / Pickup" value itself.
+--    Username may still change freely before onboarding completes (the
+--    wizard calls save_onboarding, which goes through this same trigger);
+--    once onboarding_completed_at is set, a username change is rejected
+--    outright, matching ESG-AUTH-002 v0.5's "fixed after account creation".
+-- ---------------------------------------------------------------------------
+create or replace function esg_private.validate_profile_edit() returns trigger
+language plpgsql security invoker set search_path = '' as $$
+declare
+  v_item text;
+begin
+  if new.username is distinct from old.username then
+    if old.onboarding_completed_at is not null then
+      raise exception 'Username cannot be changed after account creation.' using errcode = '22023';
+    end if;
+    if new.username is null or new.username !~ '^[A-Za-z0-9]{6,40}$' then
+      raise exception 'Username must be 6–40 letters/numbers.' using errcode = '22023';
+    end if;
+  end if;
+
+  if new.photo_url is distinct from old.photo_url then
+    if new.photo_url is not null and (pg_catalog.length(new.photo_url) > 2048 or new.photo_url !~ '^https?://') then
+      raise exception 'Invalid photo URL.' using errcode = '22023';
+    end if;
+  end if;
+
+  if new.skills is distinct from old.skills or new.services is distinct from old.services then
+    if new.skills is null or new.services is null
+        or pg_catalog.jsonb_typeof(new.skills) <> 'array' or pg_catalog.jsonb_typeof(new.services) <> 'array' then
+      raise exception 'Choose skills and services from the available categories.' using errcode = '22023';
+    end if;
+    for v_item in select pg_catalog.jsonb_array_elements_text(new.skills || new.services) loop
+      if v_item is null or (v_item <> all(array[
+          'Moving Help','Cleaning','Handyman','Furniture Assembly','Yard Work','Delivery / Pickup',
+          'Errands','Auto Help','Tech Help','Pet Care','Cooking / Catering','Tutoring','Event Help','Other'
+        ])
+        and not (old.skills ? v_item or old.services ? v_item)) then
+        raise exception 'Choose skills and services from the available categories.' using errcode = '22023';
+      end if;
+    end loop;
+    if pg_catalog.jsonb_array_length(new.skills) > 40 or pg_catalog.jsonb_array_length(new.services) > 40
+        or pg_catalog.jsonb_array_length(new.skills) <> (select count(distinct item) from pg_catalog.jsonb_array_elements_text(new.skills) as entries(item))
+        or pg_catalog.jsonb_array_length(new.services) <> (select count(distinct item) from pg_catalog.jsonb_array_elements_text(new.services) as entries(item)) then
+      raise exception 'Choose each category at most once.' using errcode = '22023';
+    end if;
+  end if;
+
+  return new;
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- 3. Rename the one category whose approved name changed ("Delivery" ->
 --    "Delivery / Pickup"); every other existing category name is unchanged.
 --    Covers gigs.service_type, tags.service_type, and any profiles.skills/
 --    services jsonb array already containing the old string.
@@ -182,58 +238,6 @@ begin
     onboarding_completed_at=coalesce(onboarding_completed_at,pg_catalog.now())
     where id=auth.uid() returning * into v_profile;
   return v_profile;
-end;
-$$;
-
--- ---------------------------------------------------------------------------
--- 5. validate_profile_edit(): approved category list, plus the username lock.
---    Username may still change freely before onboarding completes (the
---    wizard calls save_onboarding, which goes through this same trigger);
---    once onboarding_completed_at is set, a username change is rejected
---    outright, matching ESG-AUTH-002 v0.5's "fixed after account creation".
--- ---------------------------------------------------------------------------
-create or replace function esg_private.validate_profile_edit() returns trigger
-language plpgsql security invoker set search_path = '' as $$
-declare
-  v_item text;
-begin
-  if new.username is distinct from old.username then
-    if old.onboarding_completed_at is not null then
-      raise exception 'Username cannot be changed after account creation.' using errcode = '22023';
-    end if;
-    if new.username is null or new.username !~ '^[A-Za-z0-9]{6,40}$' then
-      raise exception 'Username must be 6–40 letters/numbers.' using errcode = '22023';
-    end if;
-  end if;
-
-  if new.photo_url is distinct from old.photo_url then
-    if new.photo_url is not null and (pg_catalog.length(new.photo_url) > 2048 or new.photo_url !~ '^https?://') then
-      raise exception 'Invalid photo URL.' using errcode = '22023';
-    end if;
-  end if;
-
-  if new.skills is distinct from old.skills or new.services is distinct from old.services then
-    if new.skills is null or new.services is null
-        or pg_catalog.jsonb_typeof(new.skills) <> 'array' or pg_catalog.jsonb_typeof(new.services) <> 'array' then
-      raise exception 'Choose skills and services from the available categories.' using errcode = '22023';
-    end if;
-    for v_item in select pg_catalog.jsonb_array_elements_text(new.skills || new.services) loop
-      if v_item is null or (v_item <> all(array[
-          'Moving Help','Cleaning','Handyman','Furniture Assembly','Yard Work','Delivery / Pickup',
-          'Errands','Auto Help','Tech Help','Pet Care','Cooking / Catering','Tutoring','Event Help','Other'
-        ])
-        and not (old.skills ? v_item or old.services ? v_item)) then
-        raise exception 'Choose skills and services from the available categories.' using errcode = '22023';
-      end if;
-    end loop;
-    if pg_catalog.jsonb_array_length(new.skills) > 40 or pg_catalog.jsonb_array_length(new.services) > 40
-        or pg_catalog.jsonb_array_length(new.skills) <> (select count(distinct item) from pg_catalog.jsonb_array_elements_text(new.skills) as entries(item))
-        or pg_catalog.jsonb_array_length(new.services) <> (select count(distinct item) from pg_catalog.jsonb_array_elements_text(new.services) as entries(item)) then
-      raise exception 'Choose each category at most once.' using errcode = '22023';
-    end if;
-  end if;
-
-  return new;
 end;
 $$;
 
