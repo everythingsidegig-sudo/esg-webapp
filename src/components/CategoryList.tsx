@@ -1,5 +1,6 @@
 "use client";
 
+import SelectionChip from "@/components/SelectionChip";
 import { SERVICE_TYPES } from "@/lib/services";
 
 // ESG-SVC-001 v1.0 §4/§5: one shared ALL/OTHER selection control for the
@@ -20,11 +21,13 @@ export function CategoryList({ title, selected, setSelected, otherText, setOther
   return (
     <fieldset className="space-y-2">
       {title && <legend className="mb-1 font-medium">{title}</legend>}
-      <label className="check-row"><input type="checkbox" checked={isAllSelected(selected)} onChange={() => setSelected(toggleAllCategories(selected))} /> ALL</label>
-      {CATEGORIES.map((item) => (
-        <label key={item} className="check-row"><input type="checkbox" checked={selected.includes(item)} onChange={() => setSelected(toggleOneCategory(selected, item))} /> {item}</label>
-      ))}
-      <label className="check-row"><input type="checkbox" checked={selected.includes("Other")} onChange={() => { setSelected(toggleOneCategory(selected, "Other")); if (selected.includes("Other")) setOtherText(""); }} /> OTHER</label>
+      <div className="flex flex-wrap gap-2">
+        <SelectionChip selected={isAllSelected(selected)} onClick={() => setSelected(toggleAllCategories(selected))}>ALL</SelectionChip>
+        {CATEGORIES.map((item) => (
+          <SelectionChip key={item} selected={selected.includes(item)} onClick={() => setSelected(toggleOneCategory(selected, item))}>{item}</SelectionChip>
+        ))}
+        <SelectionChip selected={selected.includes("Other")} onClick={() => { setSelected(toggleOneCategory(selected, "Other")); if (selected.includes("Other")) setOtherText(""); }}>OTHER</SelectionChip>
+      </div>
       {selected.includes("Other") && (
         <label className="block text-sm">Please specify
           <input required value={otherText} onChange={(e) => setOtherText(e.target.value)} className={`mt-1 ${input}`} />
