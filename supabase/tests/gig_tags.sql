@@ -75,7 +75,7 @@ reset role;
 select set_config('request.jwt.claim.sub', pg_temp.gt_id('poster')::text, true);
 select set_config('request.jwt.claims', jsonb_build_object('sub', pg_temp.gt_id('poster'), 'role', 'authenticated')::text, true);
 set local role authenticated;
-select public.save_onboarding('PosterTags', null, 'Test private area', 12.34, -56.78, '["Cleaning"]', '["Other"]');
+select public.save_onboarding('PosterTags', null, 'Test private area', 12.34, -56.78, '["Cleaning"]', '["Pet Care"]');
 
 -- ---------------------------------------------------------------------------
 -- 1. Valid multiple tags.

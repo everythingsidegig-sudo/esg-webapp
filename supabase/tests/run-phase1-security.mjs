@@ -4,7 +4,12 @@ import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
 const root = new URL("../", import.meta.url);
-const offers = process.argv.includes("--offers");
+const requests = process.argv.includes("--requests");
+// origin/main's migrations 0011-0018 (taxonomy, deletion eligibility, account settings,
+// registration rewrite, ...). They were never run by this harness before; --mainline
+// replays them on top of 0010 so later migrations are checked against the real baseline.
+const mainline = process.argv.includes("--mainline") || requests;
+const offers = process.argv.includes("--offers") || mainline;
 const deletion = process.argv.includes("--deletion") || offers;
 const distance = process.argv.includes("--distance") || deletion;
 const helpers = process.argv.includes("--helpers") || distance;
@@ -227,6 +232,37 @@ if (offers) {
   }
   console.log("PASS: offers migration scope (claims evolved with offer amount/message, server-captured agreed price, address behind RLS for poster + accepted helper only, old overloads dropped, no client writes, address never in notifications)");
 }
+if (requests) {
+  const sql = await readFile(new URL("migrations/20240101000019_helper_requests.sql", root), "utf8");
+  const code = sql.replace(/--.*$/gm, "");
+  const created = [...code.matchAll(/create (?:or replace )?function (?:public|esg_private)\.([a-z_]+)\(/g)].map((entry) => entry[1]).sort();
+  const expected = "accept_gig_request,account_unavailable,assert_requestable_helper,cancel_gig,create_claim,create_gig,decline_gig_request,delete_own_account,publish_gig,reassign_gig_request,select_provider,withdraw_claim";
+  if (created.join(",") !== expected) {
+    throw new Error(`Helper-request migration must only (re)create its own functions, found: ${created}`);
+  }
+  for (const entry of code.matchAll(/create (?:or replace )?function (?:public|esg_private)\.[a-z_]+\([\s\S]*?\n\$\$;/g)) {
+    if (!entry[0].includes("security definer set search_path = ''")) throw new Error("Every request function must be SECURITY DEFINER with an empty search_path");
+    if (!/function esg_private\.(?:assert_requestable_helper|account_unavailable)/.test(entry[0]) && !/if (?:auth\.uid\(\)|v_uid) is null then\s*raise exception 'Authentication required'/.test(entry[0])) {
+      throw new Error("Every request RPC must start with an explicit authentication guard");
+    }
+  }
+  if (!/drop function public\.create_gig\(uuid,text,text,text,numeric,text,timestamptz,text,double precision,double precision,text,boolean,uuid\[\],text\);/.test(code)) {
+    throw new Error("The 14-argument create_gig must be dropped, not left callable");
+  }
+  if (/requested_helper_id uuid references public\.profiles\(id\)\s+on delete/i.test(code)) {
+    throw new Error("requested_helper_id must keep NO ACTION: deleting a helper must never turn a private request public");
+  }
+  const publicPolicy = code.match(/create policy gigs_select on public\.gigs[\s\S]*?\n\);/)?.[0] ?? "";
+  if (!/requested_helper_id is null/.test(publicPolicy) || /\btrue\b/.test(publicPolicy)) {
+    throw new Error("Public gig visibility must exclude helper requests");
+  }
+  if (/p_(amount|price|agreed)/.test(code.match(/create function public\.accept_gig_request\([^)]*\)/)?.[0] ?? "")) {
+    throw new Error("accept_gig_request must not take a client-supplied price");
+  }
+  if (/notify\([^;]*(address_text|private_address|v_address)/i.test(code)) throw new Error("Notifications must never include the private address");
+  if (!/requested_helper_id = v_uid/.test(code)) throw new Error("delete_own_account must treat a requested helper as having marketplace history");
+  console.log("PASS: helper-request migration scope (private requests hidden from the public, eligibility enforced in SQL, atomic locked RPCs, deletion-safe foreign key, address never in notifications)");
+}
 if (!runtimePath) {
   console.log("Static verification only. Supply a PGlite dist/index.js path for SQL execution.");
   process.exit(0);
@@ -253,7 +289,8 @@ try {
       on functions to anon, authenticated;
     create table auth.users (
       id uuid primary key, aud text, role text, email text,
-      raw_user_meta_data jsonb, created_at timestamptz, updated_at timestamptz
+      raw_user_meta_data jsonb, created_at timestamptz, updated_at timestamptz,
+      banned_until timestamptz
     );
     create function auth.uid() returns uuid language sql stable as $$
       select coalesce(
@@ -283,6 +320,17 @@ try {
     ...(distance ? ["migrations/20240101000008_helper_location.sql"] : []),
     ...(deletion ? ["migrations/20240101000009_account_deletion.sql"] : []),
     ...(offers ? ["migrations/20240101000010_offers_and_private_address.sql"] : []),
+    ...(mainline ? [
+      "migrations/20240101000011_taxonomy_and_identity.sql",
+      "migrations/20240101000012_account_deletion_eligibility.sql",
+      "migrations/20240101000013_public_wom_percentage.sql",
+      "migrations/20240101000014_account_settings.sql",
+      "migrations/20240101000015_registration_rewrite.sql",
+      "migrations/20240101000016_fix_delete_account_username_lock.sql",
+      "migrations/20240101000017_fix_set_helper_tags_categories.sql",
+      "migrations/20240101000018_profile_other_text_validation.sql",
+    ] : []),
+    ...(requests ? ["migrations/20240101000019_helper_requests.sql"] : []),
     "tests/phase1_security.sql",
     ...(phase2a ? ["tests/phase2a_integrity.sql"] : []),
     ...(onboarding ? ["tests/onboarding_post_gig.sql"] : []),
@@ -292,19 +340,20 @@ try {
     ...(distance ? ["tests/helper_location.sql"] : []),
     ...(deletion ? ["tests/account_deletion.sql"] : []),
     ...(offers ? ["tests/offers_private_address.sql"] : []),
+    ...(requests ? ["tests/helper_requests.sql"] : []),
   ]) {
     const sql = await readFile(new URL(file, root), "utf8");
     await db.exec(sql);
     if (file.startsWith("tests/")) {
       // Every assertion is an unconditional top-level SELECT. Successful SQL
       // execution means every call returned without raising its failure error.
-      const assertions = [...sql.matchAll(/^select pg_temp\.(?:assert|expect_denied|phase2_assert|phase2_expect_error|journey_assert|journey_error_any|journey_error|dw_assert|dw_denied|dw_error|gt_assert|gt_denied|gt_error|pt_assert|pt_denied|pt_error|hl_assert|hl_denied|hl_error|ad_assert|ad_error|of_assert|of_error|of_denied)\(/gm)].length;
+      const assertions = [...sql.matchAll(/^select pg_temp\.(?:assert|expect_denied|phase2_assert|phase2_expect_error|journey_assert|journey_error_any|journey_error|dw_assert|dw_denied|dw_error|gt_assert|gt_denied|gt_error|pt_assert|pt_denied|pt_error|hl_assert|hl_denied|hl_error|ad_assert|ad_error|of_assert|of_error|of_denied|rq_assert|rq_error|rq_denied)\(/gm)].length;
       passed += assertions;
       console.log(`PASS: ${file}: ${assertions} assertions`);
     }
     console.log(`Executed ${file}`);
   }
-  const cleanup = await db.query("select to_regclass('pg_temp.security_fixture') is null and to_regclass('pg_temp.phase2_fixture') is null and to_regclass('pg_temp.journey_fixture') is null and to_regclass('pg_temp.dw_fixture') is null and to_regclass('pg_temp.gt_fixture') is null and to_regclass('pg_temp.pt_fixture') is null and to_regclass('pg_temp.hl_fixture') is null and to_regclass('pg_temp.ad_fixture') is null and to_regclass('pg_temp.of_fixture') is null as clean");
+  const cleanup = await db.query("select to_regclass('pg_temp.security_fixture') is null and to_regclass('pg_temp.phase2_fixture') is null and to_regclass('pg_temp.journey_fixture') is null and to_regclass('pg_temp.dw_fixture') is null and to_regclass('pg_temp.gt_fixture') is null and to_regclass('pg_temp.pt_fixture') is null and to_regclass('pg_temp.hl_fixture') is null and to_regclass('pg_temp.ad_fixture') is null and to_regclass('pg_temp.of_fixture') is null and to_regclass('pg_temp.rq_fixture') is null as clean");
   if (!cleanup.rows[0].clean) throw new Error("SQL fixtures did not roll back");
   console.log(`PASS: ${passed} security assertions in isolated PostgreSQL/WASM`);
   console.log("Hosted Supabase, PostgREST, Auth, Storage and Realtime integration remain unverified.");

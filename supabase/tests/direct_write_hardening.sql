@@ -95,9 +95,9 @@ select pg_temp.dw_assert(
 );
 
 -- Legitimate direct writes (the fields src/app/profile/page.tsx genuinely edits) still work.
-update public.profiles set username = 'PosterHardened', skills = '["Cleaning"]', services = '["Other"]' where id = auth.uid();
+update public.profiles set username = 'PosterHardened', skills = '["Cleaning"]', services = '["Pet Care"]' where id = auth.uid();
 select pg_temp.dw_assert(
-  (select username = 'PosterHardened' and skills = '["Cleaning"]'::jsonb and services = '["Other"]'::jsonb from public.profiles where id = pg_temp.dw_id('poster')),
+  (select username = 'PosterHardened' and skills = '["Cleaning"]'::jsonb and services = '["Pet Care"]'::jsonb from public.profiles where id = pg_temp.dw_id('poster')),
   'legitimate username/skills/services direct edit still succeeds'
 );
 select pg_temp.dw_assert(
@@ -112,7 +112,7 @@ select pg_temp.dw_assert(
 );
 -- save_onboarding() itself is unaffected: still validates, still succeeds.
 select pg_temp.dw_error('select public.save_onboarding(''ab'',null,''Area'',null,null,''[]'',''[]'')', '22023', 'save_onboarding still rejects an invalid username');
-select public.save_onboarding('PosterHardened', 'https://example.invalid/photo.jpg', 'Test private area', 12.34, -56.78, '["Cleaning"]', '["Other"]');
+select public.save_onboarding('PosterHardened', 'https://example.invalid/photo.jpg', 'Test private area', 12.34, -56.78, '["Cleaning"]', '["Pet Care"]');
 select pg_temp.dw_assert(
   (select onboarding_completed_at is not null and private_location_text = 'Test private area' from public.profiles where id = auth.uid()),
   'save_onboarding continues to complete setup'
@@ -242,7 +242,7 @@ select public.publish_gig(pg_temp.dw_id('draft_gig'));
 select pg_temp.dw_assert((select status = 'active' from public.gigs where id = pg_temp.dw_id('draft_gig')), 'publish_gig still promotes a draft to active');
 
 update dw_fixture set id = (public.create_gig(
-  gen_random_uuid(), 'Delivery', 'Cancel-me gig', 'Gig for cancel_gig regression', 15, 'fixed',
+  gen_random_uuid(), 'Pet Care', 'Cancel-me gig', 'Gig for cancel_gig regression', 15, 'fixed',
   now() + interval '1 day', 'Test area', null, null, null, true
 )).id where name = 'extra_gig';
 select public.cancel_gig(pg_temp.dw_id('extra_gig'));

@@ -67,7 +67,7 @@ reset role;
 select set_config('request.jwt.claim.sub', pg_temp.ad_id('clean')::text, true);
 select set_config('request.jwt.claims', jsonb_build_object('sub', pg_temp.ad_id('clean'), 'role', 'authenticated')::text, true);
 set local role authenticated;
-select public.save_onboarding('CleanUser1', null, '1 Clean Street', 10.0, 20.0, '["Cleaning"]', '["Other"]');
+select public.save_onboarding('CleanUser1', null, '1 Clean Street', 10.0, 20.0, '["Cleaning"]', '["Pet Care"]');
 select public.set_helper_location('Clean Area', 10.0, 20.0);
 select pg_temp.ad_assert(
   (select public.delete_own_account() = false),

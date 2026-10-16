@@ -73,7 +73,7 @@ select public.save_onboarding('HelperTags', null, 'Test private area', 12.34, -5
 -- 1. set_helper_tags() validation.
 -- ---------------------------------------------------------------------------
 select pg_temp.pt_error('select public.set_helper_tags(''Not A Category'', array[]::uuid[])', '22023', 'invalid category rejected');
-select pg_temp.pt_error('select public.set_helper_tags(''Delivery'', array[]::uuid[])', '22023', 'category not in the caller''s skills rejected');
+select pg_temp.pt_error('select public.set_helper_tags(''Pet Care'', array[]::uuid[])', '22023', 'category not in the caller''s skills rejected');
 select pg_temp.pt_error(
   'select public.set_helper_tags(''Cleaning'', array[gen_random_uuid()])', '22023', 'nonexistent tag id rejected'
 );
