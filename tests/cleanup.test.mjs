@@ -2254,7 +2254,9 @@ test("auth-entry pages wait for session restoration before deciding", async () =
   assert.deepEqual(destinations, ["/location"]);
 });
 
-// ESG-AUTH-003 v1.0: email -> 6-digit code (no reset link, no PKCE) -> new password.
+// ESG-AUTH-003 v1.0: email -> code (no reset link, no PKCE) -> new password.
+// This Supabase project sends an 8-digit code (its OTP length isn't exposed
+// as a dashboard setting); see forgot-password/page.tsx's top comment.
 async function forgotPasswordPage({ client, destinations = [] }) {
   return component("src/app/auth/forgot-password/page.tsx", "ForgotPassword", {
     client,
@@ -2307,7 +2309,7 @@ async function codeStep(client, destinations = []) {
   return { app, destinations };
 }
 
-test("forgot-password code step requires exactly 6 digits before calling Supabase", async () => {
+test("forgot-password code step requires exactly 8 digits before calling Supabase", async () => {
   const verifies = [];
   const { app } = await codeStep({ auth: {
     resetPasswordForEmail: async () => ({ error: null }),
@@ -2319,7 +2321,7 @@ test("forgot-password code step requires exactly 6 digits before calling Supabas
   await nodes(tree, (node) => node.type === "form")[0].props.onSubmit({ preventDefault() {} });
   tree = app.render();
   assert.deepEqual(verifies, []);
-  assert.equal(String(nodes(tree, (node) => node.props.role === "alert")[0].props.children), "Enter the 6-digit verification code.");
+  assert.equal(String(nodes(tree, (node) => node.props.role === "alert")[0].props.children), "Enter the 8-digit verification code.");
 });
 
 test("forgot-password verifies the code via email+token (no token_hash, no PKCE) and redirects to reset-password", async () => {
@@ -2329,10 +2331,10 @@ test("forgot-password verifies the code via email+token (no token_hash, no PKCE)
     verifyOtp: async (args) => { verifies.push(args); return { error: null }; },
   } });
   let tree = app.render();
-  nodes(tree, (node) => node.props.id === "recovery-code")[0].props.onChange({ target: { value: "123456" } });
+  nodes(tree, (node) => node.props.id === "recovery-code")[0].props.onChange({ target: { value: "12345678" } });
   tree = app.render();
   await nodes(tree, (node) => node.type === "form")[0].props.onSubmit({ preventDefault() {} });
-  assert.deepEqual(JSON.parse(JSON.stringify(verifies)), [{ email: "person@example.com", token: "123456", type: "recovery" }]);
+  assert.deepEqual(JSON.parse(JSON.stringify(verifies)), [{ email: "person@example.com", token: "12345678", type: "recovery" }]);
   assert.deepEqual(destinations, ["/auth/reset-password"]);
 });
 
@@ -2342,7 +2344,7 @@ test("forgot-password: an invalid or expired code shows an error and stays on th
     verifyOtp: async () => ({ error: { code: "otp_expired", message: "Token has expired or is invalid" } }),
   } });
   let tree = app.render();
-  nodes(tree, (node) => node.props.id === "recovery-code")[0].props.onChange({ target: { value: "000000" } });
+  nodes(tree, (node) => node.props.id === "recovery-code")[0].props.onChange({ target: { value: "00000000" } });
   tree = app.render();
   await nodes(tree, (node) => node.type === "form")[0].props.onSubmit({ preventDefault() {} });
   tree = app.render();
