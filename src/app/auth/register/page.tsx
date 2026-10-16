@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { createClient } from "@/lib/supabase/client";
 import { friendlyError, passwordError } from "@/lib/journey";
-import { SERVICE_TYPES } from "@/lib/services";
+import { CategoryList } from "@/components/CategoryList";
 
 // ESG-AUTH-002 v0.5 screens 4-11: Username -> Password -> Profile Photo
 // (mandatory) -> Phone (optional) -> Skills I Can Offer (optional) ->
@@ -15,35 +15,8 @@ import { SERVICE_TYPES } from "@/lib/services";
 // password/photo/skills/services/terms are the only things left to collect.
 // Specializations (My Profile's separate tag picker) are not part of this
 // spec and are left for the user to add afterward on My Profile.
-const CATEGORIES = SERVICE_TYPES.filter((c) => c !== "Other");
-const isAllSelected = (selected: string[]) => CATEGORIES.every((c) => selected.includes(c)) && selected.includes("Other");
-const toggleAll = (selected: string[]) => (isAllSelected(selected) ? [] : [...CATEGORIES, "Other"]);
-const toggleOne = (selected: string[], item: string) => (selected.includes(item) ? selected.filter((c) => c !== item) : [...selected, item]);
-
 type Step = "username" | "password" | "photo" | "phone" | "skills" | "services" | "terms" | "created";
 const STEP_ORDER: Step[] = ["username", "password", "photo", "phone", "skills", "services", "terms", "created"];
-
-function CategoryList({ title, selected, setSelected, otherText, setOtherText }: {
-  title: string; selected: string[]; setSelected: (next: string[]) => void;
-  otherText: string; setOtherText: (next: string) => void;
-}) {
-  const input = "w-full rounded-lg border border-neutral-300 px-3 py-2";
-  return (
-    <fieldset className="space-y-2">
-      <legend className="mb-1 font-medium">{title}</legend>
-      <label className="check-row"><input type="checkbox" checked={isAllSelected(selected)} onChange={() => setSelected(toggleAll(selected))} /> ALL</label>
-      {CATEGORIES.map((item) => (
-        <label key={item} className="check-row"><input type="checkbox" checked={selected.includes(item)} onChange={() => setSelected(toggleOne(selected, item))} /> {item}</label>
-      ))}
-      <label className="check-row"><input type="checkbox" checked={selected.includes("Other")} onChange={() => { setSelected(toggleOne(selected, "Other")); if (selected.includes("Other")) setOtherText(""); }} /> OTHER</label>
-      {selected.includes("Other") && (
-        <label className="block text-sm">Please specify
-          <input required value={otherText} onChange={(e) => setOtherText(e.target.value)} className={`mt-1 ${input}`} />
-        </label>
-      )}
-    </fieldset>
-  );
-}
 
 function RegisterInner() {
   const supabase = createClient();

@@ -75,6 +75,7 @@ async function component(path, name, overrides = {}) {
     "@/components/AuthGuard": { default: "guard" },
     "@/components/SelectionChip": { default: "selection-chip" },
     "@/components/OptionSheet": { default: "option-sheet" },
+    "@/components/CategoryList": { CategoryList: "category-list" },
     "@/lib/my-gigs": myGigsLib,
     "@/lib/money": moneyLib,
     "@/components/LogoutButton": { default: "logout-button" },
@@ -102,6 +103,17 @@ function nodes(tree, predicate) {
 const textOf = (node) => [node?.props?.children].flat(Infinity)
   .map((child) => (typeof child === "string" || typeof child === "number" ? String(child) : child?.props ? textOf(child) : "")).join("");
 const button = (tree, label) => nodes(tree, (node) => node.type === "button" && node.props.children === label)[0];
+// Profile skills/services: the real category checkboxes/ALL/OTHER live inside
+// CategoryList, which is opaque to this harness (like SelectionChip/OptionSheet) --
+// tests drive it via its props directly, computing the toggled array themselves
+// the way the real checkbox's onChange would.
+const categoryList = (tree, title) => nodes(tree, (node) => node.type === "category-list" && node.props.title === title)[0];
+const skillsList = (tree) => categoryList(tree, "Skills I can use to make money");
+const servicesList = (tree) => categoryList(tree, "Services I might need");
+function toggleCategory(list, item) {
+  const current = list.props.selected;
+  list.props.setSelected(current.includes(item) ? current.filter((c) => c !== item) : [...current, item]);
+}
 // Profile specializations: removable chips in one place, added via a bottom sheet.
 const editSpecializations = (tree) => nodes(tree, (node) => node.type === "button" && node.props["aria-label"] === "Add specializations")[0];
 const removeSpecialization = (tree, name) => nodes(tree, (node) => node.type === "button" && node.props["aria-label"] === `Remove ${name}`)[0];
@@ -109,7 +121,7 @@ const specializationSheet = (tree) => nodes(tree, (node) => node.type === "optio
 const sheetRow = (tree, label) => nodes(specializationSheet(tree) ?? {}, (node) => node.type === "button" && node.props.role === "checkbox"
   && Array.isArray(node.props.children) && node.props.children[0]?.props?.children === label)[0];
 
-test("profile chips restore saved and legacy values, toggle independently, and save the same arrays", async () => {
+test("profile skills/services selections pass through to CategoryList, toggle independently, preserve a legacy value, and save the same arrays", async () => {
   let saved;
   const client = { from: (table) => table === "profile_tags"
     ? { select: () => ({ eq: async () => ({ data: [], error: null }) }) }
@@ -122,21 +134,34 @@ test("profile chips restore saved and legacy values, toggle independently, and s
     // is enough to let those calls succeed harmlessly.
     rpc: async () => ({ data: null, error: null }),
   };
+  // "Legacy skill" stands in for a stored value outside the master list
+  // (e.g. pre-rename data) -- CategoryList only ever renders the official
+  // categories, but the raw array must still pass through untouched.
   const original = { ...profile, skills: ["Cleaning", "Legacy skill"] };
   const app = await component("src/app/profile/page.tsx", "ProfileEditor", { client });
-  const chips = (tree) => nodes(tree, (node) => node.type === "selection-chip");
   let tree = app.render({ profile: original });
-  assert.deepEqual(chips(tree).filter((node) => node.props.selected).map((node) => node.props.children), ["Cleaning", "Legacy skill", "Other"]);
-  chips(tree)[0].props.onClick();
+  assert.deepEqual(skillsList(tree).props.selected, ["Cleaning", "Legacy skill"]);
+  assert.deepEqual(servicesList(tree).props.selected, ["Other"]);
+
+  toggleCategory(skillsList(tree), "Cleaning"); // deselect
   tree = app.render({ profile: original });
-  chips(tree)[1].props.onClick();
+  assert.deepEqual(skillsList(tree).props.selected, ["Legacy skill"], "deselecting one skill leaves the legacy value untouched");
+
+  toggleCategory(skillsList(tree), "Handyman"); // select a different skill
   tree = app.render({ profile: original });
-  chips(tree)[4].props.onClick();
+  assert.deepEqual(skillsList(tree).props.selected, ["Legacy skill", "Handyman"]);
+
+  toggleCategory(servicesList(tree), "Other"); // deselect, independently of skills
   tree = app.render({ profile: original });
+  assert.deepEqual(servicesList(tree).props.selected, []);
+
   await nodes(tree, (node) => node.type === "form")[0].props.onSubmit({ preventDefault() {} });
-  assert.deepEqual(JSON.parse(JSON.stringify(saved)), { skills: ["Legacy skill", "Other"], services: [] });
+  assert.deepEqual(JSON.parse(JSON.stringify(saved)), {
+    skills: ["Legacy skill", "Handyman"], services: [], skills_other_text: null, services_other_text: null,
+  });
   const refreshed = await component("src/app/profile/page.tsx", "ProfileEditor", { client });
-  assert.deepEqual(chips(refreshed.render({ profile: { ...original, ...saved } })).filter((node) => node.props.selected).map((node) => node.props.children), ["Other", "Legacy skill"]);
+  const refreshedTree = refreshed.render({ profile: { ...original, ...saved } });
+  assert.deepEqual(skillsList(refreshedTree).props.selected, ["Legacy skill", "Handyman"], "a legacy value survives the save round-trip");
 });
 
 test("Profile: selecting a skill immediately reveals the specializations section, whose Add opens a sheet of options, with no 'tag' wording", async () => {
@@ -148,8 +173,7 @@ test("Profile: selecting a skill immediately reveals the specializations section
   app.render({ profile: { ...profile, skills: [] } }); await flush();
   let tree = app.render({ profile: { ...profile, skills: [] } });
   assert.equal(editSpecializations(tree), undefined, "no specializations section before a skill is selected");
-  const chip = (label) => nodes(tree, (node) => node.type === "selection-chip" && node.props.children === label)[0];
-  chip("Cleaning").props.onClick();
+  toggleCategory(skillsList(tree), "Cleaning");
   tree = app.render({ profile: { ...profile, skills: [] } });
   assert.ok(editSpecializations(tree), "the specializations section appears immediately, before saving");
   assert.equal(nodes(tree, (node) => node.props.children === "None added yet.").length, 1, "empty state until something is chosen");
@@ -179,9 +203,8 @@ test("Profile: each newly selected skill opens its own options sheet, and every 
   const props = { profile: { ...profile, skills: [], services: [] } };
   app.render(props); await flush();
   let tree = app.render(props);
-  const chip = (label) => nodes(tree, (node) => node.type === "selection-chip" && node.props.children === label)[0];
 
-  chip("Cleaning").props.onClick();
+  toggleCategory(skillsList(tree), "Cleaning");
   tree = app.render(props);
   assert.equal(specializationSheet(tree).props.title, "What kind of cleaning?");
   assert.deepEqual(nodes(specializationSheet(tree), (node) => node.props.role === "group").map((node) => node.props["aria-label"]), ["Cleaning specializations"], "only that skill's options");
@@ -190,7 +213,7 @@ test("Profile: each newly selected skill opens its own options sheet, and every 
   specializationSheet(tree).props.onClose();
   tree = app.render(props);
 
-  chip("Other").props.onClick();
+  toggleCategory(skillsList(tree), "Other");
   tree = app.render(props);
   assert.equal(specializationSheet(tree).props.title, "What kind of help?");
   assert.deepEqual(nodes(specializationSheet(tree), (node) => node.props.role === "group").map((node) => node.props["aria-label"]), ["Other specializations"], "the new skill's options, not the previous skill's");
@@ -202,7 +225,7 @@ test("Profile: each newly selected skill opens its own options sheet, and every 
   assert.equal(specializationSheet(tree), undefined);
   assert.ok(removeSpecialization(tree, "Deep Cleaning") && removeSpecialization(tree, "Errands"), "picks from both skills appear together in the specializations section");
 
-  chip("Other").props.onClick(); // deselecting must not open a sheet
+  toggleCategory(skillsList(tree), "Other"); // deselecting must not open a sheet
   tree = app.render(props);
   assert.equal(specializationSheet(tree), undefined, "deselecting a skill does not open anything");
 });
@@ -216,12 +239,11 @@ test("Profile: deselecting the last skill with specializations hides the section
   const withSkill = { ...profile, skills: ["Cleaning"] };
   app.render({ profile: withSkill }); await flush();
   let tree = app.render({ profile: withSkill });
-  const chip = (label) => nodes(tree, (node) => node.type === "selection-chip" && node.props.children === label)[0];
   assert.ok(editSpecializations(tree), "specializations section present while the skill is selected");
   editSpecializations(tree).props.onClick();
   tree = app.render({ profile: withSkill });
   assert.ok(specializationSheet(tree), "sheet is open");
-  chip("Cleaning").props.onClick();
+  toggleCategory(skillsList(tree), "Cleaning");
   tree = app.render({ profile: withSkill });
   assert.equal(editSpecializations(tree), undefined, "section disappears once no selected skill has specializations");
   assert.equal(specializationSheet(tree), undefined, "an open sheet for a deselected skill closes");
@@ -247,7 +269,7 @@ test("Profile Save persists skill/service changes and specializations together, 
     },
     rpc: async (name, payload) => { calls.push({ type: "rpc", name, payload }); return { data: null, error: null }; },
   };
-  const withSkills = { ...profile, skills: ["Cleaning", "Handyman"] };
+  const withSkills = { ...profile, skills: ["Cleaning", "Handyman"], services: [] };
   const app = await component("src/app/profile/page.tsx", "ProfileEditor", {
     client,
     mocks: { "@/lib/tags": {
@@ -260,8 +282,7 @@ test("Profile Save persists skill/service changes and specializations together, 
   });
   app.render({ profile: withSkills }); await flush();
   let tree = app.render({ profile: withSkills });
-  const chip = (label) => nodes(tree, (node) => node.type === "selection-chip" && node.props.children === label)[0];
-  chip("Handyman").props.onClick(); // deselect a skill that had a specialization
+  toggleCategory(skillsList(tree), "Handyman"); // deselect a skill that had a specialization
   tree = app.render({ profile: withSkills });
   editSpecializations(tree).props.onClick();
   tree = app.render({ profile: withSkills });
@@ -278,7 +299,9 @@ test("Profile Save persists skill/service changes and specializations together, 
   assert.equal(rpcCalls[1].payload.p_service_type, "Cleaning");
   assert.deepEqual(JSON.parse(JSON.stringify(rpcCalls[1].payload.p_tag_ids)).sort(), ["t1", "t3"], "remaining skill's specializations (existing + newly added) are saved");
   assert.ok(calls.indexOf(rpcCalls[1]) > profileUpdateIndex, "syncing the remaining skill happens after the profile update confirms it");
-  assert.deepEqual(JSON.parse(JSON.stringify(calls[profileUpdateIndex].payload)), { skills: ["Cleaning"], services: profile.services });
+  assert.deepEqual(JSON.parse(JSON.stringify(calls[profileUpdateIndex].payload)), {
+    skills: ["Cleaning"], services: [], skills_other_text: null, services_other_text: null,
+  });
 });
 
 test("Profile Save reports a distinct message when the profile saves but specialization sync fails afterward", async () => {
@@ -289,19 +312,61 @@ test("Profile Save reports a distinct message when the profile saves but special
     },
     rpc: async () => ({ data: null, error: new Error("network blip") }),
   };
-  const withSkill = { ...profile, skills: ["Cleaning"] };
+  const withSkill = { ...profile, skills: ["Cleaning"], services: [] };
   const app = await component("src/app/profile/page.tsx", "ProfileEditor", {
     client,
     mocks: { "@/lib/tags": { loadTagCatalog: async () => ({ Cleaning: [{ id: "t1", name: "Deep Cleaning", service_type: "Cleaning" }] }), MAX_PROFILE_TAGS: 8 } },
   });
   app.render({ profile: withSkill }); await flush();
   let tree = app.render({ profile: withSkill });
-  nodes(tree, (node) => node.type === "selection-chip" && node.props.children === "Other")[0].props.onClick();
+  toggleCategory(skillsList(tree), "Other");
+  tree = app.render({ profile: withSkill });
+  skillsList(tree).props.setOtherText("Something else");
   tree = app.render({ profile: withSkill });
   await nodes(tree, (node) => node.type === "form")[0].props.onSubmit({ preventDefault() {} });
   tree = app.render({ profile: withSkill });
   assert.equal(nodes(tree, (node) => node.props.role === "alert" && /profile saved/i.test(node.props.children)).length, 1, "distinguishes a partial failure from a full failure");
   assert.equal(nodes(tree, (node) => node.props.role === "status").length, 0, "does not also show a misleading success message");
+});
+
+// ESG-SVC-001 v1.0 §5: OTHER's "please specify" text is mandatory exactly
+// while OTHER is selected, for Skills and Services independently -- and this
+// must be enforced before anything is sent, same as Registration.
+test("Profile Save blocks selecting OTHER without specifying it, for skills and services independently", async () => {
+  const calls = [];
+  const client = {
+    from: (table) => table === "profile_tags" ? { select: () => ({ eq: async () => ({ data: [], error: null }) }) }
+      : { update: (payload) => { calls.push(payload); return { eq: () => ({ select: () => ({ single: async () => ({ error: null }) }) }) }; } },
+    rpc: async () => ({ data: null, error: null }),
+  };
+  const soloProfile = { ...profile, skills: [], services: [] };
+  const app = await component("src/app/profile/page.tsx", "ProfileEditor", { client });
+  app.render({ profile: soloProfile }); await flush();
+  let tree = app.render({ profile: soloProfile });
+  const submit = () => nodes(tree, (node) => node.type === "form")[0].props.onSubmit({ preventDefault() {} });
+
+  toggleCategory(skillsList(tree), "Other");
+  tree = app.render({ profile: soloProfile });
+  await submit();
+  tree = app.render({ profile: soloProfile });
+  assert.deepEqual(calls, [], "never saves while OTHER is selected with no text");
+  assert.equal(nodes(tree, (node) => node.props.role === "alert" && /Skills I can use to make money/.test(node.props.children)).length, 1);
+
+  skillsList(tree).props.setOtherText("Juggling");
+  toggleCategory(servicesList(tree), "Other");
+  tree = app.render({ profile: soloProfile });
+  await submit();
+  tree = app.render({ profile: soloProfile });
+  assert.deepEqual(calls, [], "skills now has text, but services' OTHER still has none");
+  assert.equal(nodes(tree, (node) => node.props.role === "alert" && /Services I might need/.test(node.props.children)).length, 1);
+
+  servicesList(tree).props.setOtherText("Piano tuning");
+  tree = app.render({ profile: soloProfile });
+  await submit();
+  assert.equal(calls.length, 1, "both OTHER texts specified: the save proceeds");
+  assert.deepEqual(JSON.parse(JSON.stringify(calls[0])), {
+    skills: ["Other"], services: ["Other"], skills_other_text: "Juggling", services_other_text: "Piano tuning",
+  });
 });
 
 function profileTagsOnlyClient(rpcCalls) {
@@ -448,9 +513,8 @@ test("Profile: existing profile values prepopulate the edit form", async () => {
   const tree = app.render({ profile: existing });
   const heading = nodes(tree, (node) => node.type === "h1")[0];
   assert.equal(textOf(heading), "@ExistingUser1", "username is shown read-only from the existing profile, not as an editable field");
-  const chips = nodes(tree, (node) => node.type === "selection-chip");
-  assert.deepEqual(chips.filter((node) => node.props.selected).map((node) => node.props.children), ["Cleaning", "Other"],
-    "existing skills and services are preselected");
+  assert.deepEqual(skillsList(tree).props.selected, ["Cleaning"], "existing skills are preselected");
+  assert.deepEqual(servicesList(tree).props.selected, ["Other"], "existing services are preselected");
 });
 
 test("Profile: primary action is 'Update profile', shows 'Updating…' while saving, and the pending guard blocks a duplicate submit", async () => {
@@ -466,7 +530,9 @@ test("Profile: primary action is 'Update profile', shows 'Updating…' while sav
   app.render({ profile: soloProfile }); await flush();
   let tree = app.render({ profile: soloProfile });
   assert.ok(button(tree, "Update profile"), "primary action is labeled Update profile, not Save");
-  nodes(tree, (node) => node.type === "selection-chip" && node.props.children === "Other")[0].props.onClick();
+  toggleCategory(skillsList(tree), "Other");
+  tree = app.render({ profile: soloProfile });
+  skillsList(tree).props.setOtherText("Something else");
   tree = app.render({ profile: soloProfile });
   const submit = () => nodes(tree, (node) => node.type === "form")[0].props.onSubmit({ preventDefault() {} });
   const first = submit();
@@ -530,18 +596,17 @@ test("Profile: Update profile is disabled and inert until something actually cha
   app.render({ profile: withSkill }); await flush();
   let tree = app.render({ profile: withSkill });
   const update = () => button(tree, "Update profile");
-  const chip = (label) => nodes(tree, (node) => node.type === "selection-chip" && node.props.children === label)[0];
   assert.equal(update().props.disabled, true, "nothing changed yet");
   const hint = () => nodes(tree, (node) => node.type === "p" && /changes/.test(String(node.props.children)))[0].props.children;
   assert.equal(hint(), "No changes yet.");
   await nodes(tree, (node) => node.type === "form")[0].props.onSubmit({ preventDefault() {} });
   assert.deepEqual(calls, [], "submitting an unchanged form (e.g. Enter key) saves nothing");
 
-  chip("Other").props.onClick();
+  toggleCategory(skillsList(tree), "Other");
   tree = app.render({ profile: withSkill });
   assert.equal(update().props.disabled, false, "a skill change enables it");
   assert.equal(hint(), "You have unsaved changes.");
-  chip("Other").props.onClick();
+  toggleCategory(skillsList(tree), "Other");
   tree = app.render({ profile: withSkill });
   assert.equal(update().props.disabled, true, "reverting the change disables it again");
 
@@ -557,7 +622,7 @@ test("Profile: Update profile is disabled and inert until something actually cha
   tree = app.render({ profile: withSkill });
   assert.equal(specializationSheet(tree), undefined, "Done/Escape/backdrop all close via onClose");
 
-  chip("Other").props.onClick(); // first "Other" chip belongs to the skills group
+  toggleCategory(skillsList(tree), "Other");
   tree = app.render({ profile: withSkill });
   assert.equal(update().props.disabled, false, "a skill change enables it");
 });

@@ -4,14 +4,14 @@ import Link from "next/link";
 import AuthGuard from "@/components/AuthGuard";
 import LogoutButton from "@/components/LogoutButton";
 import OptionSheet from "@/components/OptionSheet";
-import SelectionChip from "@/components/SelectionChip";
+import { CategoryList } from "@/components/CategoryList";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { createClient } from "@/lib/supabase/client";
 import { approximateCoordinates, friendlyError } from "@/lib/journey";
 import { reverseGeocodeGeneralArea, clearGeneralAreaState } from "@/lib/location";
-import { SERVICE_TYPES, SPECIALIZATION_PROMPTS } from "@/lib/services";
+import { SPECIALIZATION_PROMPTS } from "@/lib/services";
 import { loadTagCatalog, MAX_PROFILE_TAGS } from "@/lib/tags";
 import { formatMoney } from "@/lib/money";
 import type { Profile as ProfileRow, Tag } from "@/lib/database.types";
@@ -30,6 +30,8 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
   const { user, refreshProfile } = useAuth();
   const [skills, setSkills] = useState(profile.skills);
   const [services, setServices] = useState(profile.services);
+  const [skillsOtherText, setSkillsOtherText] = useState(profile.skills_other_text ?? "");
+  const [servicesOtherText, setServicesOtherText] = useState(profile.services_other_text ?? "");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -42,8 +44,6 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
   const [reauthPassword, setReauthPassword] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  const catalog = [...new Set<string>([...SERVICE_TYPES, ...profile.skills, ...profile.services])];
-  const toggle = (values: string[], value: string) => values.includes(value) ? values.filter((item) => item !== value) : [...values, value];
 
   // Specializations are edited inline under each selected skill below, and
   // saved as part of the one Save action. The catalog and the caller's
@@ -60,6 +60,8 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
   const sameItems = (a: string[], b: string[]) => a.length === b.length && a.every((item) => b.includes(item));
   const dirty = !sameItems(skills, profile.skills)
     || !sameItems(services, profile.services)
+    || skillsOtherText !== (profile.skills_other_text ?? "")
+    || servicesOtherText !== (profile.services_other_text ?? "")
     || (helperDataLoaded && skills.some((category) => !sameItems(specializationTags[category] ?? [], savedSpecializations[category] ?? [])));
 
   useEffect(() => {
@@ -89,10 +91,11 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
   const [sheetScope, setSheetScope] = useState<string | null>(null);
   const specializationSkills = skills.filter((skill) => (tagCatalog[skill]?.length ?? 0) > 0);
   const sheetSkills = sheetScope === ALL_SKILLS ? specializationSkills : specializationSkills.filter((skill) => skill === sheetScope);
-  function toggleSkill(item: string) {
-    const adding = !skills.includes(item);
-    setSkills(toggle(skills, item));
-    if (adding && (tagCatalog[item]?.length ?? 0) > 0) setSheetScope(item);
+  function handleSkillsChange(next: string[]) {
+    const added = next.filter((item) => !skills.includes(item)).filter((item) => (tagCatalog[item]?.length ?? 0) > 0);
+    setSkills(next);
+    if (added.length === 1) setSheetScope(added[0]);
+    else if (added.length > 1) setSheetScope(ALL_SKILLS);
   }
   const chosenSpecializations = specializationSkills.flatMap((skill) =>
     (tagCatalog[skill] ?? []).filter((tag) => (specializationTags[skill] ?? []).includes(tag.id)).map((tag) => ({ skill, tag })));
@@ -197,6 +200,8 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
     e.preventDefault();
     if (pending.current || !dirty) return;
     setError(null); setMessage(null);
+    if (skills.includes("Other") && !skillsOtherText.trim()) { setError("Specify your OTHER skill, or remove OTHER from Skills I can use to make money."); return; }
+    if (services.includes("Other") && !servicesOtherText.trim()) { setError("Specify your OTHER service, or remove OTHER from Services I might need."); return; }
     pending.current = true; setSaving(true);
     let profileSaved = false;
     try {
@@ -206,7 +211,11 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
           if (clearError) throw clearError;
         }
       }
-      const { error: profileError } = await supabase.from("profiles").update({ skills, services }).eq("id", profile.id).select("id").single();
+      const { error: profileError } = await supabase.from("profiles").update({
+        skills, services,
+        skills_other_text: skills.includes("Other") ? skillsOtherText.trim() : null,
+        services_other_text: services.includes("Other") ? servicesOtherText.trim() : null,
+      }).eq("id", profile.id).select("id").single();
       if (profileError) throw profileError;
       profileSaved = true;
       if (helperDataLoaded) {
@@ -306,9 +315,7 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
     </div>
     <form onSubmit={saveProfile} className="space-y-3 rounded-lg border border-neutral-200 bg-white p-4">
       <fieldset disabled={saving} className="space-y-3">
-        <fieldset className="min-w-0"><legend className="text-sm font-medium">Skills I can use to make money</legend>
-          <div className="mt-2 flex flex-wrap gap-2">{catalog.map((item) => <SelectionChip key={item} selected={skills.includes(item)} onClick={() => toggleSkill(item)}>{item}</SelectionChip>)}</div>
-        </fieldset>
+        <CategoryList title="Skills I can use to make money" selected={skills} setSelected={handleSkillsChange} otherText={skillsOtherText} setOtherText={setSkillsOtherText} />
         {specializationSkills.length > 0 && (
           <fieldset className="min-w-0"><legend className="text-sm font-medium">Specializations (optional)</legend>
             <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -325,9 +332,7 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
             </div>
           </fieldset>
         )}
-        <fieldset className="min-w-0"><legend className="text-sm font-medium">Services I might need</legend>
-          <div className="mt-2 flex flex-wrap gap-2">{catalog.map((item) => <SelectionChip key={item} selected={services.includes(item)} onClick={() => setServices(toggle(services, item))}>{item}</SelectionChip>)}</div>
-        </fieldset>
+        <CategoryList title="Services I might need" selected={services} setSelected={setServices} otherText={servicesOtherText} setOtherText={setServicesOtherText} />
         <button type="submit" disabled={!dirty} className={`flex w-full items-center justify-center whitespace-nowrap rounded-lg px-4 py-2.5 font-medium transition-colors disabled:cursor-not-allowed ${dirty
           ? "bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-60"
           : "bg-neutral-200 text-neutral-500"}`}>{saving ? "Updating…" : "Update profile"}</button>
