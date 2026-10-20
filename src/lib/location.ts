@@ -23,6 +23,7 @@ export function cacheGeneralArea(lat: number, lng: number, label: string) {
 // plus any cached reverse-geocode labels. Used on sign-out and account
 // deletion so no ESG-specific location data survives the session.
 export function clearGeneralAreaState() {
+  try { localStorage.removeItem(AUTH_AREA_KEY); } catch {}
   try {
     sessionStorage.removeItem(LOCATION_KEY);
     for (let i = sessionStorage.length - 1; i >= 0; i--) {
@@ -53,9 +54,42 @@ export async function reverseGeocodeGeneralArea(lat: number, lng: number): Promi
 export function loadJourneyLocation(): { text: string; lat: number | null; lng: number | null } {
   try {
     const value = JSON.parse(sessionStorage.getItem(LOCATION_KEY) ?? "null");
-    if (!value || typeof value.text !== "string") return { text: "", lat: null, lng: null };
-    return { text: value.text, ...approximateCoordinates(value.lat ?? null, value.lng ?? null) };
-  } catch { return { text: "", lat: null, lng: null }; }
+    if (value && typeof value.text === "string" && value.text) return { text: value.text.slice(0, 200), ...approximateCoordinates(value.lat ?? null, value.lng ?? null) };
+  } catch { /* fall through to the post-sign-in copy */ }
+  return restoreAreaAfterAuth();
+}
+
+// Signing in or registering can end in another tab (the email link), which starts with an
+// empty sessionStorage. A short-lived copy of the general area -- text and rounded
+// coordinates only, never an address -- carries the visitor's search across that gap.
+export const AUTH_AREA_KEY = "esg:post-auth-area";
+const AUTH_AREA_TTL_MS = 30 * 60 * 1000;
+type AreaValue = { text: string; lat: number | null; lng: number | null };
+type KeyValueStore = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+
+export function rememberAreaForAuth(store?: KeyValueStore, session?: Pick<Storage, "getItem">, now = Date.now()): boolean {
+  try {
+    const area = JSON.parse((session ?? sessionStorage).getItem(LOCATION_KEY) ?? "null");
+    if (!area || typeof area.text !== "string" || !area.text || area.text.length > 200) return false;
+    const coords = approximateCoordinates(area.lat ?? null, area.lng ?? null);
+    (store ?? localStorage).setItem(AUTH_AREA_KEY, JSON.stringify({ text: area.text, ...coords, expires: now + AUTH_AREA_TTL_MS }));
+    return true;
+  } catch { return false; }
+}
+
+export function restoreAreaAfterAuth(store?: KeyValueStore, session?: Pick<Storage, "setItem">, now = Date.now()): AreaValue {
+  const empty = { text: "", lat: null, lng: null };
+  try {
+    const target = store ?? localStorage;
+    const raw = target.getItem(AUTH_AREA_KEY);
+    target.removeItem(AUTH_AREA_KEY);
+    if (!raw) return empty;
+    const value = JSON.parse(raw);
+    if (typeof value?.text !== "string" || !value.text || value.text.length > 200 || typeof value.expires !== "number" || value.expires < now) return empty;
+    const area = { text: value.text, ...approximateCoordinates(typeof value.lat === "number" ? value.lat : null, typeof value.lng === "number" ? value.lng : null) };
+    try { (session ?? sessionStorage).setItem(LOCATION_KEY, JSON.stringify(area)); } catch { /* the area still applies to this page */ }
+    return area;
+  } catch { return empty; }
 }
 
 // Same formula Browse already uses for gig distance, in kilometers for Find a Helper's radius filter.

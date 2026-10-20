@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { safeNext, setupDestination, registrationError, passwordError, approximateCoordinates, gigInputError, friendlyError, rpcActionError } from "../src/lib/journey.ts";
+import { safeNext, setupDestination, registrationError, passwordError, approximateCoordinates, gigInputError, friendlyError, rpcActionError,
+  AUTH_DESTINATION_KEY, findHelperHref, helperProfileHref, helperUsernameFromDestination, isHelperProfileDestination, rememberAuthDestination, takeAuthDestination } from "../src/lib/journey.ts";
 import { generalAreaLabel } from "../src/lib/geocoding.ts";
 import { posterSection, helperSection, helperBadge, proposalCountLabel, timeAgo } from "../src/lib/my-gigs.ts";
 import { SERVICE_TYPES } from "../src/lib/services.ts";
@@ -149,4 +150,74 @@ test("seeded tag catalog only uses approved categories and excludes scheduling/l
   for (const { category } of rows) assert.ok(SERVICE_TYPES.includes(category), `unexpected category: ${category}`);
   const excluded = ["Weekend", "Same-Day", "Seasonal", "Local", "Long Distance"];
   for (const { name } of rows) assert.ok(!excluded.includes(name), `excluded scheduling/location term used as a tag: ${name}`);
+});
+
+// ---- signed-out helper browsing: destinations ----
+const fakeStorage = (initial = {}) => {
+  const map = new Map(Object.entries(initial));
+  return { map, getItem: (key) => map.get(key) ?? null, setItem: (key, value) => { map.set(key, value); }, removeItem: (key) => { map.delete(key); } };
+};
+
+test("only a single helper-profile path counts as a helper destination, including through safeNext's own checks", () => {
+  for (const good of ["/profile/HelperOne", "/profile/helper_1?from=find-helper&category=Yard%20Work", "/profile/AB#top"]) {
+    assert.equal(isHelperProfileDestination(good), true, good);
+  }
+  for (const bad of [
+    "", null, undefined, "/", "/profile", "/profile/", "/profile/a/b", "/profile/a.b", "/profile/a%2Fb", "/profile/" + "a".repeat(41),
+    "//evil.invalid/profile/x", "https://evil.invalid/profile/x", "javascript:alert(1)", "/\\evil.invalid", "/profile/x\\y", "/my-gigs", "/gigs/00000000-0000-0000-0000-000000000000",
+  ]) {
+    assert.equal(isHelperProfileDestination(bad), false, String(bad));
+  }
+});
+
+test("helperProfileHref builds a validated profile link that carries the search category", () => {
+  assert.equal(helperProfileHref("HelperOne"), "/profile/HelperOne");
+  assert.equal(helperProfileHref("HelperOne", "Yard Work"), "/profile/HelperOne?from=find-helper&category=Yard%20Work");
+  assert.equal(helperProfileHref("HelperOne", "x".repeat(61)), "/profile/HelperOne", "an oversized category is dropped, not embedded");
+  for (const username of ["", "a b", "a/b", "../x", "a.b", "<x>", "a".repeat(41)]) assert.equal(helperProfileHref(username, "Cleaning"), null, JSON.stringify(username));
+  assert.equal(safeNext(helperProfileHref("HelperOne", "Yard Work")), "/profile/HelperOne?from=find-helper&category=Yard%20Work", "and it passes the sign-in redirect validation unchanged");
+  assert.equal(helperUsernameFromDestination("/profile/HelperOne?from=find-helper"), "HelperOne");
+  assert.equal(helperUsernameFromDestination("/post"), null);
+});
+
+test("findHelperHref returns to the list, keeping only a known category", () => {
+  assert.equal(findHelperHref("Yard Work"), "/find-helper?category=Yard%20Work");
+  assert.equal(findHelperHref("Yard Work", ["Cleaning"]), "/find-helper", "unknown category");
+  assert.equal(findHelperHref(null), "/find-helper");
+  assert.equal(findHelperHref("x".repeat(61)), "/find-helper");
+});
+
+test("a remembered helper destination is one-shot, expires, and is re-validated when read", () => {
+  const now = 1_800_000_000_000;
+  const destination = "/profile/HelperOne?from=find-helper&category=Cleaning";
+  const storage = fakeStorage();
+  assert.equal(rememberAuthDestination(destination, storage, now), true);
+  const saved = JSON.parse(storage.map.get(AUTH_DESTINATION_KEY));
+  assert.deepEqual(saved, { path: destination, expires: now + 30 * 60 * 1000 });
+  assert.equal(takeAuthDestination(storage, now + 1000), destination);
+  assert.equal(storage.map.has(AUTH_DESTINATION_KEY), false, "forgotten once taken");
+  assert.equal(takeAuthDestination(storage, now + 1000), null, "so it cannot be reused");
+
+  rememberAuthDestination(destination, storage, now);
+  assert.equal(takeAuthDestination(storage, now + 30 * 60 * 1000 + 1), null, "expired");
+  assert.equal(storage.map.has(AUTH_DESTINATION_KEY), false, "and cleared even when expired");
+});
+
+test("only helper-profile destinations are ever stored, and tampered storage is ignored", () => {
+  const now = 1_800_000_000_000;
+  for (const refused of ["/post", "/my-gigs", "/", "https://evil.invalid/profile/x", "//evil.invalid", "/profile/a/b", "", null]) {
+    const storage = fakeStorage();
+    assert.equal(rememberAuthDestination(refused, storage, now), false, String(refused));
+    assert.equal(storage.map.size, 0);
+  }
+  for (const tampered of [
+    "not json", "null", "[]", JSON.stringify({ path: "https://evil.invalid/profile/x", expires: now + 1000 }),
+    JSON.stringify({ path: "//evil.invalid", expires: now + 1000 }), JSON.stringify({ path: "/my-gigs", expires: now + 1000 }),
+    JSON.stringify({ path: "/profile/HelperOne" }), JSON.stringify({ path: "/profile/HelperOne", expires: "soon" }), JSON.stringify({ expires: now + 1000 }),
+  ]) {
+    assert.equal(takeAuthDestination(fakeStorage({ [AUTH_DESTINATION_KEY]: tampered }), now), null, tampered);
+  }
+  const broken = { getItem() { throw new Error("blocked"); }, setItem() { throw new Error("blocked"); }, removeItem() { throw new Error("blocked"); } };
+  assert.equal(rememberAuthDestination("/profile/HelperOne", broken, now), false, "unavailable storage never throws");
+  assert.equal(takeAuthDestination(broken, now), null);
 });

@@ -4,7 +4,7 @@ import type { ClaimState, GigStatus } from "./database.types";
 // status: every section is derived from gigs.status, gigs.selected_provider_id
 // and claims.state exactly as the lifecycle RPCs set them.
 
-type GigLike = { status: GigStatus; selected_provider_id: string | null };
+type GigLike = { status: GigStatus; selected_provider_id: string | null; requested_helper_id?: string | null };
 
 // ---------------------------------------------------------------- I Need Help
 export type PosterSection = "open" | "accepted" | "in_progress" | "disputed" | "completed" | "draft" | "cancelled";
@@ -33,9 +33,10 @@ export function posterSection(gig: GigLike): PosterSection {
 }
 
 // ----------------------------------------------------------------- I'm Helping
-export type HelperSection = "proposals" | "accepted" | "in_progress" | "disputed" | "completed" | "closed";
+export type HelperSection = "requests" | "proposals" | "accepted" | "in_progress" | "disputed" | "completed" | "closed";
 
 export const HELPER_SECTIONS: { key: HelperSection; label: string }[] = [
+  { key: "requests", label: "Requests for you" },
   { key: "proposals", label: "Proposals" },
   { key: "accepted", label: "Accepted" },
   { key: "in_progress", label: "In progress" },
@@ -56,12 +57,15 @@ export function helperSection(gig: GigLike, claimState: ClaimState | null, userI
       default: return "closed";
     }
   }
+  // A private request addressed to this helper that they have not answered yet.
+  if (gig.status === "active" && !gig.selected_provider_id && gig.requested_helper_id === userId && claimState === null) return "requests";
   if (gig.status === "active" && !gig.selected_provider_id && claimState === "pending") return "proposals";
   return "closed";
 }
 
 export function helperBadge(section: HelperSection, gig: GigLike, claimState: ClaimState | null): { label: string; tone: "pending" | "good" | "neutral" | "bad" } {
   switch (section) {
+    case "requests": return { label: "New request", tone: "pending" };
     case "proposals": return { label: "Proposal pending", tone: "pending" };
     case "accepted": return { label: "Accepted", tone: "good" };
     case "in_progress": return { label: gig.status === "awaiting_payment" ? "Awaiting payment" : "In progress", tone: "good" };
@@ -69,7 +73,7 @@ export function helperBadge(section: HelperSection, gig: GigLike, claimState: Cl
     case "disputed": return { label: "Disputed", tone: "bad" };
     case "closed":
       if (gig.status === "cancelled") return { label: "Gig cancelled", tone: "bad" };
-      if (claimState === "withdrawn") return { label: "Withdrawn", tone: "neutral" };
+      if (claimState === "withdrawn") return { label: gig.requested_helper_id ? "Declined" : "Withdrawn", tone: "neutral" };
       return { label: "Not selected", tone: "neutral" };
   }
 }

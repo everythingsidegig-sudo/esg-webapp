@@ -9,7 +9,10 @@ import type { Notification } from "@/lib/database.types";
 // Every notification opens its gig -- the permanent place to manage it. A new
 // proposal lands on the poster's proposals list within that gig.
 export function notificationHref(n: Pick<Notification, "gig_id" | "type">) {
-  return n.type === "claim_received" ? `/gigs/${n.gig_id}#proposals` : `/gigs/${n.gig_id}`;
+  if (n.type === "claim_received") return `/gigs/${n.gig_id}#proposals`;
+  // A new request lands on the Accept / Decline panel for the requested helper.
+  if (n.type === "gig_request") return `/gigs/${n.gig_id}#request`;
+  return `/gigs/${n.gig_id}`;
 }
 
 export default function NotificationsBell() {

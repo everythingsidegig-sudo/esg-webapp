@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import SelectionChip from "@/components/SelectionChip";
@@ -10,15 +11,21 @@ import { approximateCoordinates, friendlyError, gigInputError } from "@/lib/jour
 import { loadJourneyLocation, reverseGeocodeGeneralArea } from "@/lib/location";
 import { SERVICE_TYPES } from "@/lib/services";
 import { CURRENCY } from "@/lib/money";
+import { PRICE_CHOICES, requestUsername, requestableCategories } from "@/lib/helper-request";
 import { loadTagCatalog, MAX_GIG_TAGS } from "@/lib/tags";
-import type { Tag } from "@/lib/database.types";
+import type { PriceType, Tag } from "@/lib/database.types";
 
 interface CreationRequest {
   p_request_id: string; p_service_type: string; p_title: string; p_description: string;
   p_amount: number; p_price_type: string; p_scheduled_at: string | null;
   p_location_text: string; p_lat: number | null; p_lng: number | null;
   p_photo_url: string | null; p_publish: boolean; p_tag_ids: string[]; p_private_address?: string | null;
+  // Set only for a private request to one helper (/post?helper=<username>); absent for a public gig.
+  p_requested_helper_id?: string | null;
 }
+// The helper a private request is addressed to, as the page knows them.
+type RequestedHelper = { id: string; username: string; categories: string[] };
+type HelperLookup = { state: "none" } | { state: "loading" } | { state: "ready"; helper: RequestedHelper } | { state: "error"; message: string };
 function readPending(key: string): CreationRequest | null {
   try {
     const value = JSON.parse(sessionStorage.getItem(key) ?? "null");
@@ -38,6 +45,13 @@ function PostGigForm() {
   const { user } = useAuth();
   const key = `esg:post:${user!.id}`;
   const [retained, setRetained] = useState<CreationRequest | null>(() => readPending(key));
+  // A retried request keeps its original helper, whatever the address bar says now.
+  const helperParam = params.get("helper");
+  const helperUsername = requestUsername(helperParam);
+  const helperId = retained?.p_requested_helper_id ?? null;
+  const [lookup, setLookup] = useState<HelperLookup>(() => helperId || helperUsername ? { state: "loading" }
+    : helperParam !== null ? { state: "error", message: "That helper link isn't valid." } : { state: "none" });
+  const [priceType, setPriceType] = useState<PriceType>(retained?.p_price_type === "negotiable" ? "negotiable" : "fixed");
   const [initialLocation] = useState(loadJourneyLocation);
   const [serviceType, setServiceType] = useState<string>(retained?.p_service_type ?? SERVICE_TYPES[0]);
   const [tagCatalog, setTagCatalog] = useState<Record<string, Tag[]>>({});
@@ -57,6 +71,28 @@ function PostGigForm() {
   const [locationNotice, setLocationNotice] = useState<string | null>(null);
   const pending = useRef(false);
   const input = "w-full rounded-lg border border-neutral-300 px-3 py-2";
+
+  useEffect(() => {
+    if (!helperId && !helperUsername) return;
+    let active = true;
+    const base = supabase.from("public_profiles").select("id,username,skills");
+    (helperId ? base.eq("id", helperId) : base.eq("username", helperUsername!)).maybeSingle().then(({ data, error: lookupError }) => {
+      if (!active) return;
+      const row = data as { id: string; username: string; skills: string[] | null } | null;
+      if (lookupError) { setLookup({ state: "error", message: "Couldn't load that helper. Check your connection and try again." }); return; }
+      if (!row) { setLookup({ state: "error", message: "That helper couldn't be found." }); return; }
+      if (row.id === user!.id) { setLookup({ state: "error", message: "You can't send a request to yourself." }); return; }
+      const categories = requestableCategories(row.skills, SERVICE_TYPES);
+      if (categories.length === 0) { setLookup({ state: "error", message: `@${row.username} hasn't listed a service you can request yet.` }); return; }
+      setLookup({ state: "ready", helper: { id: row.id, username: row.username, categories } });
+      // The helper only does what they offer: start on the category that was searched for, if any.
+      const wanted = params.get("category") ?? "";
+      setServiceType((current) => retained ? current : categories.includes(wanted) ? wanted : categories.includes(current) ? current : categories[0]);
+    }, () => { if (active) setLookup({ state: "error", message: "Couldn't load that helper. Check your connection and try again." }); });
+    return () => { active = false; };
+    // The helper is looked up once per link; the retained request only supplies the id at load.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [supabase, helperId, helperUsername]);
 
   useEffect(() => {
     let active = true;
@@ -93,6 +129,7 @@ function PostGigForm() {
   async function submit(publish: boolean) {
     if (pending.current) return;
     setError(null);
+    if (lookup.state === "loading" || lookup.state === "error") return;
     if (!retained) {
       const invalid = gigInputError(title, description, amount, scheduledAt, locationText, publish);
       if (invalid) { setError(invalid); return; }
@@ -115,10 +152,11 @@ function PostGigForm() {
         const coords = approximateCoordinates(coordinates.lat, coordinates.lng);
         request = { p_request_id: crypto.randomUUID(), p_service_type: serviceType,
           p_title: title.trim(), p_description: description.trim(), p_amount: Number(amount),
-          p_price_type: "fixed", p_scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null,
+          p_price_type: requestedHelper ? priceType : "fixed", p_scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null,
           p_location_text: locationText.trim(), p_lat: coords.lat, p_lng: coords.lng,
           p_photo_url: photoUrl, p_publish: publish, p_tag_ids: tagIds,
-          p_private_address: privateAddress.trim() || null };
+          p_private_address: privateAddress.trim() || null,
+          ...(requestedHelper ? { p_requested_helper_id: requestedHelper.id } : {}) };
         // Preserve the request before sending. Ambiguous network failures reuse this ID/payload.
         try { sessionStorage.setItem(key, JSON.stringify(request)); } catch {
           setError("Browser storage is unavailable. Enable site storage before posting so retries stay safe."); return;
@@ -134,25 +172,44 @@ function PostGigForm() {
       sessionStorage.removeItem(key);
       router.replace(data.status === "draft" ? `/my-gigs?created=${encodeURIComponent(data.id)}` : `/gigs/${encodeURIComponent(data.id)}`);
     } catch (error) {
-      setError(friendlyError(error, "We couldn't confirm whether your gig was saved. Retry this same request to safely check without creating another gig."));
+      setError(friendlyError(error, requestedHelper
+        ? "We couldn't confirm whether your request was saved. Retry this same request to safely check without creating another one."
+        : "We couldn't confirm whether your gig was saved. Retry this same request to safely check without creating another gig."));
     } finally { pending.current = false; setSubmitting(false); }
   }
+  const requestedHelper = lookup.state === "ready" ? lookup.helper : null;
+  const categoryChoices = requestedHelper ? requestedHelper.categories : SERVICE_TYPES;
+  if (lookup.state === "error") {
+    return <div className="mx-auto max-w-lg space-y-4">
+      <h1 className="text-xl font-semibold">Post a Gig</h1>
+      <p role="alert" className="rounded-lg bg-red-50 px-3 py-2.5 text-sm text-red-700">{lookup.message}</p>
+      <Link href="/find-helper" className="touch-link block text-sm font-medium text-emerald-700">← Back to Find a Helper</Link>
+      <Link href="/post" className="touch-link block text-sm font-medium text-emerald-700">Post a public gig instead</Link>
+    </div>;
+  }
+  if (lookup.state === "loading") return <p className="text-neutral-500">Loading the helper…</p>;
   return <div className="mx-auto max-w-lg space-y-4">
-    <h1 className="text-xl font-semibold">Post a Gig</h1>
+    <h1 className="text-xl font-semibold">{requestedHelper ? `Post a Gig for @${requestedHelper.username}` : "Post a Gig"}</h1>
+    {requestedHelper && (
+      <div role="note" className="space-y-1 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm text-emerald-900">
+        <p><strong>Private request.</strong> Only @{requestedHelper.username} will see it, and it isn&apos;t posted publicly or shown in Browse.</p>
+        {!retained && <Link href="/post" className="touch-link font-medium underline">Post a public gig instead</Link>}
+      </div>
+    )}
     {retained && <p role="status">A previous request is awaiting confirmation. Retry it to check the saved gig safely.</p>}
     <fieldset disabled={submitting || !!retained} className="space-y-4">
       <div role="radiogroup" aria-labelledby="category-label">
         <p id="category-label" className="text-sm font-medium">Choose a category</p>
         <div className="mt-2 flex flex-wrap gap-2">
-          {SERVICE_TYPES.map((item, index) => <SelectionChip key={item} role="radio"
+          {categoryChoices.map((item, index) => <SelectionChip key={item} role="radio"
             selected={serviceType === item} tabIndex={serviceType === item ? 0 : -1}
             onClick={() => { setServiceType(item); setTagIds([]); }}
             onKeyDown={(event) => {
               const direction = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key];
               if (direction === undefined) return;
               event.preventDefault();
-              const next = (index + direction + SERVICE_TYPES.length) % SERVICE_TYPES.length;
-              setServiceType(SERVICE_TYPES[next]);
+              const next = (index + direction + categoryChoices.length) % categoryChoices.length;
+              setServiceType(categoryChoices[next]);
               setTagIds([]);
               event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="radio"]')[next]?.focus();
             }}>{item}</SelectionChip>)}
@@ -172,7 +229,23 @@ function PostGigForm() {
       <label className="block">Brief Description<textarea required maxLength={50} rows={3} value={description} onChange={(e) => setDescription(e.target.value)} className={input} /></label>
       <label className="block">Photo (optional)<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => { setPhoto(e.target.files?.[0] ?? null); setUploadedPhoto(null); }} /></label>
       <label className="block">Budget ({CURRENCY})<input type="number" min="0.01" step="0.01" required value={amount} onChange={(e) => setAmount(e.target.value)} className={input} /></label>
-      <p className="text-sm">Pricing: Fixed</p>
+      {requestedHelper ? (
+        <div role="radiogroup" aria-labelledby="pricing-label">
+          <p id="pricing-label" className="text-sm font-medium">Pricing</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {PRICE_CHOICES.map((choice) => <SelectionChip key={choice.value} role="radio" selected={priceType === choice.value}
+              tabIndex={priceType === choice.value ? 0 : -1} onClick={() => setPriceType(choice.value)}
+              onKeyDown={(event) => {
+                if (!["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp"].includes(event.key)) return;
+                event.preventDefault();
+                const other = PRICE_CHOICES.find((item) => item.value !== choice.value)!;
+                setPriceType(other.value);
+                event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="radio"]')[PRICE_CHOICES.indexOf(other)]?.focus();
+              }}>{choice.label}</SelectionChip>)}
+          </div>
+          <p className="mt-1 text-sm text-neutral-500">{PRICE_CHOICES.find((choice) => choice.value === priceType)!.hint}</p>
+        </div>
+      ) : <p className="text-sm">Pricing: Fixed</p>}
       <label className="block">Expected Date/Time<input type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} className={input} /></label>
       <label className="block">Approximate Location<input maxLength={200} value={locationText} onChange={(e) => { setLocationText(e.target.value); setCoordinates({ lat: null, lng: null }); }} className={input} /></label>
       <button type="button" onClick={useMyLocation} className="text-sm font-medium text-emerald-700">{locating ? "Locating…" : "📍 Use my current location"}</button>
@@ -184,7 +257,7 @@ function PostGigForm() {
     {error && <p role="alert" className="text-red-600">{error}</p>}
     <div className="flex gap-3">
       {!retained && <button onClick={() => void submit(false)} disabled={submitting} className="flex-1 rounded-lg border py-2.5 disabled:opacity-60">Save as Draft</button>}
-      <button onClick={() => void submit(true)} disabled={submitting} className="flex-1 rounded-lg bg-emerald-600 py-2.5 text-white disabled:opacity-60">{submitting ? "Posting…" : retained ? "Retry previous request" : "Post Gig"}</button>
+      <button onClick={() => void submit(true)} disabled={submitting} className="flex-1 rounded-lg bg-emerald-600 py-2.5 text-white disabled:opacity-60">{submitting ? (requestedHelper ? "Sending…" : "Posting…") : retained ? "Retry previous request" : requestedHelper ? "Send request" : "Post Gig"}</button>
     </div>
   </div>;
 }

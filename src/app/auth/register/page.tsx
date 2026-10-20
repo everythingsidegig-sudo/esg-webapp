@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { createClient } from "@/lib/supabase/client";
-import { friendlyError, passwordError } from "@/lib/journey";
+import { friendlyError, passwordError, takeAuthDestination } from "@/lib/journey";
 import { CategoryList } from "@/components/CategoryList";
 
 // ESG-AUTH-002 v0.5 screens 4-11: Username -> Password -> Profile Photo
@@ -23,6 +23,11 @@ function RegisterInner() {
   const router = useRouter();
   const { user, profile, loading, refreshProfile } = useAuth();
   const pending = useRef(false);
+  // Registration still ends at Home -- unless the visitor started from a helper profile and chose
+  // Create account there. That one validated destination (see rememberAuthDestination) is taken
+  // once, here, so the effect re-running cannot lose it.
+  const destination = useRef<string | null | undefined>(undefined);
+  const afterRegistration = () => (destination.current ??= takeAuthDestination()) ?? "/";
   const input = "w-full rounded-lg border border-neutral-300 px-3 py-2";
 
   const [step, setStep] = useState<Step>("username");
@@ -42,7 +47,7 @@ function RegisterInner() {
   useEffect(() => {
     if (loading) return;
     if (!user) router.replace("/auth/sign-up");
-    else if (profile?.onboarding_completed_at) router.replace("/");
+    else if (profile?.onboarding_completed_at) router.replace(afterRegistration());
   }, [loading, user, profile, router]);
 
   if (loading || !user || profile?.onboarding_completed_at) return <p className="text-center text-neutral-500">Loading…</p>;
@@ -250,7 +255,7 @@ function RegisterInner() {
       {step === "created" && <div className="space-y-4 text-center">
         <h1 className="text-xl font-semibold">Account Created</h1>
         <p className="text-sm text-neutral-600">You&apos;re signed in.</p>
-        <button onClick={() => router.replace("/")} className="w-full rounded-lg bg-emerald-600 py-2.5 font-medium text-white">Continue</button>
+        <button onClick={() => router.replace(afterRegistration())} className="w-full rounded-lg bg-emerald-600 py-2.5 font-medium text-white">Continue</button>
       </div>}
     </div>
   );

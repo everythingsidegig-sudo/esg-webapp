@@ -15,7 +15,7 @@ import {
 import { formatMoney } from "@/lib/money";
 import type { ClaimState, GigWithTags } from "@/lib/database.types";
 
-type PosterRow = { gig: GigWithTags; proposals: number; helper: string | null };
+type PosterRow = { gig: GigWithTags; proposals: number; helper: string | null; requestedTo: string | null };
 type HelperRow = { gig: GigWithTags; claimState: ClaimState | null; offer: number | null; customer: string | null };
 
 const TONES = {
@@ -47,7 +47,7 @@ function tagChips(gig: GigWithTags) {
   return names.length > 0 && <div className="mt-2 flex flex-wrap gap-1">{names.map((name) => <TagChip key={name}>{name}</TagChip>)}</div>;
 }
 
-function posterCard({ gig, proposals, helper }: PosterRow) {
+function posterCard({ gig, proposals, helper, requestedTo }: PosterRow) {
   const section = posterSection(gig);
   return (
     <div key={gig.id} className="rounded-xl border border-neutral-200 bg-white shadow-sm">
@@ -60,6 +60,7 @@ function posterCard({ gig, proposals, helper }: PosterRow) {
           <StatusBadge status={gig.status} />
         </div>
         {helper && section !== "open" && <p className="mt-2 text-sm text-neutral-600">Helper: @{helper}{agreedLine(gig) ? ` · ${agreedLine(gig)}` : ""}</p>}
+        {gig.requested_helper_id && !gig.selected_provider_id && <p className="mt-2 text-sm text-emerald-800">🔒 Private request{requestedTo ? ` to @${requestedTo}` : ""}</p>}
         {tagChips(gig)}
       </Link>
       <div className="flex items-center justify-between gap-3 border-t border-neutral-100 px-4">
@@ -87,7 +88,8 @@ function helperCard({ gig, claimState, offer, customer }: HelperRow, userId: str
           </div>
           <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${TONES[badge.tone]}`}>{badge.label}</span>
         </div>
-        {customer && <p className="mt-2 text-sm text-neutral-600">Customer: @{customer}</p>}
+        {customer && <p className="mt-2 text-sm text-neutral-600">{section === "requests" ? "Request from" : "Customer:"} @{customer}</p>}
+        {section === "requests" && <p className="mt-1 text-sm text-neutral-600">Offered: {formatMoney(gig.amount)} · {gig.price_type === "negotiable" ? "Negotiable" : "Fixed price"}</p>}
         {offer != null && claimState === "pending" && <p className="mt-1 text-sm text-neutral-600">Your offer: {formatMoney(offer)}</p>}
         {gig.selected_provider_id === userId && agreedLine(gig) && <p className="mt-1 text-sm font-medium text-emerald-700">{agreedLine(gig)}</p>}
         {tagChips(gig)}
@@ -125,12 +127,13 @@ function MyGigsInner() {
         const ids = gigs.map((gig) => gig.id);
         const [claimsResult, names] = await Promise.all([
           ids.length > 0 ? supabase.from("claims").select("gig_id").in("gig_id", ids).eq("state", "pending") : Promise.resolve({ data: [], error: null }),
-          usernames(supabase, unique(gigs.map((gig) => gig.selected_provider_id))),
+          usernames(supabase, unique(gigs.flatMap((gig) => [gig.selected_provider_id, gig.requested_helper_id]))),
         ]);
         if (claimsResult.error) throw claimsResult.error;
         const counts = new Map<string, number>();
         for (const claim of (claimsResult.data ?? []) as { gig_id: string }[]) counts.set(claim.gig_id, (counts.get(claim.gig_id) ?? 0) + 1);
-        if (alive) setPosted(gigs.map((gig) => ({ gig, proposals: counts.get(gig.id) ?? 0, helper: gig.selected_provider_id ? names.get(gig.selected_provider_id) ?? null : null })));
+        if (alive) setPosted(gigs.map((gig) => ({ gig, proposals: counts.get(gig.id) ?? 0, helper: gig.selected_provider_id ? names.get(gig.selected_provider_id) ?? null : null,
+          requestedTo: gig.requested_helper_id ? names.get(gig.requested_helper_id) ?? null : null })));
       } catch { if (alive) setPostedError("Couldn't load your gigs. Check your connection and retry."); }
       finally { if (alive) setPostedLoading(false); }
     }
@@ -149,7 +152,8 @@ function MyGigsInner() {
         const claims = new Map<string, ClaimState>(claimList.map((claim) => [claim.gig_id, claim.state]));
         const offers = new Map<string, number | null>(claimList.map((claim) => [claim.gig_id, claim.offer_amount ?? null]));
 
-        const orParts = [`selected_provider_id.eq.${user!.id}`];
+        // Requests addressed to this helper have no claim yet, so they are found by the address itself.
+        const orParts = [`selected_provider_id.eq.${user!.id}`, `requested_helper_id.eq.${user!.id}`];
         if (claims.size > 0) orParts.push(`id.in.(${[...claims.keys()].join(",")})`);
         const { data, error } = await supabase
           .from("gigs")
@@ -200,7 +204,7 @@ function MyGigsInner() {
             })
         ) : (
           helping.length === 0
-            ? <p className="text-neutral-500">You haven&apos;t sent any offers yet. <Link href="/browse" className="touch-link font-medium text-emerald-700">Explore gigs</Link></p>
+            ? <p className="text-neutral-500">You haven&apos;t sent any offers or received any requests yet. <Link href="/browse" className="touch-link font-medium text-emerald-700">Explore gigs</Link></p>
             : HELPER_SECTIONS.map(({ key, label }) => {
               const rows = helping.filter((row) => helperSection(row.gig, row.claimState, user!.id) === key);
               if (rows.length === 0) return null;

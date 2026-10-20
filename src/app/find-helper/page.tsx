@@ -2,9 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import AreaPicker, { type Area } from "@/components/AreaPicker";
+import HelperSignInPrompt from "@/components/HelperSignInPrompt";
 import OptionSheet from "@/components/OptionSheet";
 import SelectionChip from "@/components/SelectionChip";
 import TagChip from "@/components/TagChip";
+import { useAuth } from "@/lib/auth-context";
+import { helperProfileHref } from "@/lib/journey";
 import { createClient } from "@/lib/supabase/client";
 import type { PublicProfile, PublicProfileWithTags, Tag } from "@/lib/database.types";
 import { SERVICE_TYPES, SPECIALIZATION_PROMPTS } from "@/lib/services";
@@ -18,11 +22,21 @@ const DISTANCE_OPTIONS = [
   { label: "Within 25 km", km: 25 },
 ];
 
-function HelperCard({ profile, category, distanceKm }: { profile: PublicProfileWithTags; category: string; distanceKm?: number }) {
+// A signed-out visitor can see the list but not the profile behind a card: the click is
+// intercepted to show the sign-in prompt. The link itself still points at the profile route,
+// which the server (src/proxy.ts) protects, so a new tab, middle click or typed URL is covered too.
+function HelperCard({ profile, category, distanceKm, gated = false, onGate }: {
+  profile: PublicProfileWithTags; category: string; distanceKm?: number; gated?: boolean; onGate?: (username: string) => void;
+}) {
   const tags = profileTagsForCategory(profile, category);
+  // Every service the helper has chosen to offer, the one searched for first. Nothing is capped
+  // or invented: the list is exactly the skills on the helper's profile.
+  const offered = [...new Set(profile.skills ?? [])];
+  const services = [...offered.filter((skill) => skill === category), ...offered.filter((skill) => skill !== category)];
   return (
     <Link
-      href={`/profile/${profile.username}`}
+      href={helperProfileHref(profile.username, category) ?? "/find-helper"}
+      onClick={(event) => { if (gated) { event.preventDefault(); onGate?.(profile.username); } }}
       className="flex items-center gap-3 rounded-xl border border-neutral-200 bg-white p-4 shadow-sm hover:shadow-md"
     >
       {profile.photo_url ? (
@@ -40,20 +54,32 @@ function HelperCard({ profile, category, distanceKm }: { profile: PublicProfileW
             {tags.map((tag) => <TagChip key={tag.id}>{tag.name}</TagChip>)}
           </div>
         )}
+        {services.length > 0 && (
+          <div className="mt-1.5 text-xs text-neutral-500">
+            <span className="font-medium text-neutral-600">Offers:</span>{" "}
+            <ul aria-label={`Services offered by @${profile.username}`} className="inline">
+              {services.map((skill, index) => <li key={skill} className="inline">{index > 0 && " · "}{skill}</li>)}
+            </ul>
+          </div>
+        )}
       </div>
     </Link>
   );
 }
 
-// Only helpers with an opted-in public location participate; distance never
-// narrows results when "Any distance" is selected. Never surfaces raw lat/lng.
+// Only helpers with an opted-in public location can be placed on the map: their distance is
+// shown whenever the visitor's area is known, but it never narrows results when "Any distance"
+// is selected. A radius filters and sorts nearest-first. Never surfaces raw lat/lng.
 function withDistance(list: PublicProfileWithTags[], radiusKm: number | null, searcher: { lat: number | null; lng: number | null }) {
-  if (radiusKm === null || searcher.lat == null || searcher.lng == null) {
-    return list.map((profile) => ({ profile, distanceKm: undefined as number | undefined }));
+  const located = searcher.lat != null && searcher.lng != null;
+  const measure = (profile: PublicProfileWithTags) => located && profile.public_lat != null && profile.public_lng != null
+    ? haversineKm(searcher.lat!, searcher.lng!, profile.public_lat, profile.public_lng) : undefined;
+  if (radiusKm === null || !located) {
+    return list.map((profile) => ({ profile, distanceKm: measure(profile) }));
   }
   return list
     .filter((profile) => profile.public_lat != null && profile.public_lng != null)
-    .map((profile) => ({ profile, distanceKm: haversineKm(searcher.lat!, searcher.lng!, profile.public_lat!, profile.public_lng!) }))
+    .map((profile) => ({ profile, distanceKm: measure(profile)! }))
     .filter((entry) => entry.distanceKm <= radiusKm)
     .sort((a, b) => a.distanceKm - b.distanceKm);
 }
@@ -68,7 +94,10 @@ export default function FindHelper() {
   const [error, setError] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [radiusKm, setRadiusKm] = useState<number | null>(null);
-  const [searcherLocation] = useState(loadJourneyLocation);
+  const [searcherLocation, setSearcherLocation] = useState<Area>({ text: "", lat: null, lng: null });
+  const { user, loading: authLoading } = useAuth();
+  const gated = !authLoading && !user;
+  const [gate, setGate] = useState<string | null>(null);
 
   useEffect(() => {
     loadTagCatalog(supabase).then(setTagCatalog).catch(() => {});
@@ -100,11 +129,29 @@ export default function FindHelper() {
     return () => { active = false; };
   }, [supabase, category]);
 
+  // Arriving with ?category=... (back from a profile, or after signing in) restores that search,
+  // and the area saved earlier in this visit (or kept across sign-in) is picked up. Both live in
+  // the browser, which the server render cannot see, so they are read after hydration.
+  useEffect(() => {
+    const saved = loadJourneyLocation();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (saved.text) setSearcherLocation(saved);
+    if (typeof window === "undefined") return;
+    const wanted = new URLSearchParams(window.location.search).get("category");
+    if (wanted && (SERVICE_TYPES as readonly string[]).includes(wanted)) {
+      chooseCategory(wanted);
+    }
+    // Once, on arrival; chooseCategory only calls setters.
+  }, []);
+
   const categoryTags = category ? (tagCatalog[category] ?? []) : [];
   const chosenTags = categoryTags.filter((tag) => selectedTagIds.includes(tag.id));
   const toggleTag = (id: string) => setSelectedTagIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
 
   function chooseCategory(next: string) {
+    // Keep the chosen category in the address so Back, a shared link, or a return from
+    // sign-in lands on the same search (the history entry is replaced, not added).
+    try { window.history.replaceState(null, "", `/find-helper?category=${encodeURIComponent(next)}`); } catch { /* no window (tests) */ }
     setCategory(next);
     setSelectedTagIds([]);
     setSheetOpen(false);
@@ -131,6 +178,8 @@ export default function FindHelper() {
   return (
     <div className="space-y-5">
       <h1 className="text-xl font-semibold">Find a Helper</h1>
+
+      <AreaPicker area={searcherLocation} onChange={setSearcherLocation} />
 
       <fieldset className="min-w-0 w-full">
         <legend className="text-sm font-medium">Choose a category</legend>
@@ -185,6 +234,9 @@ export default function FindHelper() {
         </label>
       )}
 
+      {category && radiusKm !== null && (searcherLocation.lat == null || searcherLocation.lng == null) && (
+        <p role="status" className="text-sm text-neutral-600">Add a ZIP code or use your location above to filter by distance.</p>
+      )}
       {category && loading && <p className="text-neutral-500">Loading helpers…</p>}
       {error && <p role="alert">{error}</p>}
       {category && !loading && !error && matchingByDistance.length === 0 && othersByDistance.length === 0 && (
@@ -195,7 +247,7 @@ export default function FindHelper() {
         <div className="space-y-2">
           {selectedTagIds.length > 0 && <h2 className="text-sm font-semibold text-neutral-500">Matching specializations</h2>}
           <div className="grid gap-3">
-            {matchingByDistance.map(({ profile, distanceKm }) => <HelperCard key={profile.id} profile={profile} category={category} distanceKm={distanceKm} />)}
+            {matchingByDistance.map(({ profile, distanceKm }) => <HelperCard key={profile.id} profile={profile} category={category} distanceKm={distanceKm} gated={gated} onGate={setGate} />)}
           </div>
         </div>
       )}
@@ -204,9 +256,14 @@ export default function FindHelper() {
         <div className="space-y-2">
           <h2 className="text-sm font-semibold text-neutral-500">Other {category} helpers</h2>
           <div className="grid gap-3">
-            {othersByDistance.map(({ profile, distanceKm }) => <HelperCard key={profile.id} profile={profile} category={category} distanceKm={distanceKm} />)}
+            {othersByDistance.map(({ profile, distanceKm }) => <HelperCard key={profile.id} profile={profile} category={category} distanceKm={distanceKm} gated={gated} onGate={setGate} />)}
           </div>
         </div>
+      )}
+      {gate && category && helperProfileHref(gate, category) && (
+        <OptionSheet title={`Sign in to view @${gate}`} onClose={() => setGate(null)}>
+          <HelperSignInPrompt username={gate} destination={helperProfileHref(gate, category)!} onContinueBrowsing={() => setGate(null)} />
+        </OptionSheet>
       )}
       {sheetOpen && category && categoryTags.length > 0 && (
         <OptionSheet title={SPECIALIZATION_PROMPTS[category] ?? `What kind of ${category.toLowerCase()}?`} onClose={() => setSheetOpen(false)}

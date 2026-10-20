@@ -8,11 +8,12 @@ import { useAuth } from "@/lib/auth-context";
 import { createClient } from "@/lib/supabase/client";
 import { rpcActionError } from "@/lib/journey";
 import { formatMoney, offerError } from "@/lib/money";
+import { priceLabel, requestStage } from "@/lib/helper-request";
 import StatusBadge from "@/components/StatusBadge";
 import ChatPanel from "@/components/ChatPanel";
 import TagChip from "@/components/TagChip";
 import { gigTagNames } from "@/lib/tags";
-import type { Claim, CompletionOutcome, FeedbackType, GigWithTags, IncompleteChoice, PublicProfile } from "@/lib/database.types";
+import type { Claim, ClaimState, CompletionOutcome, FeedbackType, GigWithTags, IncompleteChoice, PublicProfile } from "@/lib/database.types";
 
 type ClaimWithProfile = Claim & { profile?: PublicProfile };
 
@@ -24,6 +25,8 @@ function GigDetails({ id }: { id: string }) {
   const [gig, setGig] = useState<GigWithTags | null | undefined>(undefined);
   const [claims, setClaims] = useState<ClaimWithProfile[]>([]);
   const [myClaim, setMyClaim] = useState<Claim | null>(null);
+  // For a private request, how the requested helper has answered (the poster's view of it).
+  const [requestClaim, setRequestClaim] = useState<ClaimState | null>(null);
   const [myCompletion, setMyCompletion] = useState<CompletionOutcome | null>(null);
   const [myIncompleteChoice, setMyIncompleteChoice] = useState<IncompleteChoice | null>(null);
   const [myFeedback, setMyFeedback] = useState<FeedbackType | null>(null);
@@ -41,7 +44,7 @@ function GigDetails({ id }: { id: string }) {
     setGig((gigData as GigWithTags) ?? null);
     if (!gigData) return;
 
-    const personIds = [gigData.poster_id, gigData.selected_provider_id].filter((value): value is string => !!value);
+    const personIds = [gigData.poster_id, gigData.selected_provider_id, gigData.requested_helper_id].filter((value): value is string => !!value);
     const { data: personRows } = await supabase.from("public_profiles").select("id,username").in("id", personIds);
     setPeople(Object.fromEntries(((personRows ?? []) as { id: string; username: string }[]).map((row) => [row.id, row.username])));
 
@@ -51,6 +54,13 @@ function GigDetails({ id }: { id: string }) {
       setPrivateAddress((addressRow as { address_text: string } | null)?.address_text ?? null);
     } else {
       setPrivateAddress(null);
+    }
+
+    if (user && gigData.poster_id === user.id && gigData.requested_helper_id) {
+      const { data: answer } = await supabase.from("claims").select("state").eq("gig_id", id).eq("provider_id", gigData.requested_helper_id).maybeSingle();
+      setRequestClaim((answer as { state: ClaimState } | null)?.state ?? null);
+    } else {
+      setRequestClaim(null);
     }
 
     if (user && gigData.poster_id === user.id) {
@@ -155,7 +165,13 @@ function GigDetails({ id }: { id: string }) {
 
   const isPoster = user?.id === gig.poster_id;
   const isSelectedProvider = user?.id === gig.selected_provider_id;
-  const canClaim = user && !isPoster && gig.status === "active" && !gig.selected_provider_id && !myClaim;
+  const isRequestedHelper = !!user && gig.requested_helper_id === user.id;
+  const requested = !!gig.requested_helper_id;
+  const negotiable = gig.price_type === "negotiable";
+  const requestedName = gig.requested_helper_id ? people[gig.requested_helper_id] : undefined;
+  const stage = requestStage(gig, isPoster ? requestClaim : isRequestedHelper ? myClaim?.state ?? null : null);
+  // A private request takes offers only from the helper it was sent to, and only when it is negotiable.
+  const canClaim = user && !isPoster && gig.status === "active" && !gig.selected_provider_id && !myClaim && (!requested || (isRequestedHelper && negotiable));
   const offerValue = offerAmount ?? String(gig.amount);
   const offerProblem = offerError(offerValue);
   const showAddress = (isPoster || isSelectedProvider) && !!gig.selected_provider_id && !!privateAddress;
@@ -166,9 +182,12 @@ function GigDetails({ id }: { id: string }) {
         <Link href={isPoster ? "/my-gigs" : "/my-gigs?tab=helping"} className="touch-link text-sm font-medium text-emerald-700">← My Gigs</Link>
       )}
       <div className="rounded-xl border border-neutral-200 bg-white p-5 shadow-sm">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           <span className="text-xs font-medium uppercase tracking-wide text-emerald-700">{gig.service_type}</span>
-          <StatusBadge status={gig.status} />
+          <span className="flex items-center gap-2">
+            {requested && <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-800">🔒 Private request</span>}
+            <StatusBadge status={gig.status} />
+          </span>
         </div>
         <h1 className="mt-1 text-xl font-semibold">{gig.title}</h1>
         <p className="mt-1 text-sm text-neutral-500">
@@ -177,10 +196,11 @@ function GigDetails({ id }: { id: string }) {
             ? " · You are the helper"
             : people[gig.selected_provider_id] ? <> · Helper: <Link href={`/profile/${people[gig.selected_provider_id]}`} className="font-medium text-neutral-700 hover:underline">@{people[gig.selected_provider_id]}</Link></> : "")}
         </p>
+        {isPoster && requested && <p className="mt-1 text-sm text-emerald-800">Sent privately to {requestedName ? <Link href={`/profile/${requestedName}`} className="font-medium hover:underline">@{requestedName}</Link> : "one helper"}. No one else can see it.</p>}
         <p className="mt-2 text-neutral-600">{gig.description}</p>
         {gig.photo_url && <img src={gig.photo_url} alt="" className="mt-3 max-h-64 rounded-lg object-cover" />}
         <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-sm text-neutral-500">
-          <span>💵 {gig.agreed_amount != null && gig.selected_provider_id ? <>Agreed {formatMoney(gig.agreed_amount)} <span className="text-neutral-400">(budget {formatMoney(gig.amount)})</span></> : <>Budget {formatMoney(gig.amount)}</>}</span>
+          <span>💵 {gig.agreed_amount != null && gig.selected_provider_id ? <>Agreed {formatMoney(gig.agreed_amount)} <span className="text-neutral-400">(budget {formatMoney(gig.amount)})</span></> : <>Budget {formatMoney(gig.amount)}</>}{requested && <> · {priceLabel(gig.price_type)}</>}</span>
           <span>📍 {gig.location_text}</span>
           <span>🗓️ {gig.scheduled_at ? new Date(gig.scheduled_at).toLocaleString() : "Flexible"}</span>
         </div>
@@ -204,7 +224,7 @@ function GigDetails({ id }: { id: string }) {
 
       {canClaim && (
         <form
-          aria-label="Make an offer"
+          aria-label={requested ? "Counteroffer" : "Make an offer"}
           className="space-y-3 rounded-xl border border-neutral-200 bg-white p-4"
           onSubmit={(event) => {
             event.preventDefault();
@@ -212,7 +232,7 @@ function GigDetails({ id }: { id: string }) {
             void run(() => supabase.rpc("create_claim", { p_gig_id: id, p_offer_amount: Number(offerValue), p_message: offerMessage.trim() || null }));
           }}
         >
-          <h2 className="font-medium">Make an offer</h2>
+          <h2 className="font-medium">{requested ? "Or send a counteroffer" : "Make an offer"}</h2>
           <label className="block text-sm">Your offer (CAD)
             <input type="number" inputMode="decimal" min="0.01" step="0.01" required value={offerValue} onChange={(e) => setOfferAmount(e.target.value)}
               className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2" />
@@ -223,7 +243,7 @@ function GigDetails({ id }: { id: string }) {
               className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2" />
           </label>
           <button type="submit" disabled={busy} className="w-full rounded-lg bg-emerald-600 py-2.5 font-medium text-white hover:bg-emerald-700 disabled:opacity-60">
-            Send offer
+            {requested ? "Send counteroffer" : "Send offer"}
           </button>
         </form>
       )}
@@ -243,7 +263,27 @@ function GigDetails({ id }: { id: string }) {
       )}
 
       {myClaim?.state === "withdrawn" && (
-        <p className="rounded-lg bg-neutral-100 p-3 text-sm text-neutral-700">You withdrew your offer.</p>
+        <p className="rounded-lg bg-neutral-100 p-3 text-sm text-neutral-700">{isRequestedHelper ? "You declined this request." : "You withdrew your offer."}</p>
+      )}
+
+      {isRequestedHelper && (stage === "waiting" || stage === "countered") && (
+        <section id="request" aria-label="Request for you" className="scroll-mt-20 space-y-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+          <h2 className="font-medium text-emerald-900">{people[gig.poster_id] ? `@${people[gig.poster_id]} sent you a request` : "You have a request"}</h2>
+          <p className="text-sm text-emerald-900">
+            {priceLabel(gig.price_type)}: <strong>{formatMoney(gig.amount)}</strong>. Accepting agrees to this price and starts the gig; only you can see this request.
+            {negotiable && " You can also send a counteroffer below."}
+          </p>
+          <div className="flex gap-3">
+            <button disabled={busy} onClick={() => run(() => supabase.rpc("accept_gig_request", { p_gig_id: id }))}
+              className="min-h-11 flex-1 rounded-lg bg-emerald-600 py-2.5 font-medium text-white hover:bg-emerald-700 disabled:opacity-60">Accept</button>
+            <button disabled={busy} onClick={() => { if (window.confirm("Decline this request? The poster will be told.")) void run(() => supabase.rpc("decline_gig_request", { p_gig_id: id })); }}
+              className="min-h-11 flex-1 rounded-lg border border-neutral-300 bg-white py-2.5 font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-60">Decline</button>
+          </div>
+        </section>
+      )}
+
+      {isRequestedHelper && stage === "closed" && !isSelectedProvider && (
+        <p className="rounded-lg bg-neutral-100 p-3 text-sm text-neutral-700">{gig.status === "cancelled" ? "This request was cancelled." : "This request is no longer open."}</p>
       )}
 
       {myClaim?.state === "rejected" && !isSelectedProvider && (
@@ -253,22 +293,39 @@ function GigDetails({ id }: { id: string }) {
       )}
 
       {isSelectedProvider && gig.status === "active" && !gig.start_requested_at && (
-        <p className="rounded-lg bg-green-50 p-3 text-sm text-green-800">Your offer was accepted. Press START when you&apos;re ready to begin.</p>
+        <p className="rounded-lg bg-green-50 p-3 text-sm text-green-800">{isRequestedHelper ? "You accepted this request." : "Your offer was accepted."} Press START when you&apos;re ready to begin.</p>
       )}
 
       {isPoster && gig.status === "draft" && (
         <div className="space-y-2 rounded-xl border border-neutral-200 bg-white p-4">
-          <h2 className="font-medium">This gig is a draft</h2>
-          <p className="text-sm text-neutral-500">Publish it so helpers can find it and send offers.</p>
+          <h2 className="font-medium">{requested ? "This request is a draft" : "This gig is a draft"}</h2>
+          <p className="text-sm text-neutral-500">{requested
+            ? `Send it so ${requestedName ? `@${requestedName}` : "the helper"} can accept, decline${negotiable ? " or counteroffer" : ""}. It stays private.`
+            : "Publish it so helpers can find it and send offers."}</p>
           <button disabled={busy} onClick={() => run(() => supabase.rpc("publish_gig", { p_gig_id: id }))}
-            className="w-full rounded-lg bg-emerald-600 py-2.5 font-medium text-white hover:bg-emerald-700 disabled:opacity-60">Publish gig</button>
+            className="w-full rounded-lg bg-emerald-600 py-2.5 font-medium text-white hover:bg-emerald-700 disabled:opacity-60">{requested ? "Send request" : "Publish gig"}</button>
         </div>
       )}
 
       {isPoster && gig.status === "active" && !gig.selected_provider_id && (
         <div id="proposals" className="scroll-mt-20 space-y-2">
+          {requested && (
+            <section aria-label="Private request" className="space-y-2 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+              <h2 className="font-medium text-emerald-900">Private request{requestedName ? ` to @${requestedName}` : ""}</h2>
+              <p className="text-sm text-emerald-900">
+                {stage === "declined"
+                  ? `${requestedName ? `@${requestedName}` : "The helper"} declined. Your request is still private; you can post it publicly or cancel it.`
+                  : stage === "countered"
+                    ? "The helper sent a counteroffer below. Accept it to start, or wait for them to accept your price."
+                    : `Waiting for ${requestedName ? `@${requestedName}` : "the helper"} to respond. ${negotiable ? "They may accept, decline or counteroffer." : "They can accept or decline your price."}`}
+              </p>
+              <button disabled={busy}
+                onClick={() => { if (window.confirm("Post this gig publicly? Anyone nearby will be able to see it and send offers, and the helper will be told it is no longer addressed to them.")) void run(() => supabase.rpc("reassign_gig_request", { p_gig_id: id, p_new_helper_id: null })); }}
+                className="min-h-11 w-full rounded-lg border border-emerald-600 bg-white py-2.5 font-medium text-emerald-800 hover:bg-emerald-100 disabled:opacity-60">Post publicly instead</button>
+            </section>
+          )}
           <h2 className="font-medium">Your budget: {formatMoney(gig.amount)} · {claims.length} {claims.length === 1 ? "proposal" : "proposals"}</h2>
-          {claims.length === 0 && <p className="text-sm text-neutral-500">No offers yet. Helpers nearby can send one while this gig is open.</p>}
+          {claims.length === 0 && <p className="text-sm text-neutral-500">{requested ? "No counteroffer yet." : "No offers yet. Helpers nearby can send one while this gig is open."}</p>}
           {claims.map((c) => (
             <div key={c.id} className="space-y-2 rounded-lg border border-neutral-200 bg-white p-3">
               <div className="flex items-start justify-between gap-3">

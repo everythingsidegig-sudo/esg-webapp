@@ -6,7 +6,11 @@ import { runInNewContext } from "node:vm";
 import ts from "typescript";
 import * as myGigsLib from "../src/lib/my-gigs.ts";
 import * as moneyLib from "../src/lib/money.ts";
-import { approximateCoordinates, gigInputError, friendlyError, passwordError, registrationError, rpcActionError, safeNext, setupDestination } from "../src/lib/journey.ts";
+import * as journeyLib from "../src/lib/journey.ts";
+import * as areaSearchLib from "../src/lib/area-search.ts";
+import * as zipLocationLib from "../src/lib/zip-location.ts";
+import * as helperRequestLib from "../src/lib/helper-request.ts";
+import { safeNext } from "../src/lib/journey.ts";
 
 // location.ts has extension-less relative imports (./journey, ./geocoding) that
 // Node's native ESM+TS loader can't resolve directly, so its exact haversineKm
@@ -62,8 +66,9 @@ async function component(path, name, overrides = {}) {
     "@/lib/auth-context": { useAuth: () => auth },
     "@/lib/supabase/client": { createClient: () => overrides.client },
     "@/lib/services": { SERVICE_TYPES: ["Cleaning", "Other"], SPECIALIZATION_PROMPTS: { Cleaning: "What kind of cleaning?", Handyman: "What kind of handyman work?", Other: "What kind of help?" } },
-    "@/lib/journey": { friendlyError, passwordError, registrationError, rpcActionError, safeNext, setupDestination, approximateCoordinates, gigInputError },
-    "@/lib/location": { loadJourneyLocation: () => ({ text: "", lat: null, lng: null }), haversineKm, clearGeneralAreaState: () => {} },
+    // The whole real module: pages import new helpers from it as they are added.
+    "@/lib/journey": journeyLib,
+    "@/lib/location": { loadJourneyLocation: () => ({ text: "", lat: null, lng: null }), haversineKm, clearGeneralAreaState: () => {}, rememberAreaForAuth: () => false },
     "@/lib/tags": {
       loadTagCatalog: async () => ({}),
       gigTagNames: (gig) => (gig.gig_tags ?? []).map((link) => link.tag.name),
@@ -78,6 +83,14 @@ async function component(path, name, overrides = {}) {
     "@/components/CategoryList": { CategoryList: "category-list" },
     "@/lib/my-gigs": myGigsLib,
     "@/lib/money": moneyLib,
+    // Pure helpers the location screens import (area search, ZIP lookup) -- the real modules, no network at import time.
+    "@/lib/area-search": areaSearchLib,
+    "@/lib/zip-location": zipLocationLib,
+    "@/lib/helper-request": helperRequestLib,
+    "@/lib/area-lookup": { resolveAreaQuery: async () => ({ kind: "none" }) },
+    "@/components/AreaPicker": { default: "area-picker" },
+    "@/components/MapPicker": { default: "map-picker" },
+    "@/components/HelperSignInPrompt": { default: "helper-signin-prompt" },
     "@/components/LogoutButton": { default: "logout-button" },
     "@/components/MessagesLink": { default: "messages-link" },
     "@/components/StatusBadge": { default: "badge" },
@@ -86,6 +99,8 @@ async function component(path, name, overrides = {}) {
   };
   const loadedModule = { exports: {} };
   runInNewContext(`(function(require, module, exports) { ${code}\n})`, { URL, URLSearchParams, console, crypto, sessionStorage: overrides.storage,
+    // Timers are inert unless a test supplies its own: debounced lookups never fire on their own.
+    AbortController, setTimeout: () => 0, clearTimeout() {},
     ...overrides.globals })( (id) => mocks[id] ?? require(id), loadedModule, loadedModule.exports );
   return { auth, render(props = {}) {
     cursor = 0; queue = [];
@@ -1956,14 +1971,6 @@ test("I Need Help offers Post a Gig and Find a Helper as real links, reachable w
   assert.equal(nodes(tree, (node) => node.props["aria-disabled"] === "true").length, 0);
 });
 
-test("Find a Helper and the public helper profile require no authentication -- no AuthGuard, no useAuth dependency", async () => {
-  const findHelperSource = await readFile(new URL("../src/app/find-helper/page.tsx", import.meta.url), "utf8");
-  const publicProfileSource = await readFile(new URL("../src/app/profile/[username]/page.tsx", import.meta.url), "utf8");
-  for (const source of [findHelperSource, publicProfileSource]) {
-    assert.doesNotMatch(source, /AuthGuard|useAuth/, "helper browsing and public profiles have no session/auth-guard dependency to gate them");
-  }
-});
-
 test("Post a Gig, reached from I Need Help, requires authentication: unauthenticated visitors are sent to Sign In preserving next=/post", async () => {
   const destinations = [];
   const app = await component("src/components/AuthGuard.tsx", "AuthGuardInner", {
@@ -2662,4 +2669,1109 @@ test("Find a Helper: a helper without public coordinates shows for Any distance 
   }
   nodes(app.render(), (node) => node.type === "select")[0].props.onChange({ target: { value: "" } });
   assert.deepEqual(helperUsernames(app.render()).sort(), ["AccountB", "NearHelper"], "back to Any distance, the helper returns");
+});
+
+// ---------------------------------------------------------------------------
+// Signed-out "I Need Help -> Find a Helper": search is public, a helper's profile is not.
+// ---------------------------------------------------------------------------
+const helperSkillsProfile = (id, username, extra = {}) => ({ id, username, photo_url: null, skills: ["Cleaning", "Other"], wom_count: 2, profile_tags: [], ...extra });
+
+async function openFindHelper({ profiles = [helperSkillsProfile("a", "HelperOne")], user: signedInUser = null, authLoading = false, globals = {}, mocks = {} } = {}) {
+  const filters = [];
+  const app = await component("src/app/find-helper/page.tsx", "FindHelper", {
+    client: helperClient(profiles, filters),
+    mocks: { "@/lib/tags": { loadTagCatalog: async () => ({}), ...helperTagsMock }, "@/lib/location": originLocationMock, ...mocks },
+    globals,
+  });
+  app.auth.user = signedInUser;
+  app.auth.loading = authLoading;
+  app.render(); await flush();
+  let tree = app.render();
+  nodes(tree, (node) => node.type === "selection-chip" && node.props.children === "Cleaning")[0].props.onClick();
+  tree = app.render(); await flush();
+  return { app, filters, tree: app.render() };
+}
+const helperCards = (tree) => nodes(tree, (node) => node.props?.profile?.username);
+// HelperCard is a local component the harness never invokes: call it to get its rendered link.
+const renderCard = (card) => card.type(card.props);
+
+test("Find a Helper and its search stay public: no AuthGuard anywhere; only the profile route is gated, on the server", async () => {
+  const findHelperSource = await readFile(new URL("../src/app/find-helper/page.tsx", import.meta.url), "utf8");
+  const profileSource = await readFile(new URL("../src/app/profile/[username]/page.tsx", import.meta.url), "utf8");
+  const proxySource = await readFile(new URL("../src/proxy.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(findHelperSource, /AuthGuard/, "searching must never require an account");
+  assert.doesNotMatch(profileSource, /AuthGuard/, "the profile route is protected by src/proxy.ts, not by the page-level redirect guard");
+  assert.match(proxySource, /matcher: \["\/profile\/:username"\]/, "the server-side guard covers exactly the helper-profile route (not the visitor's own /profile)");
+  assert.match(proxySource, /supabase\.auth\.getUser\(\)/, "the session is verified with Supabase Auth, not just read from a cookie");
+});
+
+test("Find a Helper (signed out): the list is visible and clicking a helper opens the sign-in prompt instead of the profile", async () => {
+  const { app, tree } = await openFindHelper({ user: null });
+  const cards = helperCards(tree);
+  assert.deepEqual(cards.map((card) => card.props.profile.username), ["HelperOne"], "the signed-out visitor sees the matching helper");
+  assert.equal(cards[0].props.gated, true);
+  const link = renderCard(cards[0]);
+  assert.equal(link.props.href, "/profile/HelperOne?from=find-helper&category=Cleaning", "the link still targets the protected route and carries the search context");
+  let prevented = false;
+  link.props.onClick({ preventDefault() { prevented = true; } });
+  assert.equal(prevented, true, "the click does not navigate to the profile");
+  const after = app.render();
+  const sheet = nodes(after, (node) => node.type === "option-sheet")[0];
+  assert.ok(sheet, "a sign-in prompt sheet opens");
+  assert.match(sheet.props.title, /Sign in to view @HelperOne/);
+  const prompt = nodes(sheet, (node) => node.type === "helper-signin-prompt")[0];
+  assert.equal(prompt.props.username, "HelperOne");
+  assert.equal(prompt.props.destination, "/profile/HelperOne?from=find-helper&category=Cleaning");
+  prompt.props.onContinueBrowsing();
+  const closed = app.render();
+  assert.equal(nodes(closed, (node) => node.type === "option-sheet").length, 0, "Continue browsing closes the prompt");
+  assert.deepEqual(helperCards(closed).map((card) => card.props.profile.username), ["HelperOne"], "and the list is still there");
+});
+
+test("Find a Helper (signed in, or auth still loading): cards are ordinary links; the server decides while loading", async () => {
+  for (const options of [{ user: { id: "u1" } }, { user: null, authLoading: true }]) {
+    const { app, tree } = await openFindHelper(options);
+    const card = helperCards(tree)[0];
+    assert.equal(card.props.gated, false);
+    let prevented = false;
+    renderCard(card).props.onClick({ preventDefault() { prevented = true; } });
+    assert.equal(prevented, false, "the click is not intercepted");
+    assert.equal(nodes(app.render(), (node) => node.type === "option-sheet").length, 0);
+  }
+});
+
+test("Find a Helper shows the distance whenever both positions are known, only a radius filters, and every skill is listed", async () => {
+  const kmPerDegLat = haversineKm(0, 0, 1, 0);
+  const profiles = [
+    helperSkillsProfile("n", "NearHelper", { public_lat: 4 / kmPerDegLat, public_lng: 0, skills: ["Cleaning", "Handyman", "Pet Care"] }),
+    helperSkillsProfile("x", "NoLocation"),
+  ];
+  const { app, tree } = await openFindHelper({ profiles });
+  const byName = Object.fromEntries(helperCards(tree).map((card) => [card.props.profile.username, card.props.distanceKm]));
+  assert.ok(Math.abs(byName.NearHelper - 4) < 0.05, "distance is shown with Any distance");
+  assert.equal(byName.NoLocation, undefined, "a helper without a public position has no distance but is still listed");
+  assert.match(textOf(renderCard(helperCards(tree)[0])), /Offers:\s*Cleaning · Handyman · Pet Care/, "the requested service and every other one");
+  const crowded = helperCards(tree)[0];
+  const crowdedText = textOf(crowded.type({ ...crowded.props, profile: { ...crowded.props.profile, skills: ["A", "B", "Cleaning", "C", "D", "E", "F", "B"] } }));
+  assert.match(crowdedText, /Offers:\s*Cleaning · A · B · C · D · E · F\b/, "all of them, the searched one first, none dropped or repeated");
+  assert.doesNotMatch(crowdedText, /more/, "no skill is hidden behind a +N more");
+  nodes(tree, (node) => node.type === "select")[0].props.onChange({ target: { value: "5" } });
+  assert.deepEqual(helperCards(app.render()).map((card) => card.props.profile.username), ["NearHelper"], "a radius filters");
+  // No position at all: a radius cannot apply, and the visitor is told how to add one.
+  const noPosition = await openFindHelper({ profiles, mocks: { "@/lib/location": { loadJourneyLocation: () => ({ text: "", lat: null, lng: null }), haversineKm } } });
+  nodes(noPosition.tree, (node) => node.type === "select")[0].props.onChange({ target: { value: "5" } });
+  const hinted = noPosition.app.render();
+  assert.match(textOf(nodes(hinted, (node) => node.props.role === "status")[0]), /Add a ZIP code or use your location/);
+  assert.equal(helperCards(hinted).length, 2, "nothing is hidden by a radius that cannot be measured");
+});
+
+test("Find a Helper reads the saved area only after hydration, so the server HTML and the first client render agree", async () => {
+  const app = await component("src/app/find-helper/page.tsx", "FindHelper", {
+    client: helperClient([], []),
+    mocks: { "@/lib/tags": { loadTagCatalog: async () => ({}), ...helperTagsMock },
+      "@/lib/location": { loadJourneyLocation: () => ({ text: "Stockholm, Sweden", lat: 59.33, lng: 18.07 }), haversineKm } },
+  });
+  app.auth.user = null;
+  const picker = (tree) => nodes(tree, (node) => node.type === "area-picker")[0];
+  assert.equal(picker(app.render()).props.area.text, "", "first render: nothing from browser storage (the server cannot see it)");
+  await flush();
+  assert.deepEqual(JSON.parse(JSON.stringify(picker(app.render()).props.area)), { text: "Stockholm, Sweden", lat: 59.33, lng: 18.07 }, "then the saved area appears");
+});
+
+test("Find a Helper restores a search from ?category=, ignores unknown values, and keeps the category in the address", async () => {
+  const history = [];
+  const withQuery = (search) => ({ window: { location: { search }, history: { replaceState: (...args) => history.push(args[2]) } } });
+  const restored = await component("src/app/find-helper/page.tsx", "FindHelper", {
+    client: helperClient([helperSkillsProfile("a", "HelperOne")]), globals: withQuery("?category=Cleaning"),
+    mocks: { "@/lib/tags": { loadTagCatalog: async () => ({}), ...helperTagsMock }, "@/lib/location": originLocationMock },
+  });
+  restored.auth.user = null;
+  restored.render(); await flush(); restored.render(); await flush();
+  const tree = restored.render();
+  assert.equal(nodes(tree, (node) => node.type === "selection-chip" && node.props.children === "Cleaning")[0].props.selected, true);
+  assert.deepEqual(helperCards(tree).map((card) => card.props.profile.username), ["HelperOne"]);
+  assert.deepEqual(history, ["/find-helper?category=Cleaning"]);
+
+  const ignored = await component("src/app/find-helper/page.tsx", "FindHelper", {
+    client: helperClient([]), globals: withQuery("?category=%3Cscript%3E"),
+    mocks: { "@/lib/tags": { loadTagCatalog: async () => ({}), ...helperTagsMock }, "@/lib/location": originLocationMock },
+  });
+  ignored.render(); await flush();
+  assert.ok(nodes(ignored.render(), (node) => node.props.children === "Choose a category to see nearby helpers."), "an unknown category is ignored");
+});
+
+test("Find a Helper has a search area control that needs no account", async () => {
+  const { tree } = await openFindHelper({ user: null });
+  const picker = nodes(tree, (node) => node.type === "area-picker")[0];
+  assert.ok(picker, "ZIP / current-location search is on the page itself");
+  assert.deepEqual(JSON.parse(JSON.stringify(picker.props.area)), { text: "Origin", lat: 0, lng: 0 });
+});
+
+// ---- AreaPicker (ZIP/postal code, neighborhood search, current location, map pin) ----
+async function openAreaPicker({ geolocation, lookup, reverse, storage = new Map(), area = { text: "", lat: null, lng: null } } = {}) {
+  const chosen = [];
+  const store = { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: (key) => storage.delete(key) };
+  const app = await component("src/components/AreaPicker.tsx", "AreaPicker", {
+    storage: store,
+    globals: { setTimeout: (fn) => { Promise.resolve().then(fn); return 1; }, clearTimeout() {}, AbortController, navigator: { geolocation } },
+    mocks: {
+      "@/lib/area-lookup": { resolveAreaQuery: lookup ?? (async () => { throw new Error("no lookup expected"); }) },
+      "@/lib/location": { LOCATION_KEY: "esg:general-area", reverseGeocodeGeneralArea: reverse ?? (async () => null) },
+    },
+  });
+  const props = { area, onChange: (next) => chosen.push(JSON.parse(JSON.stringify(next))) };
+  app.render(props); await flush();
+  const type = async (value) => { nodes(app.render(props), (node) => node.type === "input")[0].props.onChange({ target: { value } }); app.render(props); await flush(); await flush(); };
+  return { app, props, chosen, storage, type };
+}
+
+test("AreaPicker: a ZIP code sets the area, stores only the rounded journey location, and shows no account requirement", async () => {
+  const { chosen, storage, type } = await openAreaPicker({ lookup: async () => ({ kind: "single", area: { label: "Minneapolis, MN 55401", areaLabel: "Minneapolis, MN 55401", lat: 44.98, lng: -93.27 } }) });
+  await type("55401");
+  assert.deepEqual(chosen, [{ text: "Minneapolis, MN 55401", lat: 44.98, lng: -93.27 }]);
+  assert.deepEqual(JSON.parse(storage.get("esg:general-area")), { text: "Minneapolis, MN 55401", lat: 44.98, lng: -93.27 }, "same record /location writes, nothing else");
+});
+
+test("AreaPicker: a postcode that cannot be found says so and keeps manual entry and current location available", async () => {
+  const { app, props, chosen, type } = await openAreaPicker({ lookup: async () => ({ kind: "none" }) });
+  await type("00000");
+  const tree = app.render(props);
+  assert.equal(chosen.length, 0);
+  assert.match(textOf(nodes(tree, (node) => node.props.role === "alert")[0]), /No place found for that postcode/);
+  assert.ok(nodes(tree, (node) => node.type === "button" && /Use my location/.test(textOf(node))).length === 1);
+});
+
+test("AreaPicker: a geocoding failure is reported as a failure, not as 'nothing found', and nothing is saved", async () => {
+  const { app, props, chosen, storage, type } = await openAreaPicker({ lookup: async () => { throw new Error("offline"); } });
+  await type("Södermalm");
+  const tree = app.render(props);
+  assert.equal(chosen.length, 0);
+  assert.equal(storage.size, 0);
+  assert.match(textOf(nodes(tree, (node) => node.props.role === "alert")[0]), /Couldn't search for that place right now/);
+  assert.equal(nodes(tree, (node) => node.type === "input").length, 1, "manual entry is still there");
+});
+
+test("AreaPicker: a neighborhood, city or ambiguous postcode lists areas (never street addresses) and picking one sets the area", async () => {
+  const matches = [
+    { label: "Kävlinge Torg 1, Kävlinge, Skåne, Sweden", areaLabel: "Kävlinge, Skåne, Sweden", lat: 55.79, lng: 13.12 },
+    { label: "Kävlinge, Texas", areaLabel: "Kävlinge, TX 24431", lat: 30.1, lng: -97.2 },
+  ];
+  const { app, props, chosen, type } = await openAreaPicker({ lookup: async () => ({ kind: "choices", choices: matches }) });
+  await type("244 31");
+  const list = nodes(app.render(props), (node) => node.type === "ul")[0];
+  const options = nodes(list, (node) => node.type === "button");
+  assert.equal(textOf(options[0]), "Kävlinge, Skåne, Sweden", "the area label is shown, not the street address");
+  assert.equal(chosen.length, 0, "several matches: nothing is chosen for the visitor");
+  options[0].props.onClick();
+  assert.deepEqual(chosen, [{ text: "Kävlinge, Skåne, Sweden", lat: 55.79, lng: 13.12 }]);
+});
+
+test("AreaPicker: the map follows the chosen area, and moving the pin re-labels the area with the pinned (rounded) point", async () => {
+  const area = { text: "Stockholm, Sweden", lat: 59.33, lng: 18.07 };
+  const { app, props, chosen, storage } = await openAreaPicker({ area, reverse: async (lat, lng) => { assert.deepEqual([lat, lng], [59.31, 18.06]); return "Södermalm, Stockholm, Sweden"; } });
+  const tree = app.render(props);
+  const map = nodes(tree, (node) => node.type === "map-picker")[0];
+  assert.deepEqual([map.props.lat, map.props.lng], [59.33, 18.07], "the pin sits where the entered area is");
+  map.props.onPick({ lat: 59.31, lng: 18.06 });
+  assert.deepEqual(chosen[0], { text: "Pinned location", lat: 59.31, lng: 18.06 }, "text never describes the old place while the pin has moved");
+  await flush(); await flush();
+  assert.deepEqual(chosen.at(-1), { text: "Södermalm, Stockholm, Sweden", lat: 59.31, lng: 18.06 }, "entered location and pin coordinates agree");
+  assert.deepEqual(JSON.parse(storage.get("esg:general-area")), chosen.at(-1));
+  // No coordinates (a place without a position): no map to show.
+  const bare = await openAreaPicker({ area: { text: "Somewhere", lat: null, lng: null } });
+  assert.equal(nodes(bare.app.render(bare.props), (node) => node.type === "map-picker").length, 0);
+});
+
+test("AreaPicker: the moved pin is saved at once, even while its place name is still being looked up", async () => {
+  const area = { text: "Stockholm, Sweden", lat: 59.33, lng: 18.07 };
+  const { app, props, storage } = await openAreaPicker({ area, reverse: () => new Promise(() => {}) });
+  nodes(app.render(props), (node) => node.type === "map-picker")[0].props.onPick({ lat: 59.4, lng: 18.1 });
+  assert.deepEqual(JSON.parse(storage.get("esg:general-area")), { text: "Pinned location", lat: 59.4, lng: 18.1 }, "leaving the page now keeps the pin, not the old place");
+});
+
+test("AreaPicker: if the pin's place name cannot be looked up, the pin stays and the text says 'Pinned location'", async () => {
+  const area = { text: "Stockholm, Sweden", lat: 59.33, lng: 18.07 };
+  const { app, props, chosen } = await openAreaPicker({ area, reverse: async () => { throw new Error("offline"); } });
+  nodes(app.render(props), (node) => node.type === "map-picker")[0].props.onPick({ lat: 59.4, lng: 18.1 });
+  await flush(); await flush();
+  assert.deepEqual(chosen.at(-1), { text: "Pinned location", lat: 59.4, lng: 18.1 });
+});
+
+test("AreaPicker: current location rounds coordinates, labels the area, stores only text and rounded lat/lng; denial falls back to manual entry", async () => {
+  const granted = await openAreaPicker({
+    geolocation: { getCurrentPosition: (ok) => ok({ coords: { latitude: 59.329323, longitude: 18.068581 } }) },
+    reverse: async (lat, lng) => { assert.deepEqual([lat, lng], [59.33, 18.07]); return "Stockholm, Sweden"; },
+  });
+  nodes(granted.app.render(granted.props), (node) => node.type === "button" && /Use my location/.test(textOf(node)))[0].props.onClick();
+  await flush(); await flush();
+  assert.deepEqual(granted.chosen, [{ text: "Stockholm, Sweden", lat: 59.33, lng: 18.07 }]);
+  assert.deepEqual(JSON.parse(granted.storage.get("esg:general-area")), { text: "Stockholm, Sweden", lat: 59.33, lng: 18.07 });
+
+  const denied = await openAreaPicker({ geolocation: { getCurrentPosition: (_ok, fail) => fail(new Error("denied")) } });
+  nodes(denied.app.render(denied.props), (node) => node.type === "button" && /Use my location/.test(textOf(node)))[0].props.onClick();
+  await flush();
+  assert.equal(denied.chosen.length, 0);
+  assert.match(textOf(nodes(denied.app.render(denied.props), (node) => node.props.role === "alert")[0]), /couldn't access your location/);
+  assert.ok(nodes(denied.app.render(denied.props), (node) => node.type === "input").length === 1, "manual entry is still there");
+
+  const unsupported = await openAreaPicker({ geolocation: undefined });
+  nodes(unsupported.app.render(unsupported.props), (node) => node.type === "button" && /Use my location/.test(textOf(node)))[0].props.onClick();
+  assert.match(textOf(nodes(unsupported.app.render(unsupported.props), (node) => node.props.role === "alert")[0]), /isn't available in this browser/);
+});
+
+// ---- postcode and area resolution (the real modules, network faked) ----
+async function loadLib(path, mocks = {}, globals = {}) {
+  const source = await readFile(new URL(`../${path}`, import.meta.url), "utf8");
+  const code = ts.transpileModule(source, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+  const loaded = { exports: {} };
+  runInNewContext(`(function(require, module, exports) { ${code}\n})`, { URL, URLSearchParams, console, AbortSignal, ...globals })((id) => mocks[id] ?? require(id), loaded, loaded.exports);
+  return loaded.exports;
+}
+
+test("Postcode parsing: US ZIPs and Swedish postcodes (spaced, unspaced, SE- prefixed) are recognised; five digits are ambiguous; junk is not a postcode", () => {
+  const { swedishPostcode, postcodeCandidates, parsePostcodeLocation } = zipLocationLib;
+  assert.equal(swedishPostcode("244 31"), "24431");
+  assert.equal(swedishPostcode("SE-244 31"), "24431");
+  assert.equal(swedishPostcode("24431"), "24431");
+  assert.equal(swedishPostcode("2443"), null);
+  assert.equal(swedishPostcode("244 311"), null);
+  assert.deepEqual(postcodeCandidates("94086"), [{ country: "us", code: "94086" }, { country: "se", code: "94086" }]);
+  assert.deepEqual(postcodeCandidates("111 22"), [{ country: "se", code: "11122" }]);
+  assert.deepEqual(postcodeCandidates("Södermalm"), []);
+  assert.deepEqual(postcodeCandidates("12345; DROP TABLE"), []);
+  const place = { "place name": "Kävlinge", state: "Skåne", latitude: "55.7922", longitude: "13.1166" };
+  assert.deepEqual(parsePostcodeLocation({ places: [place] }, "24431", "se"), { lat: 55.79, lng: 13.12, label: "244 31 Kävlinge, Skåne, Sweden" }, "rounded to a general area");
+  assert.throws(() => parsePostcodeLocation({ places: [{ ...place, latitude: "" }] }, "24431", "se"), /Invalid/);
+  assert.throws(() => parsePostcodeLocation({ places: [{ ...place, latitude: "123" }] }, "24431", "se"), /Invalid/);
+  assert.throws(() => parsePostcodeLocation({ places: [] }, "24431", "se"), /Invalid/);
+});
+
+test("resolveAreaQuery: one postcode match selects itself, an ambiguous five-digit code offers both, anything else is an area search, failures propagate", async () => {
+  const swedish = { label: "244 31 Kävlinge, Skåne, Sweden", lat: 55.79, lng: 13.12 };
+  const american = { label: "Kävlinge, TX 24431", lat: 30.1, lng: -97.2 };
+  const calls = [];
+  const searches = [];
+  const make = async (lookups, search) => loadLib("src/lib/area-lookup.ts", {
+    "@/lib/zip-location": { postcodeCandidates: zipLocationLib.postcodeCandidates, isPostcodeNotFound: zipLocationLib.isPostcodeNotFound, lookupPostcode: async (country, code) => { calls.push(`${country}:${code}`); return lookups[country](); } },
+    "@/lib/area-search": { searchAreas: async (query) => { searches.push(query); return search(); } },
+  });
+  const signal = new AbortController().signal;
+  const unique = await make({ se: async () => swedish }, async () => []);
+  const single = await unique.resolveAreaQuery("244 31", signal);
+  assert.equal(single.kind, "single");
+  assert.deepEqual([single.area.lat, single.area.lng], [55.79, 13.12]);
+  assert.deepEqual(calls, ["se:24431"]);
+  assert.equal(searches.length, 0, "a postcode that resolved is not searched again");
+
+  calls.length = 0;
+  const both = await make({ us: async () => american, se: async () => swedish }, async () => []);
+  const ambiguous = await both.resolveAreaQuery("24431", signal);
+  assert.equal(ambiguous.kind, "choices");
+  assert.deepEqual([...ambiguous.choices.map((c) => c.areaLabel)], [american.label, swedish.label]);
+  assert.deepEqual(calls.sort(), ["se:24431", "us:24431"]);
+
+  const onlyOne = await make({ us: async () => { throw new Error("404"); }, se: async () => swedish }, async () => []);
+  assert.equal((await onlyOne.resolveAreaQuery("24431", signal)).kind, "single", "the code that does not exist is ignored");
+
+  const neighborhood = await make({}, async () => [{ label: "x", areaLabel: "Södermalm, Stockholm", lat: 59.31, lng: 18.07 }]);
+  assert.equal((await neighborhood.resolveAreaQuery("Södermalm", signal)).kind, "choices");
+  assert.deepEqual(searches.at(-1), "Södermalm");
+
+  const missing = () => Object.assign(new Error("Postcode not found"), { name: "PostcodeNotFoundError" });
+  searches.length = 0;
+  const nothing = await make({ us: async () => { throw missing(); }, se: async () => { throw missing(); } }, async () => [{ label: "Pedro do Rio", areaLabel: "Pedro do Rio, Brazil", lat: -22.4, lng: -43.1 }]);
+  assert.equal((await nothing.resolveAreaQuery("00000", signal)).kind, "none", "a bare five-digit code that is neither a ZIP nor a postcode is not a place");
+  assert.equal(searches.length, 0, "and is not fuzzy-matched against unrelated towns");
+  assert.equal((await nothing.resolveAreaQuery("111 22", signal)).kind, "choices", "a spaced code the postcode service lacks still falls back to the area search");
+  assert.deepEqual([...searches], ["111 22"]);
+  const offline = await make({ us: async () => { throw new TypeError("fetch failed"); }, se: async () => { throw missing(); } }, async () => []);
+  await assert.rejects(() => offline.resolveAreaQuery("24431", signal), /fetch failed/, "an unreachable postcode service is a failure, not 'not found'");
+
+  const down = await make({}, async () => { throw new Error("network"); });
+  await assert.rejects(() => down.resolveAreaQuery("Södermalm", signal), /network/, "a service failure is not reported as 'no such place'");
+});
+
+test("Postcode lookup uses the right endpoint per country and rejects a code that does not belong to that country", async () => {
+  const urls = [];
+  const lib = await loadLib("src/lib/zip-location.ts", {}, { AbortSignal, fetch: async (url) => { urls.push(url); return { ok: true, json: async () => ({ places: [{ "place name": "Kävlinge", state: "Skåne", latitude: "55.79", longitude: "13.12" }] }) }; } });
+  const place = await lib.lookupPostcode("se", "24431", new AbortController().signal);
+  assert.deepEqual(urls, ["https://api.zippopotam.us/se/24431"]);
+  assert.equal(place.label, "244 31 Kävlinge, Skåne, Sweden");
+  await assert.rejects(() => lib.lookupPostcode("se", "../../etc", new AbortController().signal), /Invalid postcode/);
+  await assert.rejects(() => lib.lookupPostcode("us", "244 31", new AbortController().signal), /Invalid postcode/, "a Swedish code is not looked up as a US ZIP");
+  assert.equal(urls.length, 1, "invalid input never reaches the network");
+  const status = async (code) => (await loadLib("src/lib/zip-location.ts", {}, { AbortSignal, fetch: async () => ({ ok: code < 400, status: code, json: async () => ({}) }) }))
+    .lookupPostcode("se", "24431", new AbortController().signal).then(() => null, (error) => error);
+  assert.equal((await status(404)).name, "PostcodeNotFoundError", "404: the service answered, the code does not exist");
+  assert.equal(lib.isPostcodeNotFound(await status(404)), true);
+  const broken = await status(503);
+  assert.equal(broken.message, "Postcode lookup failed", "5xx: the lookup failed, which is not the same as not found");
+  assert.equal(lib.isPostcodeNotFound(broken), false);
+});
+
+test("The searched area survives the trip through sign-in or registration (short-lived, validated, rounded, one-shot)", async () => {
+  const lib = await loadLib("src/lib/location.ts", { "./journey": journeyLib, "./geocoding": { generalAreaLabel: () => null } });
+  const mapStore = () => { const m = new Map(); return { m, getItem: (k) => m.get(k) ?? null, setItem: (k, v) => m.set(k, v), removeItem: (k) => m.delete(k) }; };
+  const local = mapStore();
+  const session = mapStore();
+  session.m.set("esg:general-area", JSON.stringify({ text: "Stockholm, Sweden", lat: 59.329323, lng: 18.068581, address: "Storgatan 1" }));
+  assert.equal(lib.rememberAreaForAuth(local, session, 1000), true);
+  const saved = JSON.parse(local.m.get("esg:post-auth-area"));
+  assert.deepEqual(saved, { text: "Stockholm, Sweden", lat: 59.33, lng: 18.07, expires: 1000 + 30 * 60 * 1000 }, "rounded; nothing else is carried");
+
+  const fresh = mapStore();                  // the verification link opens a new tab: empty sessionStorage
+  assert.deepEqual(JSON.parse(JSON.stringify(lib.restoreAreaAfterAuth(local, fresh, 2000))), { text: "Stockholm, Sweden", lat: 59.33, lng: 18.07 });
+  assert.deepEqual(JSON.parse(fresh.m.get("esg:general-area")), { text: "Stockholm, Sweden", lat: 59.33, lng: 18.07 }, "restored for the rest of the visit");
+  assert.equal(local.m.size, 0, "one-shot");
+
+  local.m.set("esg:post-auth-area", JSON.stringify({ ...saved }));
+  assert.deepEqual(JSON.parse(JSON.stringify(lib.restoreAreaAfterAuth(local, mapStore(), saved.expires + 1))), { text: "", lat: null, lng: null }, "expired");
+  local.m.set("esg:post-auth-area", JSON.stringify({ text: "x".repeat(201), lat: 1, lng: 1, expires: 9e15 }));
+  assert.deepEqual(JSON.parse(JSON.stringify(lib.restoreAreaAfterAuth(local, mapStore(), 0))), { text: "", lat: null, lng: null }, "oversized");
+  local.m.set("esg:post-auth-area", "{not json");
+  assert.deepEqual(JSON.parse(JSON.stringify(lib.restoreAreaAfterAuth(local, mapStore(), 0))), { text: "", lat: null, lng: null }, "corrupt");
+  assert.equal(lib.rememberAreaForAuth(mapStore(), mapStore(), 0), false, "nothing to remember");
+});
+
+
+// ---- the prompt itself ----
+test("The helper sign-in prompt offers Log in, Create account and Continue browsing with the right destinations", async () => {
+  const storage = new Map();
+  const local = { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: (key) => storage.delete(key) };
+  const destination = "/profile/HelperOne?from=find-helper&category=Yard%20Work";
+  let areasKept = 0;
+  const app = await component("src/components/HelperSignInPrompt.tsx", "HelperSignInPrompt", {
+    mocks: {
+      "@/lib/journey": { ...journeyLib, rememberAuthDestination: (value) => journeyLib.rememberAuthDestination(value, local) },
+      "@/lib/location": { rememberAreaForAuth: () => { areasKept++; return true; } },
+    },
+  });
+  const tree = app.render({ username: "HelperOne", destination });
+  const links = nodes(tree, (node) => node.type === "a");
+  const login = links.find((node) => textOf(node) === "Log in");
+  const create = links.find((node) => textOf(node) === "Create account");
+  const browse = links.find((node) => textOf(node) === "Continue browsing");
+  assert.equal(login.props.href, `/auth/sign-in?next=${encodeURIComponent(destination)}`);
+  assert.equal(safeNext(decodeURIComponent(login.props.href.split("next=")[1])), destination, "the destination survives encoding and passes the same validation sign-in applies");
+  assert.equal(create.props.href, "/auth/sign-up");
+  assert.equal(browse.props.href, "/find-helper");
+  assert.equal(storage.size, 0, "nothing is remembered until the visitor picks Create account");
+  assert.equal(areasKept, 0);
+  create.props.onClick();
+  assert.equal(JSON.parse(storage.get("esg:post-auth-destination")).path, destination);
+  assert.equal(areasKept, 1, "the searched area is kept for the return from registration");
+  login.props.onClick();
+  assert.equal(areasKept, 2, "and for the return from Log in");
+  // Inside the list, Continue browsing is a button that closes the sheet.
+  let closed = 0;
+  const inList = nodes(app.render({ username: "HelperOne", destination, onContinueBrowsing: () => { closed++; } }), (node) => node.type === "button" && textOf(node) === "Continue browsing")[0];
+  inList.props.onClick();
+  assert.equal(closed, 1);
+});
+
+// ---- the profile route itself ----
+test("A helper profile page shows the sign-in prompt, and fetches nothing, when no one is signed in", async () => {
+  const touched = [];
+  const client = { from: (table) => { touched.push(table); throw new Error("must not query"); }, rpc: async () => { touched.push("rpc"); throw new Error("must not call"); } };
+  const app = await component("src/app/profile/[username]/page.tsx", "PublicProfileView", {
+    client, mocks: { "next/navigation": { useSearchParams: () => new URLSearchParams("from=find-helper&category=Yard%20Work") } },
+  });
+  app.auth.user = null;
+  app.render({ username: "HelperOne" }); await flush();
+  const tree = app.render({ username: "HelperOne" });
+  const prompt = nodes(tree, (node) => node.type === "helper-signin-prompt")[0];
+  assert.ok(prompt, "the prompt replaces the profile");
+  assert.equal(prompt.props.destination, "/profile/HelperOne?from=find-helper&category=Yard%20Work");
+  assert.equal(prompt.props.browseHref, "/find-helper", "an unknown category (this test's service list) falls back to the plain list");
+  assert.deepEqual(touched, [], "no profile, tag or stats data is requested for a signed-out visitor");
+  assert.equal(nodes(tree, (node) => node.type === "tag-chip").length, 0);
+});
+
+test("A signed-in visitor still gets the helper profile, with a way back to the same search", async () => {
+  const profile = { id: "helper-1", username: "HelperOne", photo_url: null, skills: ["Cleaning"], wom_count: 3, profile_tags: [] };
+  const client = {
+    from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: profile, error: null }) }) }) }),
+    rpc: async () => ({ data: [{ gigs_worked_count: 1, wom_count: 3 }], error: null }),
+  };
+  const app = await component("src/app/profile/[username]/page.tsx", "PublicProfileView", {
+    client, mocks: { "next/navigation": { useSearchParams: () => new URLSearchParams("from=find-helper&category=Cleaning") } },
+  });
+  app.render({ username: "HelperOne" }); await flush();
+  const tree = app.render({ username: "HelperOne" });
+  assert.equal(nodes(tree, (node) => node.type === "helper-signin-prompt").length, 0);
+  assert.ok(nodes(tree, (node) => node.type === "div" && textOf(node) === "@HelperOne").length > 0, "the profile itself is shown");
+  const back = nodes(tree, (node) => node.type === "a" && /Back to Find a Helper/.test(textOf(node)))[0];
+  assert.equal(back.props.href, "/find-helper?category=Cleaning", "Back returns to the same category");
+});
+
+// ---- sign in / register carry the destination ----
+async function openSignIn(next) {
+  const storage = new Map();
+  const local = { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: (key) => storage.delete(key) };
+  const app = await component("src/app/auth/sign-in/page.tsx", "SignInInner", {
+    client: { auth: {} },
+    mocks: {
+      "next/navigation": { useSearchParams: () => new URLSearchParams({ next }), useRouter: () => ({ replace() {} }) },
+      "@/lib/journey": { ...journeyLib, rememberAuthDestination: (value) => journeyLib.rememberAuthDestination(value, local) },
+    },
+  });
+  app.auth.user = null;
+  return { tree: app.render(), storage };
+}
+
+test("Sign In reached from a helper profile says so, offers Continue browsing, and Register remembers only that profile", async () => {
+  const destination = "/profile/HelperOne?from=find-helper&category=Yard%20Work";
+  const { tree, storage } = await openSignIn(destination);
+  const notice = nodes(tree, (node) => node.props.role === "status")[0];
+  assert.match(textOf(notice), /Sign in to view @HelperOne's profile/);
+  assert.equal(nodes(notice, (node) => node.type === "a" && textOf(node) === "Continue browsing")[0].props.href, "/find-helper?category=Yard%20Work");
+  const register = nodes(tree, (node) => node.type === "a" && node.props.children === "Register")[0];
+  assert.equal(register.props.href, `/auth/sign-up?next=${encodeURIComponent(destination)}`);
+  register.props.onClick();
+  assert.equal(JSON.parse(storage.get("esg:post-auth-destination")).path, destination);
+});
+
+test("Sign In never treats other or external destinations as a helper journey", async () => {
+  for (const next of ["/post", "/need-help", "https://evil.invalid/profile/HelperOne", "//evil.invalid/profile/HelperOne", "/profile/Helper/One", "/profile"]) {
+    const { tree, storage } = await openSignIn(next);
+    assert.equal(nodes(tree, (node) => node.props.role === "status").length, 0, `no helper notice for ${next}`);
+    nodes(tree, (node) => node.type === "a" && node.props.children === "Register")[0].props.onClick();
+    assert.equal(storage.size, 0, `nothing remembered for ${next}`);
+  }
+});
+
+async function registrationEnds({ remembered }) {
+  const storage = new Map();
+  if (remembered !== undefined) storage.set("esg:post-auth-destination", typeof remembered === "string" ? remembered : JSON.stringify(remembered));
+  const local = { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: (key) => storage.delete(key) };
+  const destinations = [];
+  const app = await component("src/app/auth/register/page.tsx", "RegisterInner", {
+    client: {},
+    mocks: {
+      // A new router object on every render makes the effect run again, as it can in the browser.
+      "next/navigation": { useRouter: () => ({ replace: (to) => destinations.push(to) }) },
+      "@/components/CategoryList": { CategoryList: "category-list" },
+      "@/lib/journey": { ...journeyLib, takeAuthDestination: () => journeyLib.takeAuthDestination(local) },
+    },
+  });
+  app.auth.profile = { ...profile, onboarding_completed_at: "2026-01-01" };
+  app.render(); app.render(); await flush();   // the effect may run more than once
+  return { destinations, storage };
+}
+
+test("Registration ends at Home, unless the visitor chose Create account from a helper profile: then it lands there, once", async () => {
+  const destination = "/profile/HelperOne?from=find-helper&category=Cleaning";
+  const now = Date.now();
+  const remembered = { path: destination, expires: now + 60_000 };
+  const kept = await registrationEnds({ remembered });
+  assert.ok(kept.destinations.length >= 2, "the redirect effect did run more than once");
+  assert.deepEqual([...new Set(kept.destinations)], [destination], "always the helper profile, even when the effect runs again");
+  assert.equal(kept.storage.has("esg:post-auth-destination"), false, "forgotten once used");
+  for (const [label, value] of [
+    ["nothing remembered", undefined],
+    ["expired", { path: destination, expires: now - 1 }],
+    ["external destination", { path: "https://evil.invalid/profile/x", expires: now + 60_000 }],
+    ["a protected non-helper page", { path: "/my-gigs", expires: now + 60_000 }],
+    ["corrupted value", "not json"],
+  ]) {
+    assert.deepEqual([...new Set((await registrationEnds({ remembered: value })).destinations)], ["/"], `Home when ${label}`);
+  }
+});
+
+// ---- the server-side route guard (src/proxy.ts) ----
+async function runProxy({ pathAndQuery = "/profile/HelperOne?from=find-helper&category=Yard%20Work", user = null, error = null, throws = false } = {}) {
+  const source = await readFile(new URL("../src/proxy.ts", import.meta.url), "utf8");
+  const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+  class NextResponse {
+    constructor(body, init) { this.kind = "body"; this.body = body; this.status = init?.status; this.headers = new Map(Object.entries(init?.headers ?? {})); }
+    static next() { const r = new NextResponse(); r.kind = "next"; r.cookies = { set() {} }; return r; }
+    static redirect(url) { const r = new NextResponse(); r.kind = "redirect"; r.url = String(url); r.cookies = { set() {} }; return r; }
+  }
+  const loaded = { exports: {} };
+  const mocks = {
+    "next/server": { NextResponse },
+    "@supabase/ssr": { createServerClient: () => ({ auth: { getUser: async () => { if (throws) throw new Error("network"); return { data: { user }, error }; } } }) },
+  };
+  runInNewContext(`(function(require, module, exports, process) { ${code}\n})`, { URL })((id) => mocks[id], loaded, loaded.exports, { env: { NEXT_PUBLIC_SUPABASE_URL: "http://localhost:54321", NEXT_PUBLIC_SUPABASE_ANON_KEY: "test-anon" } });
+  const url = new URL(`http://localhost:3001${pathAndQuery}`);
+  const request = { url: url.href, nextUrl: url, cookies: { getAll: () => [], set() {} } };
+  return { response: await loaded.exports.proxy(request), config: loaded.exports.config };
+}
+
+test("Direct navigation to a helper profile while signed out is redirected on the server to Sign In, keeping the profile as the destination", async () => {
+  const { response, config } = await runProxy({ error: { name: "AuthSessionMissingError", status: 400 } });
+  assert.equal(response.kind, "redirect");
+  const target = new URL(response.url);
+  assert.equal(target.pathname, "/auth/sign-in");
+  assert.equal(target.searchParams.get("reason"), "helper-profile");
+  const next = target.searchParams.get("next");
+  assert.equal(next, "/profile/HelperOne?from=find-helper&category=Yard%20Work");
+  assert.equal(safeNext(next), next, "the destination passes the validation the sign-in page applies");
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
+  assert.deepEqual(JSON.parse(JSON.stringify(config)), { matcher: ["/profile/:username"] });
+  for (const status of [401, 403]) {
+    assert.equal((await runProxy({ error: { name: "AuthApiError", status } })).response.kind, "redirect", `an invalid or expired session (${status}) is signed out`);
+  }
+});
+
+test("The route guard lets a verified session through and fails closed (503, no redirect loop) if auth cannot be checked", async () => {
+  assert.equal((await runProxy({ user: { id: "u1" } })).response.kind, "next", "a signed-in visitor gets the profile");
+  for (const options of [{ error: { name: "AuthRetryableFetchError", status: 0 } }, { error: { name: "AuthApiError", status: 500 } }, { throws: true }]) {
+    const { response } = await runProxy(options);
+    assert.equal(response.status, 503);
+    assert.notEqual(response.kind, "redirect");
+    assert.notEqual(response.kind, "next", "never serves the page when the session could not be verified");
+  }
+});
+
+test("Hostile profile paths cannot turn the sign-in redirect into an open redirect", async () => {
+  for (const pathAndQuery of ["/profile/evil.com", "/profile/%2F%2Fevil.com", "/profile/a%5Cb"]) {
+    const { response } = await runProxy({ pathAndQuery, error: { name: "AuthSessionMissingError", status: 400 } });
+    const next = new URL(response.url).searchParams.get("next");
+    assert.equal(safeNext(next), "/", `sign-in discards ${pathAndQuery}: it falls back to Home`);
+    assert.equal(new URL(response.url).origin, "http://localhost:3001", "the redirect itself always stays on this site");
+  }
+});
+
+// ===========================================================================
+// Helper requests: Post a Gig on a helper's profile -> private request -> accept / decline
+// ===========================================================================
+test("helper-request helpers: only plain usernames are accepted, the link is built safely, and the stage follows the gig and the helper's claim", () => {
+  const { requestUsername, postRequestHref, requestableCategories, requestStage, priceLabel } = helperRequestLib;
+  assert.equal(requestUsername("HelperOne"), "HelperOne");
+  for (const bad of [null, undefined, "", "a b", "../x", "<script>", "a".repeat(41), "x?y=1", "a/b"]) assert.equal(requestUsername(bad), null, String(bad));
+  assert.equal(postRequestHref("HelperOne"), "/post?helper=HelperOne");
+  assert.equal(postRequestHref("HelperOne", "Yard Work"), "/post?helper=HelperOne&category=Yard+Work");
+  assert.equal(postRequestHref("../evil"), "/post", "an unusable username never builds a helper link");
+  assert.deepEqual(requestableCategories(["Handyman", "Cleaning", "Made Up"], ["Cleaning", "Handyman", "Other"]), ["Cleaning", "Handyman"], "only what the helper offers, in the app's order; nothing invented");
+  assert.deepEqual(requestableCategories(null, ["Cleaning"]), []);
+  assert.equal(priceLabel("fixed"), "Fixed price");
+  assert.equal(priceLabel("negotiable"), "Negotiable");
+  const gig = (fields) => ({ status: "active", selected_provider_id: null, requested_helper_id: "h", ...fields });
+  assert.equal(requestStage({ ...gig(), requested_helper_id: null }, null), null, "a public gig is not a request");
+  assert.equal(requestStage(gig({ status: "draft" }), null), "draft");
+  assert.equal(requestStage(gig(), null), "waiting");
+  assert.equal(requestStage(gig(), "pending"), "countered");
+  assert.equal(requestStage(gig(), "withdrawn"), "declined");
+  assert.equal(requestStage(gig({ selected_provider_id: "h", status: "in_progress" }), "selected"), "accepted");
+  assert.equal(requestStage(gig({ status: "cancelled" }), null), "closed");
+  assert.equal(requestStage(gig({ status: "completed" }), null), "closed");
+});
+
+// ---- the profile's Post a Gig button ----
+async function openProfile({ viewer = user, profileFields = {}, search = "from=find-helper&category=Cleaning" } = {}) {
+  const profile = { id: "helper-1", username: "HelperOne", photo_url: null, skills: ["Cleaning", "Handyman", "Pet Care"], wom_count: 3, profile_tags: [], ...profileFields };
+  const client = {
+    from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: profile, error: null }) }) }) }),
+    rpc: async () => ({ data: [{ gigs_worked_count: 1, wom_percentage: 100 }], error: null }),
+  };
+  const app = await component("src/app/profile/[username]/page.tsx", "PublicProfileView", {
+    client, mocks: { "next/navigation": { useSearchParams: () => new URLSearchParams(search) } },
+  });
+  app.auth.user = viewer;
+  app.render({ username: "HelperOne" }); await flush();
+  return app.render({ username: "HelperOne" });
+}
+
+test("Another member's profile has a clearly visible Post a Gig action, targeting that helper and the searched service", async () => {
+  const tree = await openProfile();
+  const post = nodes(tree, (node) => node.type === "a" && textOf(node) === "Post a Gig");
+  assert.equal(post.length, 1);
+  assert.equal(post[0].props.href, "/post?helper=HelperOne&category=Cleaning", "names the helper (private request) and the service searched for");
+  assert.equal(post[0].props["aria-label"], "Post a Gig for @HelperOne");
+  assert.match(post[0].props.className, /bg-emerald-600/, "a primary, filled action");
+  assert.match(post[0].props.className, /min-h-11/, "a touch-sized target");
+  // Top-right: the same row as the name, after it.
+  const row = nodes(tree, (node) => node.type === "div" && Array.isArray(node.props.children) && node.props.children.includes?.(post[0]))[0];
+  assert.ok(row, "the action sits in the profile's header row");
+  assert.equal(row.props.children.at(-1), post[0], "last in the row, so it sits at the right");
+});
+
+test("Post a Gig is not shown on your own profile, and a category the helper does not offer is not carried into the link", async () => {
+  const own = await openProfile({ viewer: { id: "helper-1" } });
+  assert.equal(nodes(own, (node) => /Post a Gig/.test(textOf(node))).length, 0);
+  const other = await openProfile({ search: "from=find-helper&category=Gardening" });
+  assert.equal(nodes(other, (node) => node.type === "a" && textOf(node) === "Post a Gig")[0].props.href, "/post?helper=HelperOne");
+});
+
+// ---- the existing form, addressed to one helper ----
+async function openRequestForm({ search = "helper=HelperOne&category=Cleaning", helper = { id: "helper-1", username: "HelperOne", skills: ["Cleaning", "Handyman", "Other"] }, lookupError = null,
+    rpc, stored = new Map(), asUser = user } = {}) {
+  const calls = [], destinations = [];
+  const client = {
+    from: (table) => {
+      const api = { select: () => api, eq: () => api, maybeSingle: async () => ({ data: table === "public_profiles" ? helper : null, error: lookupError }) };
+      return api;
+    },
+    rpc: rpc ?? (async (name, payload) => { calls.push({ name, payload }); return { data: { id: "created", status: payload.p_publish ? "active" : "draft" }, error: null }; }),
+  };
+  const app = await component("src/app/post/page.tsx", "PostGigForm", {
+    client,
+    storage: { getItem: (key) => stored.get(key) ?? null, setItem: (key, value) => stored.set(key, value), removeItem: (key) => stored.delete(key) },
+    globals: { crypto: { randomUUID: () => "11111111-1111-4111-8111-111111111111" } },
+    mocks: {
+      "next/navigation": { useSearchParams: () => new URLSearchParams(search), useRouter: () => ({ replace: (url) => destinations.push(url) }) },
+      "@/lib/location": { loadJourneyLocation: () => ({ text: "Kävlinge", lat: 55.79, lng: 13.12 }), reverseGeocodeGeneralArea: async () => null },
+    },
+  });
+  app.auth.user = asUser;
+  app.render(); await flush();
+  const fill = (tree, price) => {
+    for (const [predicate, value] of [
+      [(node) => node.type === "input" && node.props.maxLength === 120, "Rake the yard"],
+      [(node) => node.type === "textarea", "Leaves and twigs"],
+      [(node) => node.props.type === "number", price ?? "40"],
+      [(node) => node.props.type === "datetime-local", new Date(Date.now() + 86400000).toISOString().slice(0, 16)],
+    ]) nodes(tree, predicate)[0].props.onChange({ target: { value } });
+  };
+  return { app, calls, destinations, stored, fill };
+}
+const radios = (tree) => nodes(tree, (node) => node.type === "selection-chip" && node.props.role === "radio");
+
+test("Post a Gig for a helper: the existing form, addressed to that helper, private, with only what they offer", async () => {
+  const { app } = await openRequestForm();
+  const tree = app.render();
+  assert.match(textOf(nodes(tree, (node) => node.type === "h1")[0]), /Post a Gig for @HelperOne/);
+  const note = nodes(tree, (node) => node.props.role === "note")[0];
+  assert.match(textOf(note), /Private request.*Only @HelperOne will see it.*isn't posted publicly/);
+  assert.ok(nodes(note, (node) => node.type === "a" && node.props.href === "/post"), "a way to post a public gig instead");
+  assert.deepEqual(radios(tree).map(textOf).slice(0, 2), ["Cleaning", "Other"], "the helper's services that exist here (Handyman is not a category in this build)");
+  assert.equal(radios(tree).find((node) => node.props.selected).props.children, "Cleaning", "starts on the searched service");
+  assert.ok(nodes(tree, (node) => node.type === "input" && node.props.maxLength === 120).length === 1, "the same title / description / budget / date / area form");
+  assert.ok(button(tree, "Send request"), "Send request is at the bottom of the form");
+  assert.ok(button(tree, "Save as Draft"));
+  assert.equal(button(tree, "Post Gig"), undefined, "not worded as a public posting");
+});
+
+test("Post a Gig for a helper: Fixed or Negotiable pricing is selectable, validated, and submitted with the helper id", async () => {
+  const { app, calls, destinations, stored, fill } = await openRequestForm();
+  let tree = app.render();
+  const pricing = radios(tree).filter((node) => ["Fixed", "Negotiable"].includes(textOf(node)));
+  assert.deepEqual(pricing.map(textOf), ["Fixed", "Negotiable"]);
+  assert.equal(pricing[0].props.selected, true, "Fixed by default");
+  pricing[1].props.onClick(); tree = app.render();
+  assert.equal(radios(tree).find((node) => textOf(node) === "Negotiable").props.selected, true);
+  assert.match(textOf(tree), /may accept, decline, or counteroffer/);
+
+  // Validation reuses the public form's rules, before anything is sent.
+  fill(tree, "-5");
+  tree = app.render(); button(tree, "Send request").props.onClick(); await flush();
+  assert.equal(calls.length, 0);
+  assert.match(textOf(nodes(app.render(), (node) => node.props.role === "alert")[0]), /positive amount/);
+
+  fill(app.render(), "40");
+  button(app.render(), "Send request").props.onClick(); await flush();
+  assert.equal(calls.length, 1);
+  const { name, payload } = calls[0];
+  assert.equal(name, "create_gig");
+  assert.equal(payload.p_requested_helper_id, "helper-1", "the helper id reaches the database call");
+  assert.equal(payload.p_price_type, "negotiable");
+  assert.equal(payload.p_publish, true);
+  assert.equal(payload.p_amount, 40);
+  assert.equal(payload.p_service_type, "Cleaning");
+  assert.deepEqual(destinations, ["/gigs/created"], "lands on the request itself");
+  assert.equal(stored.size, 0, "the retry record is cleared once the request is saved");
+});
+
+test("Post a Gig for a helper: Fixed pricing is sent as fixed, and Save as Draft keeps the helper but does not publish", async () => {
+  const sent = await openRequestForm();
+  sent.fill(sent.app.render());
+  button(sent.app.render(), "Send request").props.onClick(); await flush();
+  assert.equal(sent.calls[0].payload.p_price_type, "fixed");
+  const draft = await openRequestForm();
+  draft.fill(draft.app.render());
+  button(draft.app.render(), "Save as Draft").props.onClick(); await flush();
+  assert.equal(draft.calls[0].payload.p_requested_helper_id, "helper-1");
+  assert.equal(draft.calls[0].payload.p_publish, false);
+  assert.deepEqual(draft.destinations, ["/my-gigs?created=created"]);
+});
+
+test("Post a Gig for a helper: a double click sends one request, shows Sending…, and an ambiguous failure retries the same request", async () => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const calls = [];
+  const { app, fill, stored } = await openRequestForm({ rpc: async (name, payload) => { calls.push(payload); await gate; return { data: null, error: { code: "08006", message: "network" } }; } });
+  fill(app.render());
+  const send = button(app.render(), "Send request");
+  send.props.onClick(); send.props.onClick();
+  await flush();
+  assert.equal(calls.length, 1, "the second click is ignored");
+  assert.ok(button(app.render(), "Sending…").props.disabled, "loading state, button disabled");
+  release(); await flush(); await flush();
+  const tree = app.render();
+  assert.match(textOf(nodes(tree, (node) => node.props.role === "alert")[0]), /couldn't confirm whether your request was saved/);
+  assert.ok(button(tree, "Retry previous request"), "retry reuses the saved request");
+  assert.equal(JSON.parse(stored.get(`esg:post:${user.id}`)).p_requested_helper_id, "helper-1");
+  assert.equal(JSON.parse(stored.get(`esg:post:${user.id}`)).p_request_id, "11111111-1111-4111-8111-111111111111");
+});
+
+test("Post a Gig for a helper: a retried request stays addressed to its original helper, even if the link changes", async () => {
+  const stored = new Map([[`esg:post:${user.id}`, JSON.stringify({ p_request_id: "r1", p_service_type: "Cleaning", p_title: "t", p_description: "d", p_amount: 40, p_price_type: "negotiable",
+    p_scheduled_at: null, p_location_text: "x", p_lat: null, p_lng: null, p_photo_url: null, p_publish: true, p_tag_ids: [], p_requested_helper_id: "helper-1" })]]);
+  const { app, calls } = await openRequestForm({ search: "", stored });
+  const tree = app.render();
+  assert.match(textOf(nodes(tree, (node) => node.type === "h1")[0]), /for @HelperOne/, "the helper is looked up from the saved request");
+  assert.equal(radios(tree).find((node) => textOf(node) === "Negotiable").props.selected, true);
+  button(tree, "Retry previous request").props.onClick(); await flush();
+  assert.equal(calls[0].payload.p_request_id, "r1");
+  assert.equal(calls[0].payload.p_requested_helper_id, "helper-1");
+});
+
+test("Post a Gig for a helper: database refusals (not offered, unavailable) are shown as-is and nothing is left pending", async () => {
+  const { app, fill, stored } = await openRequestForm({ rpc: async () => ({ data: null, error: { code: "22023", message: "That helper doesn't offer this category." } }) });
+  fill(app.render());
+  button(app.render(), "Send request").props.onClick(); await flush();
+  assert.match(textOf(nodes(app.render(), (node) => node.props.role === "alert")[0]), /That helper doesn't offer this category/);
+  assert.equal(stored.size, 0, "a validation refusal cannot have committed, so the form is editable again");
+  assert.ok(button(app.render(), "Send request"));
+});
+
+test("Post a Gig for a helper: bad links and ineligible helpers stop with a clear message and no form", async () => {
+  const cases = [
+    [{ search: "helper=../evil" }, /That helper link isn't valid/],
+    [{ helper: null }, /couldn't be found/],
+    [{ lookupError: new Error("offline") }, /Couldn't load that helper/],
+    [{ helper: { id: user.id, username: "Tester123", skills: ["Cleaning"] }, search: "helper=Tester123" }, /can't send a request to yourself/],
+    [{ helper: { id: "helper-1", username: "HelperOne", skills: ["Skydiving"] } }, /hasn't listed a service you can request/],
+  ];
+  for (const [options, message] of cases) {
+    const { app } = await openRequestForm(options);
+    const tree = app.render();
+    assert.match(textOf(nodes(tree, (node) => node.props.role === "alert")[0]), message);
+    assert.equal(nodes(tree, (node) => node.type === "input").length, 0, "no form to submit");
+    assert.ok(nodes(tree, (node) => node.type === "a" && node.props.href === "/post"), "public gig posting is still one click away");
+  }
+});
+
+test("Post a Gig without a helper is unchanged: public, fixed price, no helper id, Post Gig", async () => {
+  const { app, calls, fill } = await openRequestForm({ search: "" });
+  let tree = app.render();
+  assert.match(textOf(nodes(tree, (node) => node.type === "h1")[0]), /^Post a Gig$/);
+  assert.equal(nodes(tree, (node) => node.props.role === "note").length, 0);
+  assert.equal(radios(tree).filter((node) => ["Fixed", "Negotiable"].includes(textOf(node))).length, 0, "no pricing choice on a public gig");
+  assert.match(textOf(tree), /Pricing: Fixed/);
+  fill(tree);
+  button(app.render(), "Post Gig").props.onClick(); await flush();
+  assert.equal(calls[0].payload.p_price_type, "fixed");
+  assert.equal("p_requested_helper_id" in calls[0].payload, false, "never sent for a public gig");
+});
+
+// ---- the requested helper's and the poster's gig page ----
+async function openRequest({ asUser = "helper-1", gig = {}, claims = {}, pending = [], rpcError = null, confirm = true } = {}) {
+  const fields = { id: "gig-1", poster_id: "poster-1", requested_helper_id: "helper-1", selected_provider_id: null, status: "active", price_type: "fixed", title: "Rake the yard",
+    description: "Leaves", service_type: "Cleaning", photo_url: null, amount: 40, agreed_amount: null, location_text: "Kävlinge", scheduled_at: null, start_requested_at: null,
+    incomplete_choice_phase: false, amount_paid: null, amount_received: null, gig_tags: [], ...gig };
+  const people = [{ id: "poster-1", username: "customer1" }, { id: "helper-1", username: "helper1" }];
+  const client = fakeDb((query, single) => {
+    if (query.table === "gigs") return { data: fields, error: null };
+    if (query.table === "public_profiles") return { data: people.filter((row) => (query.in.id ?? []).includes(row.id)), error: null };
+    if (query.table === "claims" && query.eq.provider_id) return { data: claims[query.eq.provider_id] ?? null, error: null };
+    if (query.table === "claims") return { data: pending, error: null };
+    return { data: single ? null : [], error: null };
+  });
+  const rpcs = [];
+  client.rpc = async (name, args) => { rpcs.push([name, JSON.parse(JSON.stringify(args))]); return { error: rpcError }; };
+  const confirms = [];
+  const app = await component("src/app/gigs/[id]/page.tsx", "GigDetails", {
+    client, globals: { window: { confirm: (message) => { confirms.push(message); return confirm; }, location: { hash: "" } }, document: { getElementById: () => null } },
+    mocks: { "@/components/ChatPanel": { default: "chat-panel" } },
+  });
+  app.auth.user = { id: asUser };
+  app.render({ id: "gig-1" }); await flush();
+  return { app, rpcs, confirms, tree: app.render({ id: "gig-1" }), again: () => app.render({ id: "gig-1" }) };
+}
+const buttonText = (tree, label) => nodes(tree, (node) => node.type === "button" && textOf(node) === label)[0];
+
+test("The requested helper sees the request with Accept and Decline (fixed price: no counteroffer), and Accept uses accept_gig_request", async () => {
+  const { tree, rpcs, confirms } = await openRequest();
+  const panel = nodes(tree, (node) => node.props["aria-label"] === "Request for you")[0];
+  assert.ok(panel, "the panel the notification links to (#request)");
+  assert.equal(panel.props.id, "request");
+  assert.match(textOf(panel), /@customer1 sent you a request/);
+  assert.match(textOf(panel), /Fixed price: 40 CAD/);
+  assert.equal(nodes(tree, (node) => node.type === "form").length, 0, "a fixed-price request has no counteroffer");
+  assert.match(textOf(tree), /Private request/);
+  await buttonText(panel, "Accept").props.onClick();
+  assert.deepEqual(rpcs, [["accept_gig_request", { p_gig_id: "gig-1" }]]);
+  assert.deepEqual(confirms, [], "accepting needs no extra dialog");
+});
+
+test("Decline asks first, then uses decline_gig_request; cancelling the dialog sends nothing", async () => {
+  const declined = await openRequest();
+  await buttonText(declined.tree, "Decline").props.onClick();
+  assert.deepEqual(declined.rpcs, [["decline_gig_request", { p_gig_id: "gig-1" }]]);
+  assert.equal(declined.confirms.length, 1);
+  const kept = await openRequest({ confirm: false });
+  await buttonText(kept.tree, "Decline").props.onClick();
+  assert.deepEqual(kept.rpcs, []);
+});
+
+test("A negotiable request also offers a counteroffer through the existing offer RPC", async () => {
+  const { tree, rpcs, app } = await openRequest({ gig: { price_type: "negotiable" } });
+  const form = nodes(tree, (node) => node.type === "form" && node.props["aria-label"] === "Counteroffer")[0];
+  assert.ok(form, "counteroffer form");
+  assert.match(textOf(nodes(tree, (node) => node.props["aria-label"] === "Request for you")[0]), /Negotiable: 40 CAD.*counteroffer/);
+  nodes(form, (node) => node.type === "input")[0].props.onChange({ target: { value: "55" } });
+  await nodes(app.render({ id: "gig-1" }), (node) => node.type === "form")[0].props.onSubmit({ preventDefault() {} });
+  assert.deepEqual(rpcs, [["create_claim", { p_gig_id: "gig-1", p_offer_amount: 55, p_message: null }]]);
+  assert.match(textOf(form), /Send counteroffer/);
+});
+
+test("After a counteroffer the helper can still accept the posted price or decline; after declining the request is closed to them", async () => {
+  const countered = await openRequest({ gig: { price_type: "negotiable" }, claims: { "helper-1": { id: "c", state: "pending", offer_amount: 55, provider_id: "helper-1" } } });
+  assert.ok(nodes(countered.tree, (node) => node.props["aria-label"] === "Request for you").length === 1);
+  assert.ok(buttonText(countered.tree, "Accept") && buttonText(countered.tree, "Decline"));
+  assert.equal(nodes(countered.tree, (node) => node.type === "form").length, 0, "one counteroffer at a time");
+  const declined = await openRequest({ claims: { "helper-1": { id: "c", state: "withdrawn", provider_id: "helper-1" } } });
+  assert.equal(nodes(declined.tree, (node) => node.props["aria-label"] === "Request for you").length, 0);
+  assert.ok(nodes(declined.tree, (node) => /You declined this request/.test(textOf(node))).length > 0);
+  assert.equal(nodes(declined.tree, (node) => node.type === "form").length, 0);
+});
+
+test("Requests that are no longer open say so (cancelled, closed) and a refused action shows the server's reason", async () => {
+  const cancelled = await openRequest({ gig: { status: "cancelled" } });
+  assert.match(textOf(cancelled.tree), /This request was cancelled/);
+  assert.equal(nodes(cancelled.tree, (node) => node.props["aria-label"] === "Request for you").length, 0);
+  const disputed = await openRequest({ gig: { status: "disputed" } });
+  assert.match(textOf(disputed.tree), /This request is no longer open/);
+  assert.equal(buttonText(disputed.tree, "Accept"), undefined);
+  const stale = await openRequest({ rpcError: { code: "P0001", message: "This request is no longer open." } });
+  await buttonText(stale.tree, "Accept").props.onClick();
+  assert.match(textOf(nodes(stale.again(), (node) => node.props.role === "alert")[0]), /This request is no longer open/);
+});
+
+test("Nobody but the requested helper gets Accept / Decline or an offer on a private request", async () => {
+  for (const asUser of ["stranger", "poster-1"]) {
+    const { tree } = await openRequest({ asUser });
+    assert.equal(nodes(tree, (node) => node.props["aria-label"] === "Request for you").length, 0, asUser);
+    assert.equal(buttonText(tree, "Accept"), undefined);
+    assert.equal(buttonText(tree, "Decline"), undefined);
+    assert.equal(nodes(tree, (node) => node.type === "form").length, 0, "no offer form");
+  }
+  const publicGig = await openRequest({ asUser: "stranger", gig: { requested_helper_id: null } });
+  assert.equal(nodes(publicGig.tree, (node) => node.type === "form" && node.props["aria-label"] === "Make an offer").length, 1, "public gigs still take offers");
+  assert.doesNotMatch(textOf(publicGig.tree), /Private request/);
+});
+
+test("The poster sees who the request went to, that it is private, and can post it publicly (one confirmed RPC)", async () => {
+  const { tree, rpcs, confirms } = await openRequest({ asUser: "poster-1" });
+  const panel = nodes(tree, (node) => node.props["aria-label"] === "Private request")[0];
+  assert.match(textOf(panel), /Private request to @helper1/);
+  assert.match(textOf(panel), /Waiting for @helper1 to respond.*accept or decline your price/);
+  assert.match(textOf(tree), /Sent privately to @helper1. No one else can see it/);
+  await buttonText(panel, "Post publicly instead").props.onClick();
+  assert.deepEqual(rpcs, [["reassign_gig_request", { p_gig_id: "gig-1", p_new_helper_id: null }]]);
+  assert.match(confirms[0], /Anyone nearby will be able to see it/, "the public step is never silent");
+  const declined = await openRequest({ asUser: "poster-1", claims: { "helper-1": { state: "withdrawn" } } });
+  assert.match(textOf(nodes(declined.tree, (node) => node.props["aria-label"] === "Private request")[0]), /@helper1 declined. Your request is still private/);
+  const negotiable = await openRequest({ asUser: "poster-1", gig: { price_type: "negotiable" } });
+  assert.match(textOf(negotiable.tree), /accept, decline or counteroffer/);
+  assert.match(textOf(negotiable.tree), /Negotiable/);
+  assert.match(textOf(negotiable.tree), /No counteroffer yet/);
+});
+
+test("A counteroffer reaches the poster as an ordinary proposal they can accept with the existing RPC", async () => {
+  const pending = [{ id: "c1", gig_id: "gig-1", provider_id: "helper-1", state: "pending", offer_amount: 55, message: null, created_at: "2026-10-01T10:00:00Z" }];
+  const { tree, rpcs } = await openRequest({ asUser: "poster-1", gig: { price_type: "negotiable" }, claims: { "helper-1": { state: "pending" } }, pending });
+  assert.match(textOf(nodes(tree, (node) => node.props["aria-label"] === "Private request")[0]), /counteroffer below/);
+  await buttonText(nodes(tree, (node) => node.props.id === "proposals")[0], "Accept offer").props.onClick();
+  assert.deepEqual(rpcs, [["select_provider", { p_gig_id: "gig-1", p_claim_id: "c1" }]]);
+});
+
+test("A draft request is sent from the gig page with the existing publish RPC", async () => {
+  const { tree, rpcs } = await openRequest({ asUser: "poster-1", gig: { status: "draft" } });
+  assert.match(textOf(tree), /This request is a draft/);
+  assert.equal(buttonText(tree, "Publish gig"), undefined, "worded as sending, not publishing");
+  await buttonText(tree, "Send request").props.onClick();
+  assert.deepEqual(rpcs, [["publish_gig", { p_gig_id: "gig-1" }]]);
+});
+
+test("After the helper accepts, the ordinary gig lifecycle continues: START, chat, address, completion and payment all use the existing sections", async () => {
+  const accepted = { poster_id: "poster-1", requested_helper_id: "helper-1", selected_provider_id: "helper-1", agreed_amount: 40 };
+  const asHelper = await openRequest({ gig: accepted, claims: { "helper-1": { state: "selected" } } });
+  assert.match(textOf(asHelper.tree), /You accepted this request. Press START/);
+  assert.ok(buttonText(asHelper.tree, "START"));
+  assert.ok(nodes(asHelper.tree, (node) => node.type === "chat-panel").length === 1, "the existing gig chat");
+  assert.equal(nodes(asHelper.tree, (node) => node.props["aria-label"] === "Request for you").length, 0, "no longer a pending request");
+  await buttonText(asHelper.tree, "START").props.onClick();
+  assert.deepEqual(asHelper.rpcs, [["request_start", { p_gig_id: "gig-1" }]]);
+
+  const asPoster = await openRequest({ asUser: "poster-1", gig: { ...accepted, start_requested_at: "2026-10-02T10:00:00Z" } });
+  await buttonText(asPoster.tree, "ACCEPT START — LET'S GO").props.onClick();
+  assert.deepEqual(asPoster.rpcs, [["approve_start", { p_gig_id: "gig-1" }]]);
+
+  const inProgress = await openRequest({ asUser: "poster-1", gig: { ...accepted, status: "in_progress" } });
+  await buttonText(inProgress.tree, "COMPLETE").props.onClick();
+  assert.equal(inProgress.rpcs[0][0], "submit_completion");
+  const paying = await openRequest({ gig: { ...accepted, status: "awaiting_payment" } });
+  assert.match(textOf(paying.tree), /Enter Amount Received/);
+  const done = await openRequest({ asUser: "poster-1", gig: { ...accepted, status: "completed" } });
+  assert.ok(buttonText(done.tree, "Skip"), "feedback step");
+  assert.equal(nodes(done.tree, (node) => node.props["aria-label"] === "Private request").length, 0, "the poster's request panel disappears once a helper is assigned");
+});
+
+// ---- My Gigs and notifications ----
+test("My Gigs (helper side) lists an unanswered request addressed to the helper under 'Requests for you', before proposals", () => {
+  const { helperSection, helperBadge, HELPER_SECTIONS } = myGigsLib;
+  const request = { status: "active", selected_provider_id: null, requested_helper_id: "me" };
+  assert.equal(HELPER_SECTIONS[0].key, "requests");
+  assert.equal(helperSection(request, null, "me"), "requests");
+  assert.deepEqual({ ...helperBadge("requests", request, null) }, { label: "New request", tone: "pending" });
+  assert.equal(helperSection(request, "pending", "me"), "proposals", "a counteroffer is an ordinary proposal");
+  assert.equal(helperSection(request, "withdrawn", "me"), "closed");
+  assert.equal(helperBadge("closed", request, "withdrawn").label, "Declined");
+  assert.equal(helperBadge("closed", { ...request, requested_helper_id: null }, "withdrawn").label, "Withdrawn", "public gigs keep their wording");
+  assert.equal(helperSection({ ...request, requested_helper_id: "someone-else" }, null, "me"), "closed", "a request for another helper is never listed");
+  assert.equal(helperSection({ status: "active", selected_provider_id: null }, null, "me"), "closed", "public gigs without a claim are unchanged");
+  assert.equal(helperSection({ ...request, selected_provider_id: "me", status: "in_progress" }, "selected", "me"), "in_progress", "after accepting, the normal sections");
+});
+
+test("My Gigs fetches gigs addressed to the helper (no claim needed) and marks the poster's private requests", async () => {
+  const queries = [];
+  const request = myGig("g-req", { poster_id: "c1", requested_helper_id: user.id, price_type: "negotiable" });
+  const mine = myGig("g-mine", { requested_helper_id: "h1" });
+  const client = fakeDb((query) => {
+    queries.push(query);
+    if (query.table === "gigs" && query.eq.poster_id) return { data: [mine], error: null };
+    if (query.table === "gigs" && query.or) return { data: [request], error: null };
+    if (query.table === "public_profiles") return { data: [{ id: "h1", username: "helper1" }, { id: "c1", username: "customer1" }].filter((row) => query.in.id.includes(row.id)), error: null };
+    return { data: [], error: null };
+  });
+  const app = await component("src/app/my-gigs/page.tsx", "MyGigsInner", { client });
+  app.render(); await flush();
+  const posted = app.render();
+  assert.match(textOf(sectionNamed(posted, "Open")), /Private request to @helper1/);
+  assert.match(queries.find((query) => query.or).or, new RegExp(`requested_helper_id\\.eq\\.${user.id}`));
+  nodes(posted, (node) => node.props.role === "tab")[1].props.onClick();
+  const helping = app.render();
+  assert.deepEqual(sectionLabels(helping), ["Requests for you"]);
+  const text = textOf(sectionNamed(helping, "Requests for you"));
+  assert.match(text, /Request from @customer1/);
+  assert.match(text, /Offered: 50 CAD · Negotiable/);
+  assert.match(text, /New request/);
+});
+
+test("A request notification opens the request panel; other notifications still open their gig or proposals", async () => {
+  const bell = await loadLib("src/components/NotificationsBell.tsx", {
+    react: {}, "next/navigation": {}, "@/lib/supabase/client": {}, "@/lib/auth-context": {}, "react/jsx-runtime": { jsx() {}, jsxs() {} },
+  });
+  assert.equal(bell.notificationHref({ gig_id: "g1", type: "gig_request" }), "/gigs/g1#request");
+  assert.equal(bell.notificationHref({ gig_id: "g1", type: "claim_received" }), "/gigs/g1#proposals");
+  for (const type of ["request_accepted", "request_declined", "request_withdrawn", "selected"]) assert.equal(bell.notificationHref({ gig_id: "g1", type }), "/gigs/g1");
+});
+
+
+// ---- /location: postcode, neighborhood, map pin ----
+async function openLocationPage({ lookup, reverse, geolocation } = {}) {
+  const locations = [];
+  const app = await component("src/app/location/page.tsx", "LocationEntryInner", {
+    storage: { setItem: (_key, value) => locations.push(JSON.parse(value)) },
+    globals: { setTimeout: (fn) => { Promise.resolve().then(fn); return 1; }, clearTimeout() {}, navigator: { geolocation } },
+    mocks: {
+      "@/lib/area-lookup": { resolveAreaQuery: lookup ?? (async () => ({ kind: "none" })) },
+      "@/lib/location": { LOCATION_KEY: "esg:general-area", reverseGeocodeGeneralArea: reverse ?? (async () => null) },
+      "next/navigation": { useRouter: () => ({ push() {} }) },
+    },
+  });
+  app.render();
+  const type = async (value) => { nodes(app.render(), (node) => node.type === "input")[0].props.onChange({ target: { value } }); app.render(); await flush(); await flush(); return app.render(); };
+  const mapOf = (tree) => nodes(tree, (node) => node.type === "map-picker")[0];
+  return { app, locations, type, mapOf };
+}
+const singleArea = (areaLabel, lat, lng) => async () => ({ kind: "single", area: { label: areaLabel, areaLabel, lat, lng } });
+
+test("/location: a Swedish postcode resolves to a place and a map pin, and Continue saves exactly that place", async () => {
+  const { locations, type, mapOf } = await openLocationPage({ lookup: singleArea("244 31 Kävlinge, Skåne, Sweden", 55.79, 13.12) });
+  const tree = await type("244 31");
+  assert.deepEqual([mapOf(tree).props.lat, mapOf(tree).props.lng], [55.79, 13.12], "the map appears with the pin on the postcode");
+  assert.match(textOf(nodes(tree, (node) => node.props.role === "status").at(-1)), /244 31 Kävlinge, Skåne, Sweden — approximate area/);
+  button(tree, "Continue").props.onClick();
+  assert.deepEqual(locations, [{ text: "244 31 Kävlinge, Skåne, Sweden", lat: 55.79, lng: 13.12 }]);
+});
+
+test("/location: Continue waits for a postcode to resolve, and a postcode that does not exist says so", async () => {
+  const slow = await openLocationPage({ lookup: () => new Promise(() => {}) });
+  let tree = await slow.type("24431");
+  assert.equal(button(tree, "Continue").props.disabled, true, "no Continue while the postcode is still being looked up");
+  const none = await openLocationPage({ lookup: async () => ({ kind: "none" }) });
+  tree = await none.type("00000");
+  assert.match(textOf(nodes(tree, (node) => node.props.role === "alert")[0]), /Couldn't find that postcode/);
+  assert.equal(none.mapOf(tree), undefined, "no map for a place that was not found");
+  assert.equal(none.locations.length, 0);
+});
+
+test("/location: an unavailable geocoder is reported, never saved as a place, and neighborhoods can still be entered by hand", async () => {
+  const down = await openLocationPage({ lookup: async () => { throw new Error("offline"); } });
+  let tree = await down.type("24431");
+  assert.match(textOf(nodes(tree, (node) => node.props.role === "alert")[0]), /Couldn't look up that postcode right now/);
+  assert.equal(down.locations.length, 0);
+  const hand = await openLocationPage({ lookup: async () => { throw new Error("offline"); } });
+  tree = await hand.type("Södermalm");
+  assert.match(textOf(nodes(tree, (node) => node.props.role === "alert")[0]), /You can still continue with what you typed/);
+  button(tree, "Continue").props.onClick();
+  assert.deepEqual(hand.locations, [{ text: "Södermalm" }], "typed text alone is enough; no invented coordinates");
+});
+
+test("/location: an ambiguous postcode or a neighborhood search offers choices, and picking one drops the pin there", async () => {
+  const choices = [
+    { label: "Crimora, VA 24431", areaLabel: "Crimora, VA 24431", lat: 38.15, lng: -78.87 },
+    { label: "244 31 Kävlinge", areaLabel: "244 31 Kävlinge, Skåne, Sweden", lat: 55.79, lng: 13.12 },
+  ];
+  const { locations, type, app, mapOf } = await openLocationPage({ lookup: async () => ({ kind: "choices", choices }) });
+  let tree = await type("24431");
+  const list = nodes(tree, (node) => node.props["aria-label"] === "Matching areas")[0];
+  assert.deepEqual(nodes(list, (node) => node.type === "button").map(textOf), ["Crimora, VA 24431", "244 31 Kävlinge, Skåne, Sweden"]);
+  assert.equal(button(tree, "Continue").props.disabled, true, "an ambiguous postcode must be chosen first");
+  assert.equal(mapOf(tree), undefined);
+  nodes(list, (node) => node.type === "button")[1].props.onClick();
+  tree = app.render();
+  assert.deepEqual([mapOf(tree).props.lat, mapOf(tree).props.lng], [55.79, 13.12]);
+  assert.equal(nodes(tree, (node) => node.props["aria-label"] === "Matching areas").length, 0, "the list closes once chosen");
+  button(tree, "Continue").props.onClick();
+  assert.deepEqual(locations, [{ text: "244 31 Kävlinge, Skåne, Sweden", lat: 55.79, lng: 13.12 }]);
+});
+
+test("/location: moving the pin changes the saved coordinates and label together (rounded), and a failed label lookup keeps the pin", async () => {
+  const labelled = await openLocationPage({ lookup: singleArea("Stockholm, Sweden", 59.33, 18.07), reverse: async (lat, lng) => { assert.deepEqual([lat, lng], [59.31, 18.06]); return "Södermalm, Stockholm"; } });
+  let tree = await labelled.type("Stockholm");
+  labelled.mapOf(tree).props.onPick({ lat: 59.31, lng: 18.06 });
+  tree = labelled.app.render();
+  assert.match(textOf(nodes(tree, (node) => node.props.role === "status").at(-1)), /Pinned location — approximate area/, "the text never describes the old place while the pin is elsewhere");
+  await flush(); await flush();
+  tree = labelled.app.render();
+  assert.deepEqual([labelled.mapOf(tree).props.lat, labelled.mapOf(tree).props.lng], [59.31, 18.06]);
+  assert.match(textOf(nodes(tree, (node) => node.props.role === "status").at(-1)), /Södermalm, Stockholm — approximate area/);
+  button(tree, "Continue").props.onClick();
+  assert.deepEqual(labelled.locations, [{ text: "Södermalm, Stockholm", lat: 59.31, lng: 18.06 }]);
+
+  const offline = await openLocationPage({ lookup: singleArea("Stockholm, Sweden", 59.33, 18.07), reverse: async () => { throw new Error("offline"); } });
+  tree = await offline.type("Stockholm");
+  offline.mapOf(tree).props.onPick({ lat: 59.4, lng: 18.1 });
+  await flush(); await flush();
+  tree = offline.app.render();
+  button(tree, "Continue").props.onClick();
+  assert.deepEqual(offline.locations, [{ text: "Pinned location", lat: 59.4, lng: 18.1 }]);
+});
+
+test("/location: current location shows the pin without re-searching its own label, and a denial leaves manual entry working", async () => {
+  const searches = [];
+  const granted = await openLocationPage({
+    lookup: async (text) => { searches.push(text); return { kind: "none" }; },
+    geolocation: { getCurrentPosition: (ok) => ok({ coords: { latitude: 59.329323, longitude: 18.068581 } }) },
+    reverse: async () => "Stockholm, Sweden",
+  });
+  button(granted.app.render(), "📍 Use My Location").props.onClick();
+  await flush(); await flush();
+  granted.app.render(); await flush(); await flush();
+  let tree = granted.app.render();
+  assert.deepEqual([granted.mapOf(tree).props.lat, granted.mapOf(tree).props.lng], [59.33, 18.07], "rounded coordinates on the map");
+  assert.equal(nodes(tree, (node) => node.type === "input")[0].props.value, "Stockholm, Sweden");
+  assert.deepEqual(searches, [], "the label the page wrote itself is not searched again");
+  const denied = await openLocationPage({ geolocation: { getCurrentPosition: (_ok, fail) => fail() } });
+  button(denied.app.render(), "📍 Use My Location").props.onClick();
+  tree = denied.app.render();
+  assert.match(textOf(nodes(tree, (node) => node.props.role === "alert")[0]), /Location permission denied/);
+  tree = await denied.type("Lund");
+  button(tree, "Continue").props.onClick();
+  assert.deepEqual(denied.locations, [{ text: "Lund" }]);
 });

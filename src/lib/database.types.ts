@@ -71,6 +71,8 @@ export interface Gig {
   // Set server-side from the accepted offer when a helper is selected; `amount` stays the posted budget.
   agreed_amount: number | null;
   price_type: PriceType;
+  // Set when the gig is a private request to one helper (migration 0019); null for every public gig.
+  requested_helper_id: string | null;
   scheduled_at: string | null;
   location_text: string | null;
   lat: number | null;
@@ -154,9 +156,12 @@ export interface Database {
     Functions: {
       ensure_profile: { Args: Record<string, never>; Returns: Profile };
       save_onboarding: { Args: { p_username: string; p_photo_url: string | null; p_location_text: string; p_lat: number | null; p_lng: number | null; p_skills: string[]; p_services: string[] }; Returns: Profile };
-      create_gig: { Args: { p_request_id: string; p_service_type: string; p_title: string; p_description: string; p_amount: number; p_price_type: string; p_scheduled_at: string | null; p_location_text: string; p_lat: number | null; p_lng: number | null; p_photo_url?: string | null; p_publish?: boolean; p_tag_ids?: string[]; p_private_address?: string | null }; Returns: Gig };
+      create_gig: { Args: { p_request_id: string; p_service_type: string; p_title: string; p_description: string; p_amount: number; p_price_type: string; p_scheduled_at: string | null; p_location_text: string; p_lat: number | null; p_lng: number | null; p_photo_url?: string | null; p_publish?: boolean; p_tag_ids?: string[]; p_private_address?: string | null; p_requested_helper_id?: string | null }; Returns: Gig };
       create_claim: { Args: { p_gig_id: string; p_offer_amount?: number | null; p_message?: string | null }; Returns: Claim };
       withdraw_claim: { Args: { p_gig_id: string }; Returns: void };
+      accept_gig_request: { Args: { p_gig_id: string }; Returns: void };
+      decline_gig_request: { Args: { p_gig_id: string }; Returns: void };
+      reassign_gig_request: { Args: { p_gig_id: string; p_new_helper_id?: string | null }; Returns: void };
       select_provider: { Args: { p_gig_id: string; p_claim_id: string }; Returns: void };
       request_start: { Args: { p_gig_id: string }; Returns: void };
       approve_start: { Args: { p_gig_id: string }; Returns: void };

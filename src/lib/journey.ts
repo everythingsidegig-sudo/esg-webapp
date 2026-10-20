@@ -75,3 +75,66 @@ export function rpcActionError(error: unknown, fallback = "Couldn't complete tha
   if (value?.code === "429" || value?.code === "over_request_rate_limit") return "Too many requests. Please wait a few minutes and try again.";
   return fallback;
 }
+
+// ---------------------------------------------------------------------------
+// Signed-out helper browsing: a helper profile is the first thing that needs an
+// account. These helpers keep the intended destination narrow (a helper profile
+// path only), validated by safeNext, and short-lived.
+// ---------------------------------------------------------------------------
+const HELPER_USERNAME = /^[A-Za-z0-9_]{1,40}$/;
+
+export function isHelperProfileDestination(value: string | null | undefined): boolean {
+  if (!value) return false;
+  const safe = safeNext(value);
+  if (safe === "/") return false;
+  try {
+    const path = new URL(safe, "https://esg.invalid").pathname;
+    return /^\/profile\/[A-Za-z0-9_]{1,40}$/.test(path);
+  } catch { return false; }
+}
+
+// Link to a helper profile that also carries the search context (the category
+// the visitor was browsing) so the profile can lead back to the same results.
+export function helperProfileHref(username: string, category?: string | null): string | null {
+  if (!HELPER_USERNAME.test(username)) return null;
+  const context = category && category.length <= 60 ? `?from=find-helper&category=${encodeURIComponent(category)}` : "";
+  return `/profile/${username}${context}`;
+}
+
+export function helperUsernameFromDestination(value: string | null | undefined): string | null {
+  if (!isHelperProfileDestination(value)) return null;
+  return new URL(safeNext(value), "https://esg.invalid").pathname.slice("/profile/".length);
+}
+
+// Where "Continue browsing" goes: back to Find a Helper, keeping the category.
+export function findHelperHref(category?: string | null, allowed?: readonly string[]): string {
+  if (!category || category.length > 60 || (allowed && !allowed.includes(category))) return "/find-helper";
+  return `/find-helper?category=${encodeURIComponent(category)}`;
+}
+
+// Registration finishes in another tab (the verification email), so the
+// destination is kept in localStorage for a short time, then forgotten.
+export const AUTH_DESTINATION_KEY = "esg:post-auth-destination";
+const AUTH_DESTINATION_TTL_MS = 30 * 60 * 1000;
+type KeyValueStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+
+export function rememberAuthDestination(destination: string | null | undefined, storage?: KeyValueStorage, now = Date.now()): boolean {
+  if (!destination || !isHelperProfileDestination(destination)) return false;
+  try {
+    (storage ?? localStorage).setItem(AUTH_DESTINATION_KEY, JSON.stringify({ path: safeNext(destination), expires: now + AUTH_DESTINATION_TTL_MS }));
+    return true;
+  } catch { return false; }
+}
+
+// One-shot: returns the remembered destination (re-validated) and forgets it.
+export function takeAuthDestination(storage?: KeyValueStorage, now = Date.now()): string | null {
+  try {
+    const store = storage ?? localStorage;
+    const raw = store.getItem(AUTH_DESTINATION_KEY);
+    store.removeItem(AUTH_DESTINATION_KEY);
+    if (!raw) return null;
+    const value = JSON.parse(raw);
+    if (typeof value?.path !== "string" || typeof value.expires !== "number" || value.expires < now) return null;
+    return isHelperProfileDestination(value.path) ? safeNext(value.path) : null;
+  } catch { return null; }
+}

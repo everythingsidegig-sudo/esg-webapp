@@ -4,8 +4,9 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { friendlyError, safeNext, setupDestination } from "@/lib/journey";
+import { findHelperHref, friendlyError, helperUsernameFromDestination, rememberAuthDestination, safeNext, setupDestination } from "@/lib/journey";
 import { useAuth } from "@/lib/auth-context";
+import { rememberAreaForAuth } from "@/lib/location";
 
 function SignInInner() {
   const supabase = createClient();
@@ -14,6 +15,10 @@ function SignInInner() {
   const requestedNext = searchParams.get("next");
   const next = safeNext(requestedNext);
   const authenticatedDestination = requestedNext ? next : "/location";
+  // Arrived from a helper profile (the visitor clicked a helper while signed out): say so, and
+  // keep a way back to the list. The destination was validated by safeNext above.
+  const helperName = helperUsernameFromDestination(next);
+  const helperCategory = helperName ? new URL(next, "https://esg.invalid").searchParams.get("category") : null;
   const { user, loading } = useAuth();
   const pending = useRef(false);
 
@@ -77,6 +82,13 @@ function SignInInner() {
     <form onSubmit={handleSubmit} className="mx-auto max-w-md space-y-4">
       <h1 className="text-xl font-semibold">Sign In</h1>
 
+      {helperName && (
+        <p role="status" className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+          Sign in to view @{helperName}&apos;s profile.{" "}
+          <Link href={findHelperHref(helperCategory)} className="touch-link font-medium underline">Continue browsing</Link>
+        </p>
+      )}
+
       <div>
         <label htmlFor="signin-identifier" className="mb-1 block text-sm font-medium">Email or username</label>
         <input
@@ -130,7 +142,7 @@ function SignInInner() {
 
       <p className="flex flex-wrap items-center justify-center gap-x-1 text-sm text-neutral-500">
         New user?{" "}
-        <Link href={`/auth/sign-up?next=${encodeURIComponent(next)}`} className="touch-link font-medium text-emerald-700">
+        <Link href={`/auth/sign-up?next=${encodeURIComponent(next)}`} onClick={() => { rememberAuthDestination(next); rememberAreaForAuth(); }} className="touch-link font-medium text-emerald-700">
           Register
         </Link>
       </p>

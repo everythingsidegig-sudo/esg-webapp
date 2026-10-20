@@ -3,14 +3,20 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { lookupZipCode, usZipCode } from "@/lib/zip-location";
+import { postcodeCandidates } from "@/lib/zip-location";
+import { resolveAreaQuery } from "@/lib/area-lookup";
+import type { AreaMatch } from "@/lib/area-search";
 import AuthGuard from "@/components/AuthGuard";
+import MapPicker, { type MapPoint } from "@/components/MapPicker";
 import { approximateCoordinates } from "@/lib/journey";
 import { LOCATION_KEY, reverseGeocodeGeneralArea } from "@/lib/location";
 
 function LocationEntryInner() {
   const router = useRouter();
   const locationRequest = useRef(0);
+  // Text the page wrote itself (a current-location label) is already resolved; searching for it
+  // again would only offer choices for a place the visitor has already pinned.
+  const resolvedText = useRef<string | null>(null);
 
   const [locationText, setLocationText] = useState("");
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
@@ -18,33 +24,73 @@ function LocationEntryInner() {
   const [error, setError] = useState<string | null>(null);
   const [locating, setLocating] = useState(false);
 
+  // lookingUpZip: a postcode is being resolved (Continue waits for it). searching: a neighborhood or
+  // city search is running in the background (Continue never waits for that: typed text is enough).
   const [lookingUpZip, setLookingUpZip] = useState(false);
+  const [searching, setSearching] = useState(false);
   const [zipArea, setZipArea] = useState<string | null>(null);
+  const [choices, setChoices] = useState<AreaMatch[]>([]);
 
+  // A postcode (US ZIP, Swedish postcode, ...) or a neighborhood/city typed here resolves to a place
+  // and a map pin. One match selects itself; several are offered as choices. Failures say so and
+  // leave manual entry (and the current-location button) untouched.
   useEffect(() => {
-    const zip = usZipCode(locationText);
-    if (!zip) return;
+    const text = locationText.trim();
+    if (text.length < 3 || text === "Current location" || text === resolvedText.current) return;
+    const postcode = postcodeCandidates(text).length > 0;
     let active = true;
     const controller = new AbortController();
     const timer = setTimeout(async () => {
+      setSearching(true);
       try {
-        const area = await lookupZipCode(zip, controller.signal);
+        const result = await resolveAreaQuery(text, controller.signal);
         if (!active) return;
-        setCoords({ lat: area.lat, lng: area.lng });
-        setZipArea(area.label);
+        if (result.kind === "single") {
+          setCoords({ lat: result.area.lat, lng: result.area.lng });
+          setZipArea(result.area.areaLabel);
+          setChoices([]);
+        } else if (result.kind === "choices") {
+          setChoices(result.choices);
+        } else if (postcode) {
+          setCoords(null);
+          setError("Couldn't find that postcode. Check it, add the country, or use your current location.");
+        }
       } catch {
         if (active) {
           setCoords(null);
-          setError("Couldn't find that ZIP code. Check it and try again, or use your current location.");
+          setError(postcode
+            ? "Couldn't look up that postcode right now. Try again, or use your current location."
+            : "Couldn't search for that place right now. You can still continue with what you typed, or use your current location.");
         }
-      } finally { if (active) setLookingUpZip(false); }
+      } finally { if (active) { setLookingUpZip(false); setSearching(false); } }
     }, 450);
     return () => { active = false; clearTimeout(timer); controller.abort(); };
   }, [locationText]);
 
+  function chooseMatch(match: AreaMatch) {
+    setCoords({ lat: match.lat, lng: match.lng });
+    setZipArea(match.areaLabel);
+    setChoices([]);
+    setError(null);
+  }
+
+  // The pin moved on the map: its rounded point is now the saved position, and the label follows it
+  // (or says "Pinned location" if the reverse lookup is unavailable) so text and pin never disagree.
+  async function pinMoved(point: MapPoint) {
+    const request = ++locationRequest.current;
+    setCoords(point);
+    setZipArea("Pinned location");
+    try {
+      const label = await reverseGeocodeGeneralArea(point.lat, point.lng);
+      if (label && request === locationRequest.current) setZipArea(label);
+    } catch { /* keep "Pinned location": the coordinates are authoritative */ }
+  }
+
   function useMyLocation() {
     const request = ++locationRequest.current;
     setLookingUpZip(false);
+    setSearching(false);
+    setChoices([]);
     setZipArea(null);
     setLocationText("Current location");
     setCoords(null);
@@ -63,7 +109,7 @@ function LocationEntryInner() {
         setLocationText("Current location");
         try {
           const label = await reverseGeocodeGeneralArea(approximate.lat, approximate.lng);
-          if (label && request === locationRequest.current) setLocationText(label);
+          if (label && request === locationRequest.current) { resolvedText.current = label; setLocationText(label); }
         } catch {
           // Coordinates remain valid and authoritative when the optional label lookup fails.
         } finally { if (request === locationRequest.current) setLocating(false); }
@@ -79,7 +125,7 @@ function LocationEntryInner() {
 
   function continueJourney() {
     if (locating || lookingUpZip) return;
-    if (usZipCode(locationText) && !coords) {
+    if (postcodeCandidates(locationText).length > 0 && !coords) {
       setError("Wait for the ZIP code to appear on the map, or choose another location.");
       return;
     }
@@ -143,7 +189,7 @@ function LocationEntryInner() {
         <div className="h-px flex-1 bg-neutral-200" /> or <div className="h-px flex-1 bg-neutral-200" />
       </div>
 
-      <label htmlFor="general-area" className="mb-2 block text-sm font-semibold text-neutral-800">City, ZIP or neighborhood</label>
+      <label htmlFor="general-area" className="mb-2 block text-sm font-semibold text-neutral-800">ZIP or postal code, neighborhood or city</label>
       <input
         id="general-area"
         aria-label="General area"
@@ -154,24 +200,29 @@ function LocationEntryInner() {
           setLocating(false);
           setError(null);
           setZipArea(null);
-          setLookingUpZip(!!usZipCode(e.target.value));
+          setChoices([]);
+          setLookingUpZip(postcodeCandidates(e.target.value).length > 0);
+          resolvedText.current = null;
           setLocationText(e.target.value);
           setCoords(null);
         }}
-        placeholder="Enter a general area"
+        placeholder="ZIP or postal code, neighborhood or city"
         className="app-input"
       />
-      {lookingUpZip && <p role="status" className="mt-3 text-sm text-neutral-500">Finding ZIP code…</p>}
+      {(lookingUpZip || searching) && <p role="status" className="mt-3 text-sm text-neutral-500">{lookingUpZip ? "Finding postcode…" : "Searching…"}</p>}
+      {choices.length > 0 && (
+        <ul aria-label="Matching areas" className="mt-3 divide-y divide-neutral-100 overflow-hidden rounded-xl border border-neutral-200 bg-white">
+          {choices.map((match) => (
+            <li key={`${match.label}|${match.lat}|${match.lng}`}>
+              <button type="button" onClick={() => chooseMatch(match)} className="min-h-11 w-full px-3 py-2 text-left text-sm hover:bg-neutral-50">{match.areaLabel}</button>
+            </li>
+          ))}
+        </ul>
+      )}
       {coords && (
-        <div className="mt-4 overflow-hidden rounded-xl border border-neutral-200">
-          <iframe
-            title="Map of your selected area"
-            src={`https://www.openstreetmap.org/export/embed.html?bbox=${encodeURIComponent([coords.lng - 0.04, coords.lat - 0.025, coords.lng + 0.04, coords.lat + 0.025].join(","))}&layer=mapnik&marker=${encodeURIComponent(`${coords.lat},${coords.lng}`)}`}
-            className="h-64 w-full border-0"
-            loading="lazy"
-            referrerPolicy="no-referrer"
-          />
-          <p role="status" className="bg-white px-3 py-2 text-sm text-neutral-600">{zipArea ?? locationText} — approximate area</p>
+        <div className="mt-4 space-y-2">
+          <MapPicker lat={coords.lat} lng={coords.lng} onPick={(point) => { void pinMoved(point); }} />
+          <p role="status" className="rounded-lg bg-white px-3 py-2 text-sm text-neutral-600">{zipArea ?? locationText} — approximate area</p>
         </div>
       )}
       <p className="mt-2 text-xs leading-5 text-neutral-400">
@@ -184,7 +235,7 @@ function LocationEntryInner() {
 
       <button
         onClick={continueJourney}
-        disabled={locating || lookingUpZip || (!!usZipCode(locationText) && !coords)}
+        disabled={locating || lookingUpZip || (postcodeCandidates(locationText).length > 0 && !coords)}
         className="touch-control mt-7 w-full border border-emerald-700 bg-white px-4 font-semibold text-emerald-700 transition hover:bg-emerald-50 disabled:cursor-wait disabled:opacity-60"
       >
         Continue
