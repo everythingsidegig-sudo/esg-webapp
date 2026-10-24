@@ -55,7 +55,15 @@ export function friendlyError(error: unknown, fallback = "Something went wrong. 
   if (value?.code === "user_already_exists" || value?.code === "email_exists") return "This email may already have an account. Try signing in.";
   if (value?.code === "22023") return value.message ?? fallback;
   if (value?.code === "429" || value?.code === "over_email_send_rate_limit" || value?.code === "over_request_rate_limit") return "Too many requests. Please wait a few minutes and try again.";
-  if (value?.code === "42501") return "Please sign in again before continuing.";
+  // 42501 is Postgres' "insufficient privilege". Our own functions raise it as 'Authentication required'
+  // when there is no session (that is the only case that means "sign in again"); anything else --
+  // a table or column the role may not write, row-level security, 'Not authorized' -- is a permission
+  // problem, and asking a signed-in person to sign in again would only send them in circles.
+  if (value?.code === "42501") {
+    return /^authentication required\.?$/i.test(value.message ?? "")
+      ? "Please sign in again before continuing."
+      : "You don't have permission to make that change. If this keeps happening, contact support.";
+  }
   if (value?.code === "weak_password") return "Choose a stronger password. Your account's password rules may require more characters.";
   if (value?.code === "email_address_invalid") return "That email address isn't valid. Check it and try again.";
   if (value?.code === "user_banned") return "This account is no longer available.";

@@ -10,6 +10,7 @@ import * as journeyLib from "../src/lib/journey.ts";
 import * as areaSearchLib from "../src/lib/area-search.ts";
 import * as zipLocationLib from "../src/lib/zip-location.ts";
 import * as helperRequestLib from "../src/lib/helper-request.ts";
+import * as profileSaveLib from "../src/lib/profile-save.ts";
 import { safeNext } from "../src/lib/journey.ts";
 
 // location.ts has extension-less relative imports (./journey, ./geocoding) that
@@ -87,6 +88,7 @@ async function component(path, name, overrides = {}) {
     "@/lib/area-search": areaSearchLib,
     "@/lib/zip-location": zipLocationLib,
     "@/lib/helper-request": helperRequestLib,
+    "@/lib/profile-save": profileSaveLib,
     "@/lib/area-lookup": { resolveAreaQuery: async () => ({ kind: "none" }) },
     "@/components/AreaPicker": { default: "area-picker" },
     "@/components/MapPicker": { default: "map-picker" },
@@ -172,7 +174,7 @@ test("profile skills/services selections pass through to CategoryList, toggle in
 
   await nodes(tree, (node) => node.type === "form")[0].props.onSubmit({ preventDefault() {} });
   assert.deepEqual(JSON.parse(JSON.stringify(saved)), {
-    skills: ["Legacy skill", "Handyman"], services: [], skills_other_text: null, services_other_text: null,
+    skills: ["Legacy skill", "Handyman"], services: [],   // no OTHER text columns: neither changed
   });
   const refreshed = await component("src/app/profile/page.tsx", "ProfileEditor", { client });
   const refreshedTree = refreshed.render({ profile: { ...original, ...saved } });
@@ -315,7 +317,7 @@ test("Profile Save persists skill/service changes and specializations together, 
   assert.deepEqual(JSON.parse(JSON.stringify(rpcCalls[1].payload.p_tag_ids)).sort(), ["t1", "t3"], "remaining skill's specializations (existing + newly added) are saved");
   assert.ok(calls.indexOf(rpcCalls[1]) > profileUpdateIndex, "syncing the remaining skill happens after the profile update confirms it");
   assert.deepEqual(JSON.parse(JSON.stringify(calls[profileUpdateIndex].payload)), {
-    skills: ["Cleaning"], services: [], skills_other_text: null, services_other_text: null,
+    skills: ["Cleaning"], services: [],   // no OTHER text columns: neither changed
   });
 });
 
@@ -3774,4 +3776,127 @@ test("/location: current location shows the pin without re-searching its own lab
   tree = await denied.type("Lund");
   button(tree, "Continue").props.onClick();
   assert.deepEqual(denied.locations, [{ text: "Lund" }]);
+});
+
+// ===========================================================================
+// Profile save: the OTHER text columns are sent only when they change (migration 0020 grants them)
+// ===========================================================================
+test("profileUpdate: an ordinary save names only skills and services; the OTHER text columns are sent exactly when they change", () => {
+  const { profileUpdate, otherTextsChanged, otherTextFor } = profileSaveLib;
+  const draft = (fields) => ({ skills: ["Cleaning"], services: ["Handyman"], skillsOtherText: "", servicesOtherText: "", ...fields });
+  const none = { skills_other_text: null, services_other_text: null };
+  const keys = (update) => Object.keys(update).sort().join(",");
+
+  assert.equal(keys(profileUpdate(draft(), none)), "services,skills", "ordinary profile: nothing else is written");
+  assert.equal(keys(profileUpdate(draft({ skills: ["Cleaning", "Errands"] }), none)), "services,skills", "skills changed, text untouched");
+
+  // OTHER skills / services, newly chosen with their text.
+  const withSkill = profileUpdate(draft({ skills: ["Cleaning", "Other"], skillsOtherText: "  Piano tuning  " }), none);
+  assert.deepEqual({ ...withSkill }, { skills: ["Cleaning", "Other"], services: ["Handyman"], skills_other_text: "Piano tuning" }, "trimmed, and only the changed side is sent");
+  const withService = profileUpdate(draft({ services: ["Other"], servicesOtherText: "Dog walking" }), none);
+  assert.deepEqual({ ...withService }, { skills: ["Cleaning"], services: ["Other"], services_other_text: "Dog walking" });
+
+  // Existing values are preserved by omission, never overwritten with a blank.
+  const saved = { skills_other_text: "Piano tuning", services_other_text: "Dog walking" };
+  const kept = profileUpdate(draft({ skills: ["Cleaning", "Other"], services: ["Handyman", "Other"], skillsOtherText: "Piano tuning", servicesOtherText: "Dog walking" }), saved);
+  assert.equal(keys(kept), "services,skills", "both stored texts unchanged: neither column is in the payload");
+  const keptOneSide = profileUpdate(draft({ skills: ["Cleaning", "Other"], services: ["Handyman", "Other"], skillsOtherText: "Piano and organ tuning", servicesOtherText: "Dog walking" }), saved);
+  assert.equal(keptOneSide.skills_other_text, "Piano and organ tuning", "an edit to one text is never dropped");
+  assert.equal("services_other_text" in keptOneSide, false, "and the other stored text is left alone");
+
+  // Unticking OTHER clears its text (the database requires text exactly while OTHER is selected).
+  const cleared = profileUpdate(draft({ skills: ["Cleaning"], skillsOtherText: "Piano tuning" }), saved);
+  assert.equal(cleared.skills_other_text, null);
+  assert.equal("services_other_text" in cleared, true, "the services side is also reconciled: OTHER is not selected there");
+
+  // A draft left over from an unticked OTHER is not a change; empty and missing are the same.
+  assert.deepEqual({ ...otherTextsChanged(draft({ skillsOtherText: "left over" }), none) }, { skills: false, services: false });
+  assert.deepEqual({ ...otherTextsChanged(draft({ services: ["Other"] }), none) }, { skills: false, services: false }, "OTHER selected with no stored or typed text: unchanged");
+  assert.equal(otherTextFor(["Other"], "   "), null);
+  assert.equal(otherTextFor(["Cleaning"], "text"), null);
+});
+
+async function openProfileForSave({ profileFields = {}, updateResult = { error: null } } = {}) {
+  const updates = [];
+  const client = {
+    from: (table) => table === "profile_tags"
+      ? { select: () => ({ eq: async () => ({ data: [], error: null }) }) }
+      : { update: (payload) => { updates.push(JSON.parse(JSON.stringify(payload))); return { eq: () => ({ select: () => ({ single: async () => updateResult }) }) }; } },
+    rpc: async () => ({ data: null, error: null }),
+  };
+  const app = await component("src/app/profile/page.tsx", "ProfileEditor", { client });
+  const props = { profile: { ...profile, skills: ["Cleaning"], services: ["Other"], skills_other_text: null, services_other_text: "Dog walking", ...profileFields } };
+  app.render(props); await flush();
+  const submit = async () => { await nodes(app.render(props), (node) => node.type === "form")[0].props.onSubmit({ preventDefault() {} }); return app.render(props); };
+  return { app, props, updates, submit };
+}
+
+test("Profile Save: an ordinary skills change does not write, and so cannot overwrite, the OTHER text columns", async () => {
+  const { app, props, updates, submit } = await openProfileForSave();
+  toggleCategory(skillsList(app.render(props)), "Handyman");
+  await submit();
+  assert.deepEqual(updates, [{ skills: ["Cleaning", "Handyman"], services: ["Other"] }], "the stored OTHER service text is preserved by omission");
+});
+
+test("Profile Save: choosing OTHER and typing the text saves exactly that text, trimmed, for skills and for services", async () => {
+  const skill = await openProfileForSave({ profileFields: { services: ["Handyman"], services_other_text: null } });
+  toggleCategory(skillsList(skill.app.render(skill.props)), "Other");
+  skillsList(skill.app.render(skill.props)).props.setOtherText("  Piano tuning ");
+  const skillTree = await skill.submit();
+  assert.deepEqual(skill.updates, [{ skills: ["Cleaning", "Other"], services: ["Handyman"], skills_other_text: "Piano tuning" }]);
+  assert.equal(nodes(skillTree, (node) => node.props.role === "alert").length, 0);
+
+  const service = await openProfileForSave();
+  servicesList(service.app.render(service.props)).props.setOtherText("Dog and cat walking");
+  await service.submit();
+  assert.deepEqual(service.updates, [{ skills: ["Cleaning"], services: ["Other"], services_other_text: "Dog and cat walking" }], "an edit to the text alone is saved, not discarded");
+});
+
+test("Profile Save: unticking OTHER clears its stored text, and leftover typed text is not an unsaved change", async () => {
+  const { app, props, updates, submit } = await openProfileForSave();
+  const hint = () => textOf(nodes(app.render(props), (node) => node.type === "p" && /unsaved changes|No changes yet/.test(textOf(node)))[0]);
+  assert.equal(hint(), "No changes yet.");
+  toggleCategory(servicesList(app.render(props)), "Other");
+  assert.equal(hint(), "You have unsaved changes.");
+  await submit();
+  assert.deepEqual(updates, [{ skills: ["Cleaning"], services: [], services_other_text: null }], "the stored text is cleared with the selection");
+  // Typing text while OTHER is not selected must not enable the button.
+  const idle = await openProfileForSave({ profileFields: { services: ["Handyman"], services_other_text: null } });
+  servicesList(idle.app.render(idle.props)).props.setOtherText("typed but OTHER is not selected");
+  assert.equal(button(idle.app.render(idle.props), "Update profile").props.disabled, true);
+});
+
+test("Profile Save: OTHER without its text is still refused in the page, before anything is sent", async () => {
+  const { app, props, updates, submit } = await openProfileForSave({ profileFields: { services: ["Handyman"], services_other_text: null } });
+  toggleCategory(skillsList(app.render(props)), "Other");
+  const tree = await submit();
+  assert.deepEqual(updates, []);
+  assert.match(textOf(nodes(tree, (node) => node.props.role === "alert")[0]), /Specify your OTHER skill/);
+});
+
+test("Profile Save: a permission refusal is explained as a permission problem, not as 'sign in again'", async () => {
+  const denied = await openProfileForSave({ updateResult: { error: { code: "42501", message: "permission denied for table profiles" } } });
+  toggleCategory(skillsList(denied.app.render(denied.props)), "Handyman");
+  const tree = await denied.submit();
+  const alert = textOf(nodes(tree, (node) => node.props.role === "alert")[0]);
+  assert.match(alert, /don't have permission/);
+  assert.doesNotMatch(alert, /sign in/i);
+  assert.equal(nodes(tree, (node) => node.props.role === "status").length, 0, "no success message");
+  assert.match(textOf(nodes(tree, (node) => node.type === "p" && /unsaved changes/.test(textOf(node)))[0]), /unsaved changes/, "still unsaved");
+});
+
+test("friendlyError: 42501 is a permission message unless our own function says authentication is required; other mappings are unchanged", () => {
+  const { friendlyError, rpcActionError } = journeyLib;
+  assert.match(friendlyError({ code: "42501", message: "permission denied for table profiles" }), /don't have permission/);
+  assert.match(friendlyError({ code: "42501", message: "new row violates row-level security policy for table \"profiles\"" }), /don't have permission/);
+  assert.match(friendlyError({ code: "42501", message: "Not authorized" }), /don't have permission/);
+  assert.match(friendlyError({ code: "42501" }), /don't have permission/, "no message: still a permission problem");
+  assert.doesNotMatch(friendlyError({ code: "42501", message: "permission denied for table profiles" }), /sign in/i);
+  assert.match(friendlyError({ code: "42501", message: "Authentication required" }), /sign in again/, "a genuine missing session still asks to sign in");
+  assert.match(friendlyError({ code: "42501", message: "authentication required." }), /sign in again/);
+  assert.match(friendlyError({ code: "email_not_confirmed" }), /Verify your email/);
+  assert.match(friendlyError({ code: "invalid_credentials" }), /isn't right/);
+  assert.match(friendlyError({ code: "22023", message: "Pick a future date/time before posting." }), /future date/);
+  assert.equal(friendlyError({ code: "XX000" }, "fallback"), "fallback");
+  assert.match(rpcActionError({ code: "42501", message: "Not authorized" }), /sign in again/, "lifecycle RPC errors keep their existing wording (unchanged here)");
 });

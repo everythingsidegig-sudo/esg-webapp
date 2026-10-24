@@ -14,6 +14,7 @@ import { reverseGeocodeGeneralArea, clearGeneralAreaState } from "@/lib/location
 import { SPECIALIZATION_PROMPTS } from "@/lib/services";
 import { loadTagCatalog, MAX_PROFILE_TAGS } from "@/lib/tags";
 import { formatMoney } from "@/lib/money";
+import { otherTextsChanged, profileUpdate } from "@/lib/profile-save";
 import type { Profile as ProfileRow, Tag } from "@/lib/database.types";
 
 const ALL_SKILLS = "*";
@@ -58,10 +59,12 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
   // "Update profile" is only actionable once something differs from what's saved.
   // Username is fixed after account creation (ESG-AUTH-002 v0.5) and isn't editable here.
   const sameItems = (a: string[], b: string[]) => a.length === b.length && a.every((item) => b.includes(item));
+  // OTHER text only counts while OTHER is selected, so text left over from an unticked OTHER is not a change.
+  const otherChanged = otherTextsChanged({ skills, services, skillsOtherText, servicesOtherText }, profile);
   const dirty = !sameItems(skills, profile.skills)
     || !sameItems(services, profile.services)
-    || skillsOtherText !== (profile.skills_other_text ?? "")
-    || servicesOtherText !== (profile.services_other_text ?? "")
+    || otherChanged.skills
+    || otherChanged.services
     || (helperDataLoaded && skills.some((category) => !sameItems(specializationTags[category] ?? [], savedSpecializations[category] ?? [])));
 
   useEffect(() => {
@@ -211,11 +214,10 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
           if (clearError) throw clearError;
         }
       }
-      const { error: profileError } = await supabase.from("profiles").update({
-        skills, services,
-        skills_other_text: skills.includes("Other") ? skillsOtherText.trim() : null,
-        services_other_text: services.includes("Other") ? servicesOtherText.trim() : null,
-      }).eq("id", profile.id).select("id").single();
+      // The OTHER text columns are sent only when they changed (see lib/profile-save.ts).
+      const { error: profileError } = await supabase.from("profiles")
+        .update(profileUpdate({ skills, services, skillsOtherText, servicesOtherText }, profile))
+        .eq("id", profile.id).select("id").single();
       if (profileError) throw profileError;
       profileSaved = true;
       if (helperDataLoaded) {
