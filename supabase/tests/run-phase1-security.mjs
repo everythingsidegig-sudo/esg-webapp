@@ -4,7 +4,8 @@ import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
 const root = new URL("../", import.meta.url);
-const requests = process.argv.includes("--requests");
+const profileSave = process.argv.includes("--profile-save");
+const requests = process.argv.includes("--requests") || profileSave;
 // origin/main's migrations 0011-0018 (taxonomy, deletion eligibility, account settings,
 // registration rewrite, ...). They were never run by this harness before; --mainline
 // replays them on top of 0010 so later migrations are checked against the real baseline.
@@ -263,6 +264,16 @@ if (requests) {
   if (!/requested_helper_id = v_uid/.test(code)) throw new Error("delete_own_account must treat a requested helper as having marketplace history");
   console.log("PASS: helper-request migration scope (private requests hidden from the public, eligibility enforced in SQL, atomic locked RPCs, deletion-safe foreign key, address never in notifications)");
 }
+if (profileSave) {
+  const sql = await readFile(new URL("migrations/20240101000020_profile_column_update_grants.sql", root), "utf8");
+  const code = sql.replace(/--.*$/gm, "");
+  const grants = [...code.matchAll(/\b(grant|revoke)\b[^;]*;/gi)].map((entry) => entry[0].replace(/\s+/g, " ").trim());
+  if (grants.length !== 1 || grants[0] !== "grant update (phone, skills_other_text, services_other_text) on public.profiles to authenticated;") {
+    throw new Error(`The profile grant migration must grant UPDATE on exactly phone and the two OTHER text columns to authenticated and nothing else, found: ${grants}`);
+  }
+  if (/create (?:or replace )?(?:function|policy|trigger|table)|drop |alter /i.test(code)) throw new Error("The profile grant migration must not change functions, policies, triggers or tables");
+  console.log("PASS: profile grant migration scope (UPDATE on phone, skills_other_text and services_other_text for authenticated only; no policy, trigger or function change)");
+}
 if (!runtimePath) {
   console.log("Static verification only. Supply a PGlite dist/index.js path for SQL execution.");
   process.exit(0);
@@ -331,6 +342,7 @@ try {
       "migrations/20240101000018_profile_other_text_validation.sql",
     ] : []),
     ...(requests ? ["migrations/20240101000019_helper_requests.sql"] : []),
+    ...(profileSave ? ["migrations/20240101000020_profile_column_update_grants.sql"] : []),
     "tests/phase1_security.sql",
     ...(phase2a ? ["tests/phase2a_integrity.sql"] : []),
     ...(onboarding ? ["tests/onboarding_post_gig.sql"] : []),
@@ -341,19 +353,20 @@ try {
     ...(deletion ? ["tests/account_deletion.sql"] : []),
     ...(offers ? ["tests/offers_private_address.sql"] : []),
     ...(requests ? ["tests/helper_requests.sql"] : []),
+    ...(profileSave ? ["tests/profile_column_grants.sql"] : []),
   ]) {
     const sql = await readFile(new URL(file, root), "utf8");
     await db.exec(sql);
     if (file.startsWith("tests/")) {
       // Every assertion is an unconditional top-level SELECT. Successful SQL
       // execution means every call returned without raising its failure error.
-      const assertions = [...sql.matchAll(/^select pg_temp\.(?:assert|expect_denied|phase2_assert|phase2_expect_error|journey_assert|journey_error_any|journey_error|dw_assert|dw_denied|dw_error|gt_assert|gt_denied|gt_error|pt_assert|pt_denied|pt_error|hl_assert|hl_denied|hl_error|ad_assert|ad_error|of_assert|of_error|of_denied|rq_assert|rq_error|rq_denied)\(/gm)].length;
+      const assertions = [...sql.matchAll(/^select pg_temp\.(?:assert|expect_denied|phase2_assert|phase2_expect_error|journey_assert|journey_error_any|journey_error|dw_assert|dw_denied|dw_error|gt_assert|gt_denied|gt_error|pt_assert|pt_denied|pt_error|hl_assert|hl_denied|hl_error|ad_assert|ad_error|of_assert|of_error|of_denied|rq_assert|rq_error|rq_denied|po_assert|po_error|po_denied)\(/gm)].length;
       passed += assertions;
       console.log(`PASS: ${file}: ${assertions} assertions`);
     }
     console.log(`Executed ${file}`);
   }
-  const cleanup = await db.query("select to_regclass('pg_temp.security_fixture') is null and to_regclass('pg_temp.phase2_fixture') is null and to_regclass('pg_temp.journey_fixture') is null and to_regclass('pg_temp.dw_fixture') is null and to_regclass('pg_temp.gt_fixture') is null and to_regclass('pg_temp.pt_fixture') is null and to_regclass('pg_temp.hl_fixture') is null and to_regclass('pg_temp.ad_fixture') is null and to_regclass('pg_temp.of_fixture') is null and to_regclass('pg_temp.rq_fixture') is null as clean");
+  const cleanup = await db.query("select to_regclass('pg_temp.security_fixture') is null and to_regclass('pg_temp.phase2_fixture') is null and to_regclass('pg_temp.journey_fixture') is null and to_regclass('pg_temp.dw_fixture') is null and to_regclass('pg_temp.gt_fixture') is null and to_regclass('pg_temp.pt_fixture') is null and to_regclass('pg_temp.hl_fixture') is null and to_regclass('pg_temp.ad_fixture') is null and to_regclass('pg_temp.of_fixture') is null and to_regclass('pg_temp.rq_fixture') is null and to_regclass('pg_temp.po_fixture') is null as clean");
   if (!cleanup.rows[0].clean) throw new Error("SQL fixtures did not roll back");
   console.log(`PASS: ${passed} security assertions in isolated PostgreSQL/WASM`);
   console.log("Hosted Supabase, PostgREST, Auth, Storage and Realtime integration remain unverified.");
