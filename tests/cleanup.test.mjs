@@ -11,6 +11,7 @@ import * as areaSearchLib from "../src/lib/area-search.ts";
 import * as zipLocationLib from "../src/lib/zip-location.ts";
 import * as helperRequestLib from "../src/lib/helper-request.ts";
 import * as profileSaveLib from "../src/lib/profile-save.ts";
+import * as negotiationLib from "../src/lib/negotiation.ts";
 import { safeNext } from "../src/lib/journey.ts";
 
 // location.ts has extension-less relative imports (./journey, ./geocoding) that
@@ -89,6 +90,7 @@ async function component(path, name, overrides = {}) {
     "@/lib/zip-location": zipLocationLib,
     "@/lib/helper-request": helperRequestLib,
     "@/lib/profile-save": profileSaveLib,
+    "@/lib/negotiation": negotiationLib,
     "@/lib/area-lookup": { resolveAreaQuery: async () => ({ kind: "none" }) },
     "@/components/AreaPicker": { default: "area-picker" },
     "@/components/MapPicker": { default: "map-picker" },
@@ -1546,7 +1548,8 @@ test("Chat opening marks the other party's messages read and tells the header ba
   const rows = [{ id: "m1", gig_id: "g1", sender_id: "other", body: "Hi", created_at: "2026-10-01T10:00:00Z", read_at: null }];
   const query = { select() { return query; }, eq() { return query; }, order() { return { then: (ok) => Promise.resolve({ data: rows }).then(ok) }; },
     update(payload) { updates.push(payload); const chain = { eq() { return chain; }, neq() { return chain; }, is() { return Promise.resolve({ error: null }); } }; return chain; } };
-  const client = { from: () => query, channel() { const c = { on() { return c; }, subscribe() { return c; } }; return c; }, removeChannel() {} };
+  const noProposals = { select() { return noProposals; }, eq() { return noProposals; }, order() { return { then: (ok) => Promise.resolve({ data: [] }).then(ok) }; } };
+  const client = { from: (table) => (table === "price_proposals" ? noProposals : query), channel() { const c = { on() { return c; }, subscribe() { return c; } }; return c; }, removeChannel() {} };
   const app = await component("src/components/ChatPanel.tsx", "ChatPanel", {
     client, globals: { Event: class { constructor(type) { this.type = type; } }, window: { dispatchEvent: (event) => events.push(event.type) } },
   });
@@ -3899,4 +3902,339 @@ test("friendlyError: 42501 is a permission message unless our own function says 
   assert.match(friendlyError({ code: "22023", message: "Pick a future date/time before posting." }), /future date/);
   assert.equal(friendlyError({ code: "XX000" }, "fallback"), "fallback");
   assert.match(rpcActionError({ code: "42501", message: "Not authorized" }), /sign in again/, "lifecycle RPC errors keep their existing wording (unchanged here)");
+});
+
+// ---- Gig page: full-width link buttons must center their text ----
+// .touch-link is `display: inline-flex` and sits outside Tailwind's layers, so it beats `block` and
+// makes `text-center` a no-op: the label hugged the left edge of its box. Link-styled buttons that
+// fill their row use an explicit flex centering instead.
+test("Gig page: the Message helper link and the proposal's View profile link center their text and keep a touch-size target", async () => {
+  const accepted = await openGig({ poster_id: user.id, selected_provider_id: "helper-1" });
+  const message = nodes(accepted.tree, (node) => node.type === "a" && node.props.href === "#messages")[0];
+  assert.ok(message, "the Message link is there");
+  for (const cls of [message.props.className]) {
+    assert.match(cls, /\bflex\b/);
+    assert.match(cls, /\bjustify-center\b/);
+    assert.match(cls, /\bitems-center\b/);
+    assert.match(cls, /\bmin-h-11\b/, "44px touch target");
+    assert.match(cls, /\bpx-4\b/, "horizontal padding so the label never touches the border");
+    assert.doesNotMatch(cls, /\btouch-link\b/, "touch-link (inline-flex) overrides block and text-center");
+  }
+  const claims = [{ id: "c1", gig_id: "gig-1", provider_id: "helper-1", state: "pending", offer_amount: 40, created_at: "2026-10-01T10:00:00Z" }];
+  const open = await openGig({ poster_id: user.id }, { claims });
+  const profileLink = nodes(open.tree, (node) => node.type === "a" && /View profile/.test(textOf(node)));
+  assert.ok(profileLink.length > 0, "the proposal shows a View profile link");
+  for (const link of profileLink) {
+    assert.match(link.props.className, /\bjustify-center\b/);
+    assert.doesNotMatch(link.props.className, /\btouch-link\b/);
+  }
+});
+
+// ---- Chat panel presentation ----
+async function openChat({ rows = [], readOnly = false, proposals = [], negotiation, rpcError = null, onPriceChanged, proposalsError = null } = {}) {
+  const inserts = [], rpcs = [], current = { proposals: proposals.map((proposal) => ({ ...proposal })) };
+  const table = (data, error = null) => {
+    const query = {
+      select() { return query; }, eq() { return query; },
+      order() { return { then: (ok) => Promise.resolve(error ? { data: null, error } : { data: data() }).then(ok) }; },
+      update() { const chain = { eq() { return chain; }, neq() { return chain; }, is() { return Promise.resolve({ error: null }); } }; return chain; },
+      insert: async (payload) => { inserts.push(JSON.parse(JSON.stringify(payload))); return { error: null }; },
+    };
+    return query;
+  };
+  const messages = table(() => rows), proposalTable = table(() => current.proposals, proposalsError);
+  const client = {
+    from: (name) => (name === "price_proposals" ? proposalTable : messages),
+    rpc: async (name, args) => { rpcs.push([name, JSON.parse(JSON.stringify(args))]); return { data: null, error: rpcError }; },
+    channel() { const c = { on() { return c; }, subscribe() { return c; } }; return c; }, removeChannel() {},
+  };
+  const app = await component("src/components/ChatPanel.tsx", "ChatPanel", {
+    client, globals: { Event: class { constructor(type) { this.type = type; } }, window: { dispatchEvent() {} } },
+  });
+  const props = { gigId: "g1", currentUserId: "me", readOnly, negotiation, otherName: "@helper1", onPriceChanged };
+  app.render(props); await flush();
+  return { app, props, inserts, rpcs, current, tree: app.render(props) };
+}
+const chatBubbles = (tree) => nodes(tree, (node) => node.type === "div" && typeof node.props.className === "string" && /\brounded-2xl\b/.test(node.props.className) && /\bpx-3\.5\b/.test(node.props.className));
+const chatStamps = (tree) => nodes(tree, (node) => node.type === "p" && /text-\[11px\]/.test(node.props.className ?? "")).map(textOf);
+
+test("Chat: bubbles are grouped per sender, dated, timed, and only your last read message says Seen", async () => {
+  const at = (daysAgo, hh, mm) => { const d = new Date(); d.setDate(d.getDate() - daysAgo); d.setHours(hh, mm, 0, 0); return d.toISOString(); };
+  const rows = [
+    { id: "1", sender_id: "them", body: "I accept", created_at: at(1, 9, 0), read_at: at(1, 9, 1) },
+    { id: "2", sender_id: "them", body: "Hello", created_at: at(0, 10, 0), read_at: at(0, 10, 1) },
+    { id: "3", sender_id: "me", body: "Good", created_at: at(0, 10, 1), read_at: at(0, 10, 2) },
+    { id: "4", sender_id: "me", body: "See you Saturday", created_at: at(0, 10, 2), read_at: at(0, 10, 3) },
+  ];
+  const { tree } = await openChat({ rows });
+  const log = nodes(tree, (node) => node.props.role === "log")[0];
+  assert.ok(log, "the conversation is an accessible live log");
+  const chips = nodes(log, (node) => node.type === "span" && /rounded-full/.test(node.props.className ?? "")).map(textOf);
+  assert.deepEqual(chips, ["Yesterday", "Today"], "a date chip starts each day");
+  assert.equal(chatBubbles(tree).length, 4);
+  const mine = chatBubbles(tree).filter((node) => /bg-emerald-600/.test(node.props.className));
+  assert.equal(mine.length, 2);
+  assert.doesNotMatch(mine[0].props.className, /rounded-br-md/, "inside a group only the last bubble gets the corner tail");
+  assert.match(mine[1].props.className, /rounded-br-md/);
+  const stamps = chatStamps(tree);
+  assert.equal(stamps.length, 3, "one time stamp per group: yesterday's message, today's 'Hello', your two messages");
+  assert.ok(stamps.every((text) => /\d{1,2}:\d{2}/.test(text)));
+  assert.equal(stamps.filter((text) => /Seen/.test(text)).length, 1, "Seen appears once");
+  assert.match(stamps.at(-1), /Seen/, "on the last message you sent");
+  assert.match(chatBubbles(tree)[0].props.className, /bg-white/, "their messages are white with a border");
+  assert.doesNotMatch(JSON.stringify(tree), /touch-link/);
+});
+
+test("Chat: an unread message of yours is not marked Seen, and an empty chat invites the first message", async () => {
+  const unread = await openChat({ rows: [{ id: "1", sender_id: "me", body: "Hi", created_at: new Date().toISOString(), read_at: null }] });
+  assert.equal(chatStamps(unread.tree).filter((text) => /Seen/.test(text)).length, 0);
+  const empty = await openChat();
+  assert.match(textOf(empty.tree), /No messages yet/);
+  assert.match(textOf(empty.tree), /Say hello/);
+});
+
+test("Chat: the composer is a form; Send is disabled until there is text, Enter or the button sends the trimmed text once", async () => {
+  const { app, props, inserts, tree } = await openChat();
+  const form = () => nodes(app.render(props), (node) => node.type === "form")[0];
+  const sendButton = () => nodes(form(), (node) => node.type === "button")[0];
+  assert.equal(sendButton().props["aria-label"], "Send message");
+  assert.equal(sendButton().props.disabled, true, "nothing to send yet");
+  assert.equal(nodes(tree, (node) => node.type === "input")[0].props["aria-label"], "Message");
+  nodes(form(), (node) => node.type === "input")[0].props.onChange({ target: { value: "   " } });
+  assert.equal(sendButton().props.disabled, true, "whitespace is not a message");
+  nodes(form(), (node) => node.type === "input")[0].props.onChange({ target: { value: "  On my way  " } });
+  assert.equal(sendButton().props.disabled, false);
+  let prevented = false;
+  await form().props.onSubmit({ preventDefault() { prevented = true; } });
+  await flush();
+  assert.equal(prevented, true, "the page never reloads");
+  assert.deepEqual(inserts, [{ gig_id: "g1", sender_id: "me", body: "On my way" }]);
+  assert.equal(nodes(form(), (node) => node.type === "input")[0].props.value, "", "the box clears after a successful send");
+});
+
+test("Chat: a closed gig shows the read-only notice instead of a composer", async () => {
+  const { tree } = await openChat({ readOnly: true });
+  assert.equal(nodes(tree, (node) => node.type === "form").length, 0);
+  assert.match(textOf(tree), /read-only/);
+});
+
+test("Chat: Seen is shown once, on your most recent message, even if earlier messages of yours were read too", async () => {
+  const at = (hh, mm) => { const d = new Date(); d.setHours(hh, mm, 0, 0); return d.toISOString(); };
+  const { tree } = await openChat({ rows: [
+    { id: "1", sender_id: "me", body: "First", created_at: at(9, 0), read_at: at(9, 1) },
+    { id: "2", sender_id: "them", body: "Reply", created_at: at(9, 2), read_at: at(9, 2) },
+    { id: "3", sender_id: "me", body: "Second", created_at: at(9, 3), read_at: at(9, 4) },
+  ] });
+  const stamps = chatStamps(tree);
+  assert.equal(stamps.length, 3);
+  assert.equal(stamps.filter((text) => /Seen/.test(text)).length, 1);
+  assert.match(stamps.at(-1), /Seen/);
+});
+
+// ===========================================================================
+// Price negotiation in the chat (migration 0021): up to three rounds, propose / counter / accept / decline
+// ===========================================================================
+test("negotiation helpers: rounds, who may propose, amount checks, error wording and card status", () => {
+  const { negotiationView, proposalAmountError, negotiationActionError, proposalStatus, MAX_PRICE_ROUNDS } = negotiationLib;
+  const p = (fields) => ({ id: "p" + Math.random(), gig_id: "g", proposer_id: "them", round: 1, from_amount: 100, amount: 120, state: "declined", created_at: "2026-10-01T10:00:00Z", responded_at: "2026-10-01T10:01:00Z", ...fields });
+  assert.equal(MAX_PRICE_ROUNDS, 3);
+  const none = negotiationView([], "me", true);
+  assert.deepEqual({ ...none }, { used: 0, remaining: 3, nextRound: 1, pending: null, agreed: false, pendingFromOther: false, pendingFromMe: false, canPropose: true });
+  assert.equal(negotiationView([], "me", false).canPropose, false, "not before the helper is chosen, nor after start");
+  const theirs = p({ state: "pending", responded_at: null });
+  const owed = negotiationView([theirs], "me", true);
+  assert.equal(owed.pendingFromOther, true);
+  assert.equal(owed.canPropose, true, "you can counter their proposal");
+  const mine = negotiationView([p({ proposer_id: "me", state: "pending", responded_at: null })], "me", true);
+  assert.equal(mine.pendingFromMe, true);
+  assert.equal(mine.canPropose, false, "you wait for their answer");
+  const used = negotiationView([p({ round: 1 }), p({ round: 2 }), p({ round: 3 })], "me", true);
+  assert.deepEqual([used.used, used.remaining, used.canPropose], [3, 0, false], "three rounds is the limit, whatever happened to them");
+  assert.equal(negotiationView([p({ state: "withdrawn" }), p({ round: 2 })], "me", true).remaining, 1, "a withdrawn proposal still counts as a round");
+  const agreed = negotiationView([p({ state: "accepted" })], "me", true);
+  assert.deepEqual([agreed.agreed, agreed.canPropose], [true, false], "an accepted price ends the negotiation");
+
+  assert.equal(proposalAmountError("120", 100), null);
+  assert.equal(proposalAmountError(" 99.5 ", 100), null);
+  for (const bad of ["", "abc", "-5", "0", "100.123", "1e3", "10000000000"]) assert.match(proposalAmountError(bad, 100), /positive price/, bad);
+  assert.equal(proposalAmountError("100", 100), "That is already the agreed price.");
+  assert.equal(proposalAmountError("100.00", 100), "That is already the agreed price.");
+
+  assert.equal(negotiationActionError({ code: "P0001", message: "You already have a proposal waiting for a reply. Withdraw it first." }), "You already have a proposal waiting for a reply. Withdraw it first.");
+  assert.equal(negotiationActionError({ code: "22023", message: "That is already the agreed price." }), "That is already the agreed price.");
+  assert.match(negotiationActionError({ code: "42501", message: "Not authorized" }), /can't change the price/);
+  assert.equal(negotiationActionError({ code: "XX000", message: "relation \"price_proposals\" does not exist" }), "Couldn't send that. Please try again.", "internal details are never shown");
+  assert.equal(negotiationActionError(null), "Couldn't send that. Please try again.");
+
+  assert.equal(proposalStatus(theirs, "me", true), "answer");
+  assert.equal(proposalStatus(mine.pending, "me", true), "waiting");
+  assert.equal(proposalStatus(theirs, "me", false), "closed");
+  for (const state of ["accepted", "declined", "withdrawn"]) assert.equal(proposalStatus(p({ state }), "me", true), state);
+});
+
+const nowIso = (minutesAgo) => new Date(Date.now() - minutesAgo * 60000).toISOString();
+const prop = (fields = {}) => ({ id: "pp" + (fields.round ?? 1), gig_id: "g1", proposer_id: "them", round: 1, from_amount: 100, amount: 120, state: "pending", created_at: nowIso(5), responded_at: null, ...fields });
+const open = { open: true, agreedAmount: 100 };
+const buttonLabelled = (tree, pattern) => nodes(tree, (node) => node.type === "button" && pattern.test(String(node.props["aria-label"] ?? textOf(node))))[0];
+const proposeButton = (tree) => nodes(tree, (node) => node.type === "button" && /(Propose a new price|Counter with another price)/.test(textOf(node)))[0];
+const proposalCards = (tree) => nodes(tree, (node) => node.type === "section" && /^Price proposal/.test(node.props["aria-label"] ?? ""));
+
+test("Chat negotiation: a proposal appears as a card in the conversation, in time order, and the recipient can Accept or Decline", async () => {
+  const rows = [
+    { id: "m1", sender_id: "them", body: "Could we do a bit more?", created_at: nowIso(10), read_at: null },
+    { id: "m2", sender_id: "me", body: "Maybe", created_at: nowIso(2), read_at: null },
+  ];
+  const { app, props, rpcs, tree } = await openChat({ rows, proposals: [prop({ created_at: nowIso(5) })], negotiation: open });
+  const log = nodes(tree, (node) => node.props.role === "log")[0];
+  const order = nodes(log, (node) => (node.type === "section" && /^Price proposal/.test(node.props["aria-label"] ?? "")) || (node.type === "div" && /rounded-2xl/.test(node.props.className ?? "") && /px-3\.5/.test(node.props.className ?? "")))
+    .map((node) => (node.type === "section" ? "proposal" : textOf(node)));
+  assert.deepEqual(order, ["Could we do a bit more?", "proposal", "Maybe"], "the card sits between the messages around it, by time");
+  const card = proposalCards(tree)[0];
+  assert.match(textOf(card), /Price proposal · Round 1 of 3/);
+  assert.match(textOf(card), /120 CAD/);
+  assert.match(textOf(card), /100 CAD/, "the price it started from is shown, struck through");
+  assert.match(textOf(card), /@helper1 proposed this/, "named after the other person");
+
+  buttonLabelled(card, /^Accept/).props.onClick();
+  await flush(); await flush();
+  assert.deepEqual(rpcs, [["respond_price_proposal", { p_proposal_id: "pp1", p_accept: true }]]);
+  buttonLabelled(app.render(props), /^Decline/).props.onClick();
+  await flush(); await flush();
+  assert.deepEqual(rpcs.at(-1), ["respond_price_proposal", { p_proposal_id: "pp1", p_accept: false }]);
+});
+
+test("Chat negotiation: your own proposal says it is waiting and can be withdrawn, but cannot be accepted by you", async () => {
+  const { tree, rpcs } = await openChat({ proposals: [prop({ proposer_id: "me" })], negotiation: open });
+  const card = proposalCards(tree)[0];
+  assert.match(textOf(card), /You proposed this/);
+  assert.match(textOf(card), /Waiting for a reply/);
+  assert.equal(buttonLabelled(card, /^(Accept|Decline)/), undefined, "no Accept/Decline on your own proposal");
+  nodes(card, (node) => node.type === "button" && textOf(node) === "Withdraw")[0].props.onClick();
+  await flush(); await flush();
+  assert.deepEqual(rpcs, [["withdraw_price_proposal", { p_proposal_id: "pp1" }]]);
+  assert.equal(proposeButton(tree), undefined, "you cannot stack a second proposal while yours waits");
+});
+
+test("Chat negotiation: answered proposals show their outcome, and a late one says the price can no longer change", async () => {
+  const states = [["accepted", /Accepted\. The agreed price is 120 CAD/], ["declined", /Declined/], ["withdrawn", /Withdrawn/]];
+  for (const [state, pattern] of states) {
+    const { tree } = await openChat({ proposals: [prop({ state, responded_at: nowIso(1) })], negotiation: open });
+    const card = proposalCards(tree)[0];
+    assert.match(textOf(card), pattern, state);
+    assert.equal(buttonLabelled(card, /^(Accept|Decline|Withdraw)/), undefined, "no actions on an answered proposal");
+  }
+  const late = await openChat({ proposals: [prop()], negotiation: { open: false, agreedAmount: 100 } });
+  assert.match(textOf(proposalCards(late.tree)[0]), /can no longer be changed/);
+  assert.equal(buttonLabelled(proposalCards(late.tree)[0], /^(Accept|Decline)/), undefined, "once start was requested the pending proposal cannot be answered");
+  const accepted = proposalCards((await openChat({ proposals: [prop({ state: "accepted", responded_at: nowIso(1) })], negotiation: open })).tree)[0];
+  assert.match(accepted.props.className, /border-emerald-300/, "an accepted price is highlighted");
+});
+
+test("Chat negotiation: Propose a new price opens a small form, checks the amount, and sends it through propose_price", async () => {
+  let changed = 0;
+  const { app, props, rpcs, tree } = await openChat({ negotiation: open, onPriceChanged: () => { changed++; } });
+  assert.match(textOf(proposeButton(tree)), /Propose a new price/);
+  assert.match(textOf(proposeButton(tree)), /3 of 3 left/);
+  proposeButton(tree).props.onClick();
+  let form = nodes(app.render(props), (node) => node.type === "form" && node.props["aria-label"] === "Propose a new price")[0];
+  assert.ok(form, "the form opens above the message box");
+  assert.match(textOf(form), /now 100 CAD/);
+  assert.match(textOf(form), /round 1 of 3/);
+  const type = (value) => nodes(form, (node) => node.type === "input")[0].props.onChange({ target: { value } });
+  // Nothing is sent for an unusable amount, and the reason is shown.
+  for (const [bad, message] of [["abc", /positive price/], ["100", /already the agreed price/], ["12.345", /positive price/]]) {
+    type(bad);
+    form = nodes(app.render(props), (node) => node.type === "form" && node.props["aria-label"] === "Propose a new price")[0];
+    form.props.onSubmit({ preventDefault() {} });
+    await flush(); await flush();
+    assert.match(textOf(nodes(app.render(props), (node) => node.props.role === "alert")[0]), message);
+  }
+  assert.deepEqual(rpcs, [], "no request for invalid amounts");
+  type("120.50");
+  form = nodes(app.render(props), (node) => node.type === "form" && node.props["aria-label"] === "Propose a new price")[0];
+  form.props.onSubmit({ preventDefault() {} });
+  await flush(); await flush();
+  assert.deepEqual(rpcs, [["propose_price", { p_gig_id: "g1", p_amount: 120.5 }]]);
+  assert.equal(changed, 1, "the gig page is told to refresh");
+  assert.equal(nodes(app.render(props), (node) => node.type === "form" && node.props["aria-label"] === "Propose a new price").length, 0, "the form closes after a successful proposal");
+});
+
+test("Chat negotiation: a refusal from the server is explained in words, and Cancel closes the form", async () => {
+  const { app, props, tree } = await openChat({ negotiation: open, rpcError: { code: "P0001", message: "The price has already been proposed three times." } });
+  proposeButton(tree).props.onClick();
+  let form = nodes(app.render(props), (node) => node.type === "form" && node.props["aria-label"] === "Propose a new price")[0];
+  nodes(form, (node) => node.type === "input")[0].props.onChange({ target: { value: "130" } });
+  form = nodes(app.render(props), (node) => node.type === "form" && node.props["aria-label"] === "Propose a new price")[0];
+  form.props.onSubmit({ preventDefault() {} });
+  await flush(); await flush();
+  assert.match(textOf(nodes(app.render(props), (node) => node.props.role === "alert")[0]), /proposed three times/);
+  const cancel = nodes(app.render(props), (node) => node.type === "button" && textOf(node) === "Cancel")[0];
+  cancel.props.onClick();
+  assert.equal(nodes(app.render(props), (node) => node.type === "form" && node.props["aria-label"] === "Propose a new price").length, 0);
+});
+
+test("Chat negotiation: the propose control is hidden when the price cannot change, and says why when the rounds are used up", async () => {
+  const closed = await openChat({ negotiation: { open: false, agreedAmount: 100 } });
+  assert.equal(proposeButton(closed.tree), undefined, "after start (or before a helper is chosen) there is no price control");
+  const none = await openChat({});
+  assert.equal(proposeButton(none.tree), undefined, "no negotiation prop: plain chat");
+  const readOnly = await openChat({ readOnly: true, negotiation: open });
+  assert.equal(proposeButton(readOnly.tree), undefined, "a finished conversation is read-only");
+  const done = (n, state = "declined") => Array.from({ length: n }, (_, i) => prop({ id: `d${i}`, round: i + 1, state, proposer_id: i % 2 ? "me" : "them", responded_at: nowIso(1) }));
+  const exhausted = await openChat({ negotiation: open, proposals: done(3) });
+  assert.equal(proposeButton(exhausted.tree), undefined);
+  assert.match(textOf(exhausted.tree), /All three price proposals have been used/);
+  const agreed = await openChat({ negotiation: open, proposals: [prop({ state: "accepted", responded_at: nowIso(1) })] });
+  assert.equal(proposeButton(agreed.tree), undefined);
+  assert.match(textOf(agreed.tree), /A new price was agreed/);
+  const two = await openChat({ negotiation: open, proposals: done(2) });
+  assert.match(textOf(proposeButton(two.tree)), /1 of 3 left/, "the button counts what is left");
+  const counter = await openChat({ negotiation: open, proposals: [prop({ round: 1 })] });
+  assert.match(textOf(proposeButton(counter.tree)), /Counter with another price/, "while an answer is owed, proposing is a counter");
+});
+
+test("Gig page: the chat is told when the price can be negotiated (helper chosen, start not yet requested) and who the other person is", async () => {
+  const chat = (tree) => nodes(tree, (node) => node.type === "chat-panel")[0];
+  const selected = await openGig({ poster_id: user.id, selected_provider_id: "helper-1", agreed_amount: 55, amount: 50 });
+  assert.deepEqual({ ...chat(selected.tree).props.negotiation }, { open: true, agreedAmount: 55 }, "negotiate from the agreed price, not the original budget");
+  assert.equal(chat(selected.tree).props.otherName, "@helper1");
+  assert.equal(typeof chat(selected.tree).props.onPriceChanged, "function", "the page reloads the gig when a price is accepted");
+  const asHelper = await openGig({ selected_provider_id: user.id, agreed_amount: 50 });
+  assert.equal(chat(asHelper.tree).props.otherName, "@customer1");
+  assert.equal(chat(asHelper.tree).props.negotiation.open, true);
+  const started = await openGig({ poster_id: user.id, selected_provider_id: "helper-1", start_requested_at: "2026-10-02T10:00:00Z" });
+  assert.equal(chat(started.tree).props.negotiation.open, false, "the price is fixed once the helper asks to start");
+  const running = await openGig({ poster_id: user.id, selected_provider_id: "helper-1", status: "in_progress" });
+  assert.equal(chat(running.tree).props.negotiation.open, false);
+});
+
+test("A price notification opens the chat where the proposal waits; other notification links are unchanged", async () => {
+  const bell = await loadLib("src/components/NotificationsBell.tsx", {
+    react: {}, "next/navigation": {}, "@/lib/supabase/client": {}, "@/lib/auth-context": {}, "react/jsx-runtime": { jsx() {}, jsxs() {} },
+  });
+  for (const type of ["price_proposed", "price_accepted", "price_declined", "price_withdrawn"]) assert.equal(bell.notificationHref({ gig_id: "g1", type }), "/gigs/g1#messages", type);
+  assert.equal(bell.notificationHref({ gig_id: "g1", type: "gig_request" }), "/gigs/g1#request");
+  assert.equal(bell.notificationHref({ gig_id: "g1", type: "claim_received" }), "/gigs/g1#proposals");
+  assert.equal(bell.notificationHref({ gig_id: "g1", type: "selected" }), "/gigs/g1");
+});
+
+test("Chat negotiation: on a server without migration 0021 the price controls stay hidden and the chat still works", async () => {
+  const missing = { code: "PGRST205", message: "Could not find the table 'public.price_proposals' in the schema cache" };
+  const { tree, inserts, app, props } = await openChat({ negotiation: open, proposalsError: missing, rows: [{ id: "m1", sender_id: "them", body: "Hi", created_at: nowIso(3), read_at: null }] });
+  assert.equal(proposeButton(tree), undefined, "no button that could not work");
+  assert.equal(proposalCards(tree).length, 0);
+  assert.equal(nodes(tree, (node) => node.props.role === "alert").length, 0, "and no scary error");
+  assert.match(textOf(tree), /Hi/, "messages still load");
+  nodes(app.render(props), (node) => node.type === "input")[0].props.onChange({ target: { value: "Still here" } });
+  await nodes(app.render(props), (node) => node.type === "form")[0].props.onSubmit({ preventDefault() {} });
+  await flush();
+  assert.deepEqual(inserts, [{ gig_id: "g1", sender_id: "me", body: "Still here" }], "sending messages is unaffected");
+});
+
+test("negotiation errors: an upgrade-pending server is reported as unavailable, not as a generic failure", () => {
+  const { negotiationUnavailable, negotiationActionError } = negotiationLib;
+  for (const code of ["PGRST205", "PGRST202", "42P01", "42883"]) assert.equal(negotiationUnavailable({ code }), true, code);
+  for (const bad of [null, undefined, {}, { code: "P0001" }, { code: "42501" }]) assert.equal(negotiationUnavailable(bad), false);
+  assert.equal(negotiationActionError({ code: "PGRST202", message: "Could not find the function public.propose_price(p_amount, p_gig_id) in the schema cache" }), "Price negotiation isn't available on this server yet.");
+  assert.doesNotMatch(negotiationActionError({ code: "PGRST202", message: "Could not find the function public.propose_price" }), /schema cache|public./);
 });

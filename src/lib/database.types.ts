@@ -129,6 +129,22 @@ export interface ChatMessage {
   read_at: string | null;
 }
 
+export type PriceProposalState = "pending" | "accepted" | "declined" | "withdrawn";
+
+// A price proposed from the gig chat (migration 0021). amount is the proposal, from_amount the
+// agreed price it started from; round counts proposals on the gig (at most three).
+export interface PriceProposal {
+  id: string;
+  gig_id: string;
+  proposer_id: string;
+  round: number;
+  from_amount: number;
+  amount: number;
+  state: PriceProposalState;
+  created_at: string;
+  responded_at: string | null;
+}
+
 export interface Notification {
   id: string;
   recipient_id: string;
@@ -152,6 +168,7 @@ export interface Database {
       gig_private_locations: { Row: GigPrivateLocation; Insert: Partial<GigPrivateLocation>; Update: Partial<GigPrivateLocation> };
       chat_messages: { Row: ChatMessage; Insert: Partial<ChatMessage>; Update: Partial<ChatMessage> };
       notifications: { Row: Notification; Insert: Partial<Notification>; Update: Partial<Notification> };
+      price_proposals: { Row: PriceProposal; Insert: Partial<PriceProposal>; Update: Partial<PriceProposal> };
     };
     Functions: {
       ensure_profile: { Args: Record<string, never>; Returns: Profile };
@@ -159,6 +176,9 @@ export interface Database {
       create_gig: { Args: { p_request_id: string; p_service_type: string; p_title: string; p_description: string; p_amount: number; p_price_type: string; p_scheduled_at: string | null; p_location_text: string; p_lat: number | null; p_lng: number | null; p_photo_url?: string | null; p_publish?: boolean; p_tag_ids?: string[]; p_private_address?: string | null; p_requested_helper_id?: string | null }; Returns: Gig };
       create_claim: { Args: { p_gig_id: string; p_offer_amount?: number | null; p_message?: string | null }; Returns: Claim };
       withdraw_claim: { Args: { p_gig_id: string }; Returns: void };
+      propose_price: { Args: { p_gig_id: string; p_amount: number }; Returns: PriceProposal };
+      respond_price_proposal: { Args: { p_proposal_id: string; p_accept: boolean }; Returns: void };
+      withdraw_price_proposal: { Args: { p_proposal_id: string }; Returns: void };
       accept_gig_request: { Args: { p_gig_id: string }; Returns: void };
       decline_gig_request: { Args: { p_gig_id: string }; Returns: void };
       reassign_gig_request: { Args: { p_gig_id: string; p_new_helper_id?: string | null }; Returns: void };

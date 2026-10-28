@@ -4,7 +4,8 @@ import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
 const root = new URL("../", import.meta.url);
-const profileSave = process.argv.includes("--profile-save");
+const negotiation = process.argv.includes("--negotiation");
+const profileSave = process.argv.includes("--profile-save") || negotiation;
 const requests = process.argv.includes("--requests") || profileSave;
 // origin/main's migrations 0011-0018 (taxonomy, deletion eligibility, account settings,
 // registration rewrite, ...). They were never run by this harness before; --mainline
@@ -274,6 +275,25 @@ if (profileSave) {
   if (/create (?:or replace )?(?:function|policy|trigger|table)|drop |alter /i.test(code)) throw new Error("The profile grant migration must not change functions, policies, triggers or tables");
   console.log("PASS: profile grant migration scope (UPDATE on phone, skills_other_text and services_other_text for authenticated only; no policy, trigger or function change)");
 }
+if (negotiation) {
+  const sql = await readFile(new URL("migrations/20240101000021_price_negotiation.sql", root), "utf8");
+  const code = sql.replace(/--.*$/gm, "");
+  const created = [...code.matchAll(/create function public\.([a-z_]+)\(/g)].map((entry) => entry[1]).sort();
+  if (created.join(",") !== "propose_price,respond_price_proposal,withdraw_price_proposal") {
+    throw new Error(`The negotiation migration must create exactly its three functions and replace none, found: ${created}`);
+  }
+  if (/create or replace function/i.test(code)) throw new Error("The negotiation migration must not replace any existing function");
+  for (const entry of code.matchAll(/create function public\.[a-z_]+\([\s\S]*?\n\$\$;/g)) {
+    if (!entry[0].includes("security definer set search_path = ''")) throw new Error("Every negotiation function must be SECURITY DEFINER with an empty search_path");
+    if (!/if auth\.uid\(\) is null then\s*raise exception 'Authentication required' using errcode = '42501'/.test(entry[0])) throw new Error("Every negotiation function must start with an explicit authentication guard");
+  }
+  if (!/grant select on public\.price_proposals to authenticated;/.test(code) || /grant (insert|update|delete|all)[^;]*price_proposals/i.test(code)) {
+    throw new Error("Clients may only read price_proposals");
+  }
+  if (/\bto\s+(anon|public)\b/i.test(code.replace(/revoke[\s\S]*?;/gi, ""))) throw new Error("The negotiation migration must not grant anything to anon or PUBLIC");
+  if (/update public\.gigs set [^;]*\b(amount|price_type|status|selected_provider_id)\b\s*=/i.test(code)) throw new Error("Negotiation may only change gigs.agreed_amount");
+  console.log("PASS: price-negotiation migration scope (three new SECURITY DEFINER functions, read-only table for clients, no grants to anon, only gigs.agreed_amount is ever changed)");
+}
 if (!runtimePath) {
   console.log("Static verification only. Supply a PGlite dist/index.js path for SQL execution.");
   process.exit(0);
@@ -343,6 +363,7 @@ try {
     ] : []),
     ...(requests ? ["migrations/20240101000019_helper_requests.sql"] : []),
     ...(profileSave ? ["migrations/20240101000020_profile_column_update_grants.sql"] : []),
+    ...(negotiation ? ["migrations/20240101000021_price_negotiation.sql"] : []),
     "tests/phase1_security.sql",
     ...(phase2a ? ["tests/phase2a_integrity.sql"] : []),
     ...(onboarding ? ["tests/onboarding_post_gig.sql"] : []),
@@ -354,19 +375,20 @@ try {
     ...(offers ? ["tests/offers_private_address.sql"] : []),
     ...(requests ? ["tests/helper_requests.sql"] : []),
     ...(profileSave ? ["tests/profile_column_grants.sql"] : []),
+    ...(negotiation ? ["tests/price_negotiation.sql"] : []),
   ]) {
     const sql = await readFile(new URL(file, root), "utf8");
     await db.exec(sql);
     if (file.startsWith("tests/")) {
       // Every assertion is an unconditional top-level SELECT. Successful SQL
       // execution means every call returned without raising its failure error.
-      const assertions = [...sql.matchAll(/^select pg_temp\.(?:assert|expect_denied|phase2_assert|phase2_expect_error|journey_assert|journey_error_any|journey_error|dw_assert|dw_denied|dw_error|gt_assert|gt_denied|gt_error|pt_assert|pt_denied|pt_error|hl_assert|hl_denied|hl_error|ad_assert|ad_error|of_assert|of_error|of_denied|rq_assert|rq_error|rq_denied|po_assert|po_error|po_denied)\(/gm)].length;
+      const assertions = [...sql.matchAll(/^select pg_temp\.(?:assert|expect_denied|phase2_assert|phase2_expect_error|journey_assert|journey_error_any|journey_error|dw_assert|dw_denied|dw_error|gt_assert|gt_denied|gt_error|pt_assert|pt_denied|pt_error|hl_assert|hl_denied|hl_error|ad_assert|ad_error|of_assert|of_error|of_denied|rq_assert|rq_error|rq_denied|po_assert|po_error|po_denied|pn_assert|pn_error|pn_denied)\(/gm)].length;
       passed += assertions;
       console.log(`PASS: ${file}: ${assertions} assertions`);
     }
     console.log(`Executed ${file}`);
   }
-  const cleanup = await db.query("select to_regclass('pg_temp.security_fixture') is null and to_regclass('pg_temp.phase2_fixture') is null and to_regclass('pg_temp.journey_fixture') is null and to_regclass('pg_temp.dw_fixture') is null and to_regclass('pg_temp.gt_fixture') is null and to_regclass('pg_temp.pt_fixture') is null and to_regclass('pg_temp.hl_fixture') is null and to_regclass('pg_temp.ad_fixture') is null and to_regclass('pg_temp.of_fixture') is null and to_regclass('pg_temp.rq_fixture') is null and to_regclass('pg_temp.po_fixture') is null as clean");
+  const cleanup = await db.query("select to_regclass('pg_temp.security_fixture') is null and to_regclass('pg_temp.phase2_fixture') is null and to_regclass('pg_temp.journey_fixture') is null and to_regclass('pg_temp.dw_fixture') is null and to_regclass('pg_temp.gt_fixture') is null and to_regclass('pg_temp.pt_fixture') is null and to_regclass('pg_temp.hl_fixture') is null and to_regclass('pg_temp.ad_fixture') is null and to_regclass('pg_temp.of_fixture') is null and to_regclass('pg_temp.rq_fixture') is null and to_regclass('pg_temp.po_fixture') is null and to_regclass('pg_temp.pn_fixture') is null as clean");
   if (!cleanup.rows[0].clean) throw new Error("SQL fixtures did not roll back");
   console.log(`PASS: ${passed} security assertions in isolated PostgreSQL/WASM`);
   console.log("Hosted Supabase, PostgREST, Auth, Storage and Realtime integration remain unverified.");

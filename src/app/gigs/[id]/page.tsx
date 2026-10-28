@@ -338,7 +338,7 @@ function GigDetails({ id }: { id: string }) {
               {c.message && <p className="rounded-lg bg-neutral-50 p-2 text-sm text-neutral-700">{c.message}</p>}
               <div className="flex gap-2">
                 {c.profile?.username && (
-                  <Link href={`/profile/${c.profile.username}`} className="touch-link flex-1 rounded-lg border border-neutral-300 py-1.5 text-center text-sm font-medium text-neutral-700">
+                  <Link href={`/profile/${c.profile.username}`} className="flex min-h-11 flex-1 items-center justify-center rounded-lg border border-neutral-300 px-3 py-1.5 text-center text-sm font-medium text-neutral-700">
                     View profile
                   </Link>
                 )}
@@ -366,7 +366,7 @@ function GigDetails({ id }: { id: string }) {
       {(isPoster || isSelectedProvider) && gig.selected_provider_id && (
         <>
           {(gig.status === "active" || gig.status === "in_progress") && (
-            <a href="#messages" className="touch-link block w-full rounded-lg border border-emerald-600 py-2.5 text-center font-medium text-emerald-700">
+            <a href="#messages" className="flex min-h-11 w-full items-center justify-center rounded-lg border border-emerald-600 px-4 py-2.5 text-center font-medium text-emerald-700 hover:bg-emerald-50">
               {isPoster ? "Message helper" : "Message poster"}
             </a>
           )}
@@ -480,7 +480,11 @@ function GigDetails({ id }: { id: string }) {
           {(gig.status === "in_progress" || gig.status === "active" || gig.status === "completed" || gig.status === "incomplete") && (
             <section id="messages" aria-label="Messages" className="scroll-mt-20 space-y-2">
               <h2 className="font-medium">Messages</h2>
-              <ChatPanel gigId={id} currentUserId={user!.id} readOnly={gig.status !== "in_progress" && gig.status !== "active"} />
+              <ChatPanel gigId={id} currentUserId={user!.id} readOnly={gig.status !== "in_progress" && gig.status !== "active"}
+                // The price can be negotiated in the chat until the helper asks to start (rules: migration 0021).
+                negotiation={{ open: gig.status === "active" && !!gig.selected_provider_id && !gig.start_requested_at, agreedAmount: Number(gig.agreed_amount ?? gig.amount) }}
+                otherName={(() => { const other = isPoster ? gig.selected_provider_id : gig.poster_id; return other && people[other] ? `@${people[other]}` : undefined; })()}
+                onPriceChanged={() => { void loadAll(); }} />
             </section>
           )}
 

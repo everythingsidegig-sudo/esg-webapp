@@ -12,6 +12,8 @@ export function notificationHref(n: Pick<Notification, "gig_id" | "type">) {
   if (n.type === "claim_received") return `/gigs/${n.gig_id}#proposals`;
   // A new request lands on the Accept / Decline panel for the requested helper.
   if (n.type === "gig_request") return `/gigs/${n.gig_id}#request`;
+  // A price proposal or its answer lands in the chat, where the Accept / Decline buttons are.
+  if (n.type.startsWith("price_")) return `/gigs/${n.gig_id}#messages`;
   return `/gigs/${n.gig_id}`;
 }
 
