@@ -12,6 +12,7 @@ import * as zipLocationLib from "../src/lib/zip-location.ts";
 import * as helperRequestLib from "../src/lib/helper-request.ts";
 import * as profileSaveLib from "../src/lib/profile-save.ts";
 import * as negotiationLib from "../src/lib/negotiation.ts";
+import * as repostLib from "../src/lib/repost.ts";
 import { safeNext } from "../src/lib/journey.ts";
 
 // location.ts has extension-less relative imports (./journey, ./geocoding) that
@@ -91,6 +92,7 @@ async function component(path, name, overrides = {}) {
     "@/lib/helper-request": helperRequestLib,
     "@/lib/profile-save": profileSaveLib,
     "@/lib/negotiation": negotiationLib,
+    "@/lib/repost": repostLib,
     "@/lib/area-lookup": { resolveAreaQuery: async () => ({ kind: "none" }) },
     "@/components/AreaPicker": { default: "area-picker" },
     "@/components/MapPicker": { default: "map-picker" },
@@ -4237,4 +4239,180 @@ test("negotiation errors: an upgrade-pending server is reported as unavailable, 
   for (const bad of [null, undefined, {}, { code: "P0001" }, { code: "42501" }]) assert.equal(negotiationUnavailable(bad), false);
   assert.equal(negotiationActionError({ code: "PGRST202", message: "Could not find the function public.propose_price(p_amount, p_gig_id) in the schema cache" }), "Price negotiation isn't available on this server yet.");
   assert.doesNotMatch(negotiationActionError({ code: "PGRST202", message: "Could not find the function public.propose_price" }), /schema cache|public./);
+});
+
+// ===========================================================================
+// Repost a closed gig as a new gig
+// ===========================================================================
+test("repost helpers: only your own cancelled, completed or incomplete gigs, a validated id, and a draft that leaves out what must not be copied", () => {
+  const { canRepost, repostParam, repostHref, repostPrivateHref, repostDraft, REPOSTABLE_STATUSES } = repostLib;
+  assert.deepEqual([...REPOSTABLE_STATUSES], ["cancelled", "completed", "incomplete"]);
+  for (const status of REPOSTABLE_STATUSES) assert.equal(canRepost({ poster_id: "me", status }, "me"), true, status);
+  for (const status of ["draft", "active", "in_progress", "awaiting_payment", "disputed"]) assert.equal(canRepost({ poster_id: "me", status }, "me"), false, status);
+  assert.equal(canRepost({ poster_id: "someone", status: "cancelled" }, "me"), false, "only the poster");
+  assert.equal(canRepost({ poster_id: "me", status: "cancelled" }, null), false);
+  assert.equal(repostParam("11111111-2222-4333-8444-555555555555"), "11111111-2222-4333-8444-555555555555");
+  assert.equal(repostParam("11111111-2222-4333-8444-55555555555G"), null);
+  for (const bad of [null, undefined, "", "abc", "../x", "1; drop table gigs", "11111111-2222-4333-8444-5555555555555"]) assert.equal(repostParam(bad), null, String(bad));
+  assert.equal(repostHref("g-1"), "/post?repost=g-1");
+  assert.equal(repostPrivateHref("g-1", "HelperOne", "Yard Work"), "/post?helper=HelperOne&category=Yard+Work&repost=g-1");
+
+  const gig = { service_type: "Cleaning", title: "Rake leaves", description: "Front yard", amount: 55, location_text: "Kävlinge", lat: 55.79, lng: 13.11, photo_url: "https://x.invalid/p.jpg",
+    gig_tags: [{ tag_id: "t1" }, { tag_id: "t2" }, { tag_id: "t1" }],
+    // Everything below must never reach the draft:
+    status: "cancelled", scheduled_at: "2020-01-01T00:00:00Z", selected_provider_id: "h", requested_helper_id: "h", agreed_amount: 70, id: "old" };
+  const draft = repostDraft(gig, "Storgatan 1");
+  assert.deepEqual({ ...draft, tagIds: [...draft.tagIds] }, { serviceType: "Cleaning", title: "Rake leaves", description: "Front yard", amount: "55", locationText: "Kävlinge", lat: 55.79, lng: 13.11,
+    photoUrl: "https://x.invalid/p.jpg", tagIds: ["t1", "t2"], privateAddress: "Storgatan 1" }, "the original budget, tags de-duplicated, the private address kept");
+  assert.equal(repostDraft({ ...gig, location_text: null, photo_url: null, gig_tags: null }, null).locationText, "");
+  assert.deepEqual(Object.keys(draft).sort(), ["amount", "description", "lat", "lng", "locationText", "photoUrl", "privateAddress", "serviceType", "tagIds", "title"], "no date, status, helper or price history in the draft");
+});
+
+test("Gig page: a closed gig of yours offers Repost as a new gig; nobody else, and no other status, does", async () => {
+  const repostSection = (tree) => nodes(tree, (node) => node.props["aria-label"] === "Repost this gig")[0];
+  for (const status of ["cancelled", "completed", "incomplete"]) {
+    const { tree } = await openGig({ poster_id: user.id, status, selected_provider_id: status === "cancelled" ? null : "helper-1" });
+    const section = repostSection(tree);
+    assert.ok(section, status);
+    const link = nodes(section, (node) => node.type === "a" && textOf(node) === "Repost as a new gig")[0];
+    assert.equal(link.props.href, "/post?repost=gig-1");
+    assert.match(link.props.className, /min-h-11/, "44px target");
+    assert.match(textOf(section), /stays in your history as it is/);
+    assert.equal(nodes(section, (node) => node.type === "a").length, 1, "a public gig has only the one action");
+  }
+  for (const status of ["draft", "active", "in_progress", "awaiting_payment", "disputed"]) {
+    assert.equal(repostSection((await openGig({ poster_id: user.id, status, selected_provider_id: status === "draft" || status === "active" ? null : "helper-1" })).tree), undefined, status);
+  }
+  assert.equal(repostSection((await openGig({ poster_id: "poster-1", status: "cancelled" })).tree), undefined, "someone else's gig");
+  assert.equal(repostSection((await openGig({ poster_id: "poster-1", status: "completed", selected_provider_id: user.id })).tree), undefined, "the helper cannot repost the poster's gig");
+});
+
+test("Gig page: a closed private request can be reposted publicly or sent to the same helper again", async () => {
+  const { tree } = await openGig({ poster_id: user.id, status: "cancelled", requested_helper_id: "helper-1", service_type: "Yard Work", price_type: "negotiable" });
+  const section = nodes(tree, (node) => node.props["aria-label"] === "Repost this gig")[0];
+  const links = nodes(section, (node) => node.type === "a");
+  assert.deepEqual(links.map(textOf), ["Repost as a new gig", "Send to @helper1 again"]);
+  assert.equal(links[1].props.href, "/post?helper=helper1&category=Yard+Work&repost=gig-1");
+  assert.match(textOf(section), /private request.*visible to every helper/);
+});
+
+// ---- the Post a Gig form, prefilled ----
+const REPOST_ID = "11111111-2222-4333-8444-555555555555";
+async function openRepostForm({ search = `repost=${REPOST_ID}`, gig, address = "Storgatan 1, 2tr", gigError = null, stored = new Map(), asUser = user, helper = null } = {}) {
+  const calls = [], destinations = [], queries = [];
+  const base = { id: REPOST_ID, poster_id: asUser.id, status: "cancelled", service_type: "Cleaning", title: "Rake leaves", description: "Front yard", amount: 55, agreed_amount: 70,
+    location_text: "Kävlinge", lat: 55.79, lng: 13.11, photo_url: "https://x.invalid/p.jpg", requested_helper_id: null, selected_provider_id: null, scheduled_at: "2020-01-01T00:00:00Z",
+    gig_tags: [{ tag_id: "t1" }], ...gig };
+  const tables = { gigs: gig === null ? null : base, gig_private_locations: address == null ? null : { address_text: address }, public_profiles: helper };
+  const client = {
+    from: (table) => {
+      const api = { select: () => api, eq: (field, value) => { queries.push([table, field, value]); return api; }, maybeSingle: async () => ({ data: tables[table] ?? null, error: table === "gigs" ? gigError : null }) };
+      return api;
+    },
+    rpc: async (name, payload) => { calls.push({ name, payload }); return { data: { id: "new-gig", status: payload.p_publish ? "active" : "draft" }, error: null }; },
+  };
+  const app = await component("src/app/post/page.tsx", "PostGigForm", {
+    client,
+    storage: { getItem: (key) => stored.get(key) ?? null, setItem: (key, value) => stored.set(key, value), removeItem: (key) => stored.delete(key) },
+    globals: { crypto: { randomUUID: () => "99999999-9999-4999-8999-999999999999" } },
+    mocks: {
+      "next/navigation": { useSearchParams: () => new URLSearchParams(search), useRouter: () => ({ replace: (url) => destinations.push(url) }) },
+      "@/lib/location": { loadJourneyLocation: () => ({ text: "Somewhere else", lat: 1, lng: 2 }), reverseGeocodeGeneralArea: async () => null },
+    },
+  });
+  app.auth.user = asUser;
+  app.render(); await flush(); await flush();
+  return { app, calls, destinations, queries, stored, tree: app.render() };
+}
+const setField = (app, predicate, value) => { nodes(app.render(), predicate)[0].props.onChange({ target: { value } }); };
+const titleInput = (node) => node.type === "input" && node.props.maxLength === 120;
+const dateInput = (node) => node.props.type === "datetime-local";
+
+test("Repost: the form opens prefilled from the closed gig, asks for a new date, and posts a NEW public gig through create_gig", async () => {
+  const { app, calls, destinations, queries, tree } = await openRepostForm();
+  assert.deepEqual(queries.filter(([table]) => table === "gigs"), [["gigs", "id", REPOST_ID]], "reads only the gig named in the link");
+  assert.match(textOf(nodes(tree, (node) => node.props.role === "note")[0]), /Reposting .Rake leaves. as a new gig/);
+  assert.match(textOf(nodes(tree, (node) => node.props.role === "note")[0]), /every helper can see/);
+  assert.equal(nodes(tree, titleInput)[0].props.value, "Rake leaves");
+  assert.equal(nodes(tree, (node) => node.type === "textarea")[0].props.value, "Front yard");
+  assert.equal(nodes(tree, (node) => node.props.type === "number")[0].props.value, "55", "the original budget, not the 70 the price was renegotiated to");
+  assert.equal(nodes(tree, dateInput)[0].props.value, "", "the old date is not carried over; the poster picks a new one");
+  assert.match(textOf(tree), /original photo will be reused/);
+  assert.equal(nodes(tree, (node) => node.type === "selection-chip" && node.props.role === "radio" && node.props.selected)[0].props.children, "Cleaning");
+
+  // Without a date the gig cannot be published, and nothing is sent.
+  button(app.render(), "Post Gig").props.onClick(); await flush();
+  assert.equal(calls.length, 0);
+  assert.match(textOf(nodes(app.render(), (node) => node.props.role === "alert")[0]), /future date/);
+
+  setField(app, dateInput, new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 16));
+  button(app.render(), "Post Gig").props.onClick(); await flush();
+  assert.equal(calls.length, 1);
+  const payload = calls[0].payload;
+  assert.equal(calls[0].name, "create_gig");
+  assert.equal(payload.p_request_id, "99999999-9999-4999-8999-999999999999", "a brand-new creation request, not the old gig");
+  assert.deepEqual([payload.p_service_type, payload.p_title, payload.p_description, payload.p_amount, payload.p_price_type], ["Cleaning", "Rake leaves", "Front yard", 55, "fixed"]);
+  assert.deepEqual([payload.p_location_text, payload.p_lat, payload.p_lng], ["Kävlinge", 55.79, 13.11]);
+  assert.equal(payload.p_photo_url, "https://x.invalid/p.jpg", "the photo is reused, not re-uploaded");
+  assert.deepEqual([...payload.p_tag_ids], ["t1"]);
+  assert.equal(payload.p_private_address, "Storgatan 1, 2tr");
+  assert.equal(payload.p_publish, true);
+  assert.equal("p_requested_helper_id" in payload, false, "a plain repost is public");
+  assert.match(payload.p_scheduled_at, /^20\d\d-/);
+  assert.ok(new Date(payload.p_scheduled_at) > new Date(), "the new date is in the future");
+  assert.deepEqual(destinations, ["/gigs/new-gig"]);
+});
+
+test("Repost: Save as Draft works too, and the poster can change anything before posting", async () => {
+  const { app, calls, destinations } = await openRepostForm({ gig: { status: "completed", selected_provider_id: "h" } });
+  setField(app, titleInput, "Rake leaves again");
+  setField(app, (node) => node.props.type === "number", "60");
+  button(app.render(), "Save as Draft").props.onClick(); await flush();
+  assert.equal(calls[0].payload.p_title, "Rake leaves again");
+  assert.equal(calls[0].payload.p_amount, 60);
+  assert.equal(calls[0].payload.p_publish, false);
+  assert.equal(calls[0].payload.p_scheduled_at, null);
+  assert.deepEqual(destinations, ["/my-gigs?created=new-gig"]);
+});
+
+test("Repost: only your own cancelled, completed or incomplete gig can be reposted; anything else stops with a reason and no form", async () => {
+  const cases = [
+    [{ gig: { poster_id: "someone-else" } }, /only repost your own gigs/],
+    [{ gig: { status: "active" } }, /Only a cancelled or completed gig/],
+    [{ gig: { status: "in_progress" } }, /Only a cancelled or completed gig/],
+    [{ gig: null }, /couldn't be found/],
+    [{ gigError: new Error("offline") }, /Couldn't load that gig/],
+    [{ search: "repost=not-an-id" }, /repost link isn't valid/],
+    [{ search: "repost=../../etc" }, /repost link isn't valid/],
+  ];
+  for (const [options, message] of cases) {
+    const { tree, calls } = await openRepostForm(options);
+    assert.match(textOf(nodes(tree, (node) => node.props.role === "alert")[0]), message, JSON.stringify(options).slice(0, 60));
+    assert.equal(nodes(tree, titleInput).length, 0, "no form to submit");
+    assert.ok(nodes(tree, (node) => node.type === "a" && node.props.href === "/post"), "a way to post from scratch");
+    assert.equal(calls.length, 0);
+  }
+});
+
+test("Repost: a request still awaiting confirmation takes priority over the repost link", async () => {
+  const stored = new Map([[`esg:post:${user.id}`, JSON.stringify({ p_request_id: "r1", p_service_type: "Other", p_title: "Pending thing", p_description: "d", p_amount: 9, p_price_type: "fixed",
+    p_scheduled_at: null, p_location_text: "x", p_lat: null, p_lng: null, p_photo_url: null, p_publish: true, p_tag_ids: [], p_requested_helper_id: null })]]);
+  const { tree, queries } = await openRepostForm({ stored });
+  assert.equal(queries.filter(([table]) => table === "gigs").length, 0, "the old gig is not even read");
+  assert.equal(nodes(tree, titleInput)[0].props.value, "Pending thing");
+  assert.equal(nodes(tree, (node) => node.props.role === "note").length, 0);
+});
+
+test("Repost to the same helper: the private-request form keeps the helper's categories and copies the details, but not the category tags", async () => {
+  const helper = { id: "helper-9", username: "HelperNine", skills: ["Cleaning", "Other"] };
+  const { app, calls, tree } = await openRepostForm({ search: `helper=HelperNine&category=Cleaning&repost=${REPOST_ID}`, helper, gig: { requested_helper_id: "helper-9", price_type: "negotiable" } });
+  assert.match(textOf(nodes(tree, (node) => node.type === "h1")[0]), /for @HelperNine/);
+  assert.equal(nodes(tree, titleInput)[0].props.value, "Rake leaves");
+  assert.equal(nodes(tree, (node) => node.type === "selection-chip" && node.props.role === "radio" && node.props.selected)[0].props.children, "Cleaning");
+  assert.equal(nodes(tree, (node) => node.props.role === "note").length, 2, "the repost note and the private-request note");
+  setField(app, dateInput, new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 16));
+  button(app.render(), "Send request").props.onClick(); await flush();
+  assert.equal(calls[0].payload.p_requested_helper_id, "helper-9");
+  assert.deepEqual([...calls[0].payload.p_tag_ids], [], "tags belong to the gig's category and are re-picked for a private request");
+  assert.equal(calls[0].payload.p_title, "Rake leaves");
 });

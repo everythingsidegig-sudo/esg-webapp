@@ -13,7 +13,8 @@ import { SERVICE_TYPES } from "@/lib/services";
 import { CURRENCY } from "@/lib/money";
 import { PRICE_CHOICES, requestUsername, requestableCategories } from "@/lib/helper-request";
 import { loadTagCatalog, MAX_GIG_TAGS } from "@/lib/tags";
-import type { PriceType, Tag } from "@/lib/database.types";
+import { canRepost, repostDraft, repostParam } from "@/lib/repost";
+import type { Gig, PriceType, Tag } from "@/lib/database.types";
 
 interface CreationRequest {
   p_request_id: string; p_service_type: string; p_title: string; p_description: string;
@@ -25,6 +26,8 @@ interface CreationRequest {
 }
 // The helper a private request is addressed to, as the page knows them.
 type RequestedHelper = { id: string; username: string; categories: string[] };
+// Reposting a closed gig (/post?repost=<id>): its details prefill this same form.
+type RepostLoad = { state: "none" } | { state: "loading" } | { state: "ready"; title: string } | { state: "error"; message: string };
 type HelperLookup = { state: "none" } | { state: "loading" } | { state: "ready"; helper: RequestedHelper } | { state: "error"; message: string };
 function readPending(key: string): CreationRequest | null {
   try {
@@ -51,6 +54,11 @@ function PostGigForm() {
   const helperId = retained?.p_requested_helper_id ?? null;
   const [lookup, setLookup] = useState<HelperLookup>(() => helperId || helperUsername ? { state: "loading" }
     : helperParam !== null ? { state: "error", message: "That helper link isn't valid." } : { state: "none" });
+  // A request still awaiting confirmation always wins over a repost link.
+  const repostRaw = params.get("repost");
+  const repostId = retained ? null : repostParam(repostRaw);
+  const [repost, setRepost] = useState<RepostLoad>(() => retained ? { state: "none" }
+    : repostId ? { state: "loading" } : repostRaw !== null ? { state: "error", message: "That repost link isn't valid." } : { state: "none" });
   const [priceType, setPriceType] = useState<PriceType>(retained?.p_price_type === "negotiable" ? "negotiable" : "fixed");
   const [initialLocation] = useState(loadJourneyLocation);
   const [serviceType, setServiceType] = useState<string>(retained?.p_service_type ?? SERVICE_TYPES[0]);
@@ -93,6 +101,39 @@ function PostGigForm() {
     // The helper is looked up once per link; the retained request only supplies the id at load.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supabase, helperId, helperUsername]);
+
+  useEffect(() => {
+    if (!repostId) return;
+    let active = true;
+    (async () => {
+      try {
+        const { data, error: loadError } = await supabase.from("gigs").select("*, gig_tags(tag_id)").eq("id", repostId).maybeSingle();
+        if (!active) return;
+        if (loadError) { setRepost({ state: "error", message: "Couldn't load that gig. Check your connection and try again." }); return; }
+        const gig = data as (Gig & { gig_tags: { tag_id: string }[] | null }) | null;
+        if (!gig) { setRepost({ state: "error", message: "That gig couldn't be found." }); return; }
+        if (gig.poster_id !== user!.id) { setRepost({ state: "error", message: "You can only repost your own gigs." }); return; }
+        if (!canRepost(gig, user!.id)) { setRepost({ state: "error", message: "Only a cancelled or completed gig can be reposted." }); return; }
+        const { data: addressRow } = await supabase.from("gig_private_locations").select("address_text").eq("gig_id", repostId).maybeSingle();
+        if (!active) return;
+        const draft = repostDraft(gig, (addressRow as { address_text: string } | null)?.address_text);
+        setTitle(draft.title);
+        setDescription(draft.description);
+        setAmount(draft.amount);
+        if (draft.locationText) { setLocationText(draft.locationText); setCoordinates({ lat: draft.lat, lng: draft.lng }); }
+        setPrivateAddress(draft.privateAddress);
+        setUploadedPhoto(draft.photoUrl);
+        // A private request keeps the helper's own categories; otherwise copy the category and its tags.
+        if (!helperUsername) { setServiceType(draft.serviceType); setTagIds(draft.tagIds); }
+        setRepost({ state: "ready", title: gig.title });
+      } catch {
+        if (active) setRepost({ state: "error", message: "Couldn't load that gig. Check your connection and try again." });
+      }
+    })();
+    return () => { active = false; };
+    // Loaded once per link; helperUsername only decides whether the category is copied.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [supabase, repostId]);
 
   useEffect(() => {
     let active = true;
@@ -188,12 +229,27 @@ function PostGigForm() {
     </div>;
   }
   if (lookup.state === "loading") return <p className="text-neutral-500">Loading the helper…</p>;
+  if (repost.state === "error") {
+    return <div className="mx-auto max-w-lg space-y-4">
+      <h1 className="text-xl font-semibold">Repost a gig</h1>
+      <p role="alert" className="rounded-lg bg-red-50 px-3 py-2.5 text-sm text-red-700">{repost.message}</p>
+      <Link href="/my-gigs" className="touch-link block text-sm font-medium text-emerald-700">← Back to My Gigs</Link>
+      <Link href="/post" className="touch-link block text-sm font-medium text-emerald-700">Post a new gig from scratch</Link>
+    </div>;
+  }
+  if (repost.state === "loading") return <p className="text-neutral-500">Loading the gig…</p>;
   return <div className="mx-auto max-w-lg space-y-4">
     <h1 className="text-xl font-semibold">{requestedHelper ? `Post a Gig for @${requestedHelper.username}` : "Post a Gig"}</h1>
     {requestedHelper && (
       <div role="note" className="space-y-1 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm text-emerald-900">
         <p><strong>Private request.</strong> Only @{requestedHelper.username} will see it, and it isn&apos;t posted publicly or shown in Browse.</p>
         {!retained && <Link href="/post" className="touch-link font-medium underline">Post a public gig instead</Link>}
+      </div>
+    )}
+    {repost.state === "ready" && (
+      <div role="note" className="space-y-1 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm text-emerald-900">
+        <p><strong>Reposting &ldquo;{repost.title}&rdquo; as a new gig.</strong> The details are copied below. Choose a new date and check everything before you post. The original gig stays as it is.</p>
+        {!requestedHelper && <p>The repost is a regular gig that every helper can see.</p>}
       </div>
     )}
     {retained && <p role="status">A previous request is awaiting confirmation. Retry it to check the saved gig safely.</p>}
@@ -228,6 +284,7 @@ function PostGigForm() {
       <label className="block">Gig Title<input required maxLength={120} value={title} onChange={(e) => setTitle(e.target.value)} className={input} /></label>
       <label className="block">Brief Description<textarea required maxLength={50} rows={3} value={description} onChange={(e) => setDescription(e.target.value)} className={input} /></label>
       <label className="block">Photo (optional)<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => { setPhoto(e.target.files?.[0] ?? null); setUploadedPhoto(null); }} /></label>
+      {uploadedPhoto && !photo && repost.state === "ready" && <p className="text-sm text-neutral-500">The original photo will be reused. Choose a file to replace it.</p>}
       <label className="block">Budget ({CURRENCY})<input type="number" min="0.01" step="0.01" required value={amount} onChange={(e) => setAmount(e.target.value)} className={input} /></label>
       {requestedHelper ? (
         <div role="radiogroup" aria-labelledby="pricing-label">

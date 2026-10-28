@@ -9,6 +9,7 @@ import { createClient } from "@/lib/supabase/client";
 import { rpcActionError } from "@/lib/journey";
 import { formatMoney, offerError } from "@/lib/money";
 import { priceLabel, requestStage } from "@/lib/helper-request";
+import { canRepost, repostHref, repostPrivateHref } from "@/lib/repost";
 import StatusBadge from "@/components/StatusBadge";
 import ChatPanel from "@/components/ChatPanel";
 import TagChip from "@/components/TagChip";
@@ -531,6 +532,22 @@ function GigDetails({ id }: { id: string }) {
         >
           Cancel gig
         </button>
+      )}
+
+      {canRepost(gig, user?.id) && (
+        <section aria-label="Repost this gig" className="space-y-2 rounded-xl border border-neutral-200 bg-white p-4">
+          <h2 className="font-medium">Need this done again?</h2>
+          <p className="text-sm text-neutral-500">Start a new gig with the same details. This one stays in your history as it is.</p>
+          {gig.requested_helper_id && <p className="text-sm text-neutral-500">This was a private request. Reposting it as a new gig makes it visible to every helper.</p>}
+          <Link href={repostHref(gig.id)} className="flex min-h-11 w-full items-center justify-center rounded-lg bg-emerald-600 px-4 py-2.5 text-center font-medium text-white hover:bg-emerald-700">
+            Repost as a new gig
+          </Link>
+          {gig.requested_helper_id && requestedName && (
+            <Link href={repostPrivateHref(gig.id, requestedName, gig.service_type)} className="flex min-h-11 w-full items-center justify-center rounded-lg border border-emerald-600 px-4 py-2.5 text-center font-medium text-emerald-700 hover:bg-emerald-50">
+              Send to @{requestedName} again
+            </Link>
+          )}
+        </section>
       )}
 
       {gig.status === "disputed" && (
