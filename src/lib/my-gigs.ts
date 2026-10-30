@@ -60,13 +60,16 @@ export function helperSection(gig: GigLike, claimState: ClaimState | null, userI
   // A private request addressed to this helper that they have not answered yet.
   if (gig.status === "active" && !gig.selected_provider_id && gig.requested_helper_id === userId && claimState === null) return "requests";
   if (gig.status === "active" && !gig.selected_provider_id && claimState === "pending") return "proposals";
+  // Another helper was chosen but this offer is kept until the gig is over (migration 0024): it can still be picked
+  // if the chosen helper leaves before the start.
+  if (claimState === "pending" && gig.selected_provider_id && (gig.status === "active" || gig.status === "in_progress" || gig.status === "awaiting_payment" || gig.status === "disputed")) return "proposals";
   return "closed";
 }
 
 export function helperBadge(section: HelperSection, gig: GigLike, claimState: ClaimState | null): { label: string; tone: "pending" | "good" | "neutral" | "bad" } {
   switch (section) {
     case "requests": return { label: "New request", tone: "pending" };
-    case "proposals": return { label: "Proposal pending", tone: "pending" };
+    case "proposals": return gig.selected_provider_id ? { label: "On hold", tone: "neutral" } : { label: "Proposal pending", tone: "pending" };
     case "accepted": return { label: "Accepted", tone: "good" };
     case "in_progress": return { label: gig.status === "awaiting_payment" ? "Awaiting payment" : "In progress", tone: "good" };
     case "completed": return { label: gig.status === "incomplete" ? "Incomplete" : "Completed", tone: "neutral" };

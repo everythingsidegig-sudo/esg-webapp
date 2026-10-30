@@ -84,6 +84,10 @@ export interface Gig {
   // Migration 0022: the poster delayed a start request / the helper withdrew while it was delayed.
   start_delayed_at: string | null;
   helper_withdrawn_at: string | null;
+  // Migration 0023: waits the helper took on an unanswered start request, when the latest one ends, and when the poster removed the helper.
+  start_wait_count: number;
+  start_wait_until: string | null;
+  helper_removed_at: string | null;
   resolution_path: "complete" | "partial_pay" | null;
   incomplete_choice_phase: boolean;
   amount_paid: number | null;
@@ -181,6 +185,9 @@ export interface Database {
       withdraw_claim: { Args: { p_gig_id: string }; Returns: void };
       delay_start: { Args: { p_gig_id: string }; Returns: void };
       withdraw_from_gig: { Args: { p_gig_id: string }; Returns: void };
+      wait_for_start: { Args: { p_gig_id: string }; Returns: void };
+      withdraw_unanswered: { Args: { p_gig_id: string }; Returns: void };
+      remove_helper: { Args: { p_gig_id: string }; Returns: void };
       propose_price: { Args: { p_gig_id: string; p_amount: number }; Returns: PriceProposal };
       respond_price_proposal: { Args: { p_proposal_id: string; p_accept: boolean }; Returns: void };
       withdraw_price_proposal: { Args: { p_proposal_id: string }; Returns: void };
