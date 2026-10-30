@@ -60,7 +60,8 @@ function posterCard({ gig, proposals, helper, requestedTo }: PosterRow) {
           <StatusBadge status={gig.status} />
         </div>
         {helper && section !== "open" && <p className="mt-2 text-sm text-neutral-600">Helper: @{helper}{agreedLine(gig) ? ` · ${agreedLine(gig)}` : ""}</p>}
-        {gig.requested_helper_id && !gig.selected_provider_id && <p className="mt-2 text-sm text-emerald-800">🔒 Private request{requestedTo ? ` to @${requestedTo}` : ""}</p>}
+        {gig.helper_withdrawn_at && <p className="mt-2 text-sm text-amber-700">Your helper withdrew. You can post it again for everyone.</p>}
+        {gig.requested_helper_id && !gig.selected_provider_id && !gig.helper_withdrawn_at && <p className="mt-2 text-sm text-emerald-800">🔒 Private request{requestedTo ? ` to @${requestedTo}` : ""}</p>}
         {tagChips(gig)}
       </Link>
       <div className="flex items-center justify-between gap-3 border-t border-neutral-100 px-4">

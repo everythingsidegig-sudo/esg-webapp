@@ -13,6 +13,7 @@ import * as helperRequestLib from "../src/lib/helper-request.ts";
 import * as profileSaveLib from "../src/lib/profile-save.ts";
 import * as negotiationLib from "../src/lib/negotiation.ts";
 import * as repostLib from "../src/lib/repost.ts";
+import * as startFlowLib from "../src/lib/start-flow.ts";
 import { safeNext } from "../src/lib/journey.ts";
 
 // location.ts has extension-less relative imports (./journey, ./geocoding) that
@@ -93,6 +94,7 @@ async function component(path, name, overrides = {}) {
     "@/lib/profile-save": profileSaveLib,
     "@/lib/negotiation": negotiationLib,
     "@/lib/repost": repostLib,
+    "@/lib/start-flow": startFlowLib,
     "@/lib/area-lookup": { resolveAreaQuery: async () => ({ kind: "none" }) },
     "@/components/AreaPicker": { default: "area-picker" },
     "@/components/MapPicker": { default: "map-picker" },
@@ -4415,4 +4417,135 @@ test("Repost to the same helper: the private-request form keeps the helper's cat
   assert.equal(calls[0].payload.p_requested_helper_id, "helper-9");
   assert.deepEqual([...calls[0].payload.p_tag_ids], [], "tags belong to the gig's category and are re-picked for a private request");
   assert.equal(calls[0].payload.p_title, "Rake leaves");
+});
+
+// ===========================================================================
+// Delay start, wait or withdraw, then post it again (migration 0022)
+// ===========================================================================
+test("start-flow helpers: who sees which step of the start request, and when the server can delay at all", () => {
+  const { startView, delayAvailable, helperWithdrew } = startFlowLib;
+  const gig = (fields) => ({ status: "active", poster_id: "poster", selected_provider_id: "helper", start_requested_at: "2026-10-01T10:00:00Z", start_delayed_at: null, ...fields });
+  assert.equal(startView(gig(), "poster"), "poster-review");
+  assert.equal(startView(gig(), "helper"), "helper-waiting");
+  assert.equal(startView(gig({ start_delayed_at: "2026-10-01T11:00:00Z" }), "poster"), "poster-delayed");
+  assert.equal(startView(gig({ start_delayed_at: "2026-10-01T11:00:00Z" }), "helper"), "helper-delayed");
+  assert.equal(startView(gig(), "stranger"), "none", "only the two people in the gig");
+  assert.equal(startView(gig(), null), "none");
+  assert.equal(startView(gig({ start_requested_at: null }), "poster"), "none", "no request, nothing to review");
+  assert.equal(startView(gig({ selected_provider_id: null }), "poster"), "none");
+  for (const status of ["draft", "in_progress", "awaiting_payment", "completed", "cancelled", "disputed"]) assert.equal(startView(gig({ status }), "poster"), "none", status);
+  assert.equal(delayAvailable({ start_delayed_at: null }), true, "the column comes back (even when empty)");
+  assert.equal(delayAvailable({ id: "g" }), false, "a server without migration 0022 does not send it");
+  assert.equal(helperWithdrew({ status: "cancelled", helper_withdrawn_at: "2026-10-02T10:00:00Z" }), true);
+  assert.equal(helperWithdrew({ status: "cancelled", helper_withdrawn_at: null }), false, "a plain cancellation");
+  assert.equal(helperWithdrew({ status: "active", helper_withdrawn_at: "2026-10-02T10:00:00Z" }), false);
+});
+
+const startGig = (fields) => ({ requested_helper_id: null, selected_provider_id: "helper-1", agreed_amount: 55, start_requested_at: "2026-10-02T10:00:00Z", start_delayed_at: null, helper_withdrawn_at: null, ...fields });
+
+test("Poster: a start request can be accepted or delayed (after a confirmation), and a delayed start can still be accepted", async () => {
+  const review = await openRequest({ asUser: "poster-1", gig: startGig() });
+  assert.ok(buttonText(review.tree, "ACCEPT START — LET'S GO"));
+  const delay = buttonText(review.tree, "Delay start");
+  assert.ok(delay, "Delay start sits next to Accept");
+  assert.match(delay.props.className, /min-h-11/);
+  await delay.props.onClick();
+  assert.deepEqual(review.rpcs, [["delay_start", { p_gig_id: "gig-1" }]]);
+  assert.match(review.confirms[0], /helper will be asked to wait.*withdraw/);
+
+  const declined = await openRequest({ asUser: "poster-1", gig: startGig(), confirm: false });
+  await buttonText(declined.tree, "Delay start").props.onClick();
+  assert.deepEqual(declined.rpcs, [], "cancelling the dialog sends nothing");
+
+  const delayed = await openRequest({ asUser: "poster-1", gig: startGig({ start_delayed_at: "2026-10-02T11:00:00Z" }) });
+  assert.match(textOf(delayed.tree), /You delayed the start\. @helper1 can wait or withdraw/);
+  assert.equal(buttonText(delayed.tree, "Delay start"), undefined, "a start can be delayed once");
+  await buttonText(delayed.tree, "ACCEPT START — LET'S GO").props.onClick();
+  assert.deepEqual(delayed.rpcs, [["approve_start", { p_gig_id: "gig-1" }]], "the existing approval still works");
+});
+
+test("Poster: on a server without migration 0022 the Delay button is not offered, and Accept still works", async () => {
+  const gig = startGig(); delete gig.start_delayed_at; delete gig.helper_withdrawn_at;
+  const { tree } = await openRequest({ asUser: "poster-1", gig });
+  assert.equal(buttonText(tree, "Delay start"), undefined);
+  assert.ok(buttonText(tree, "ACCEPT START — LET'S GO"));
+});
+
+test("Helper: waits quietly until the poster responds; when the start is delayed they can wait or withdraw", async () => {
+  const waiting = await openRequest({ asUser: "helper-1", gig: startGig(), claims: { "helper-1": { id: "c", state: "selected", provider_id: "helper-1" } } });
+  assert.match(textOf(waiting.tree), /Waiting for the Poster to approve start/);
+  assert.equal(nodes(waiting.tree, (node) => node.props["aria-label"] === "Start delayed").length, 0);
+
+  const delayedGig = startGig({ start_delayed_at: "2026-10-02T11:00:00Z" });
+  const delayed = await openRequest({ asUser: "helper-1", gig: delayedGig, claims: { "helper-1": { id: "c", state: "selected", provider_id: "helper-1" } } });
+  const card = nodes(delayed.tree, (node) => node.props["aria-label"] === "Start delayed")[0];
+  assert.ok(card, "the choice card");
+  assert.match(textOf(card), /The poster asked you to wait/);
+  assert.deepEqual(nodes(card, (node) => node.type === "button").map(textOf), ["I'll wait", "Withdraw"]);
+  for (const b of nodes(card, (node) => node.type === "button")) assert.match(b.props.className, /min-h-11/);
+
+  // Wait: no server call, the choices go away, and the helper is told what happens next.
+  nodes(card, (node) => node.type === "button" && textOf(node) === "I'll wait")[0].props.onClick();
+  const after = delayed.again();
+  assert.deepEqual(delayed.rpcs, []);
+  assert.equal(nodes(after, (node) => node.type === "button" && textOf(node) === "Withdraw").length, 0);
+  assert.match(textOf(after), /notified as soon as the poster approves/);
+
+  // Withdraw: asks first, then calls the new function.
+  const leaving = await openRequest({ asUser: "helper-1", gig: delayedGig, claims: { "helper-1": { id: "c", state: "selected", provider_id: "helper-1" } } });
+  await nodes(leaving.tree, (node) => node.type === "button" && textOf(node) === "Withdraw")[0].props.onClick();
+  assert.deepEqual(leaving.rpcs, [["withdraw_from_gig", { p_gig_id: "gig-1" }]]);
+  assert.match(leaving.confirms[0], /cannot claim it again/);
+  const kept = await openRequest({ asUser: "helper-1", gig: delayedGig, confirm: false, claims: { "helper-1": { id: "c", state: "selected", provider_id: "helper-1" } } });
+  await nodes(kept.tree, (node) => node.type === "button" && textOf(node) === "Withdraw")[0].props.onClick();
+  assert.deepEqual(kept.rpcs, [], "cancelling the dialog does not withdraw");
+});
+
+test("Nobody else gets the start decisions: not a stranger, not the poster as helper, not the helper as poster", async () => {
+  const delayedGig = startGig({ start_delayed_at: "2026-10-02T11:00:00Z" });
+  const stranger = await openRequest({ asUser: "stranger", gig: delayedGig });
+  for (const label of ["Delay start", "Withdraw", "I'll wait", "ACCEPT START — LET'S GO"]) assert.equal(buttonText(stranger.tree, label), undefined, label);
+  const helperView = await openRequest({ asUser: "helper-1", gig: startGig(), claims: { "helper-1": { id: "c", state: "selected", provider_id: "helper-1" } } });
+  assert.equal(buttonText(helperView.tree, "Delay start"), undefined, "the helper cannot delay their own request");
+  assert.equal(buttonText(helperView.tree, "ACCEPT START — LET'S GO"), undefined);
+  const posterView = await openRequest({ asUser: "poster-1", gig: delayedGig });
+  assert.equal(buttonText(posterView.tree, "Withdraw"), undefined, "the poster cannot withdraw the helper");
+});
+
+test("After the helper withdraws: the poster is offered to post it publicly again, the helper sees they withdrew", async () => {
+  const withdrawn = { status: "cancelled", selected_provider_id: null, agreed_amount: null, start_requested_at: null, start_delayed_at: null, helper_withdrawn_at: "2026-10-03T10:00:00Z", requested_helper_id: null };
+  const poster = await openRequest({ asUser: "poster-1", gig: withdrawn });
+  const section = nodes(poster.tree, (node) => node.props["aria-label"] === "Repost this gig")[0];
+  assert.match(textOf(section), /Your helper withdrew/);
+  const link = nodes(section, (node) => node.type === "a")[0];
+  assert.equal(textOf(link), "Post it publicly as a new gig");
+  assert.equal(link.props.href, "/post?repost=gig-1", "the existing repost opens the form prefilled");
+  assert.equal(nodes(section, (node) => node.type === "a").length, 1);
+
+  // A private request: the withdrawn helper is not offered the request again.
+  const privateGig = await openRequest({ asUser: "poster-1", gig: { ...withdrawn, requested_helper_id: "helper-1" } });
+  const privateLinks = nodes(nodes(privateGig.tree, (node) => node.props["aria-label"] === "Repost this gig")[0], (node) => node.type === "a").map(textOf);
+  assert.deepEqual(privateLinks, ["Post it publicly as a new gig"], "no 'Send to @helper again' for the helper who withdrew");
+
+  const helper = await openRequest({ asUser: "helper-1", gig: withdrawn, claims: { "helper-1": { id: "c", state: "withdrawn", provider_id: "helper-1" } } });
+  assert.match(textOf(helper.tree), /You withdrew from this gig/);
+  assert.equal(nodes(helper.tree, (node) => node.props["aria-label"] === "Repost this gig").length, 0, "only the poster can repost");
+  assert.equal(nodes(helper.tree, (node) => node.type === "chat-panel").length, 0, "and the conversation is closed for the helper");
+
+  // An ordinary cancellation keeps its old wording.
+  const plain = await openRequest({ asUser: "poster-1", gig: { ...withdrawn, helper_withdrawn_at: null } });
+  assert.match(textOf(nodes(plain.tree, (node) => node.props["aria-label"] === "Repost this gig")[0]), /Need this done again\?/);
+});
+
+test("My Gigs: a gig whose helper withdrew says so on the poster's card", async () => {
+  const gig = myGig("g-w", { status: "cancelled", helper_withdrawn_at: "2026-10-03T10:00:00Z", requested_helper_id: null });
+  const client = fakeDb((query) => {
+    if (query.table === "gigs" && query.eq.poster_id) return { data: [gig, myGig("g-plain", { status: "cancelled" })], error: null };
+    return { data: [], error: null };
+  });
+  const app = await component("src/app/my-gigs/page.tsx", "MyGigsInner", { client });
+  app.render(); await flush();
+  const cancelled = sectionNamed(app.render(), "Cancelled");
+  assert.equal((textOf(cancelled).match(/Your helper withdrew/g) ?? []).length, 1, "only the withdrawn gig carries the note");
+  assert.match(textOf(cancelled), /post it again for everyone/);
 });

@@ -10,6 +10,7 @@ import { rpcActionError } from "@/lib/journey";
 import { formatMoney, offerError } from "@/lib/money";
 import { priceLabel, requestStage } from "@/lib/helper-request";
 import { canRepost, repostHref, repostPrivateHref } from "@/lib/repost";
+import { delayAvailable, helperWithdrew, startView } from "@/lib/start-flow";
 import StatusBadge from "@/components/StatusBadge";
 import ChatPanel from "@/components/ChatPanel";
 import TagChip from "@/components/TagChip";
@@ -36,6 +37,8 @@ function GigDetails({ id }: { id: string }) {
   const [offerMessage, setOfferMessage] = useState("");
   const [privateAddress, setPrivateAddress] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // "I'll wait": the helper's answer to a delayed start is just to carry on waiting, so it needs no server call.
+  const [willWait, setWillWait] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [people, setPeople] = useState<Record<string, string>>({});
   const scrolledToHash = useRef(false);
@@ -167,6 +170,7 @@ function GigDetails({ id }: { id: string }) {
   const isPoster = user?.id === gig.poster_id;
   const isSelectedProvider = user?.id === gig.selected_provider_id;
   const isRequestedHelper = !!user && gig.requested_helper_id === user.id;
+  const view = startView(gig, user?.id);
   const requested = !!gig.requested_helper_id;
   const negotiable = gig.price_type === "negotiable";
   const requestedName = gig.requested_helper_id ? people[gig.requested_helper_id] : undefined;
@@ -264,7 +268,7 @@ function GigDetails({ id }: { id: string }) {
       )}
 
       {myClaim?.state === "withdrawn" && (
-        <p className="rounded-lg bg-neutral-100 p-3 text-sm text-neutral-700">{isRequestedHelper ? "You declined this request." : "You withdrew your offer."}</p>
+        <p className="rounded-lg bg-neutral-100 p-3 text-sm text-neutral-700">{gig.helper_withdrawn_at ? "You withdrew from this gig." : isRequestedHelper ? "You declined this request." : "You withdrew your offer."}</p>
       )}
 
       {isRequestedHelper && (stage === "waiting" || stage === "countered") && (
@@ -380,17 +384,52 @@ function GigDetails({ id }: { id: string }) {
               START
             </button>
           )}
-          {gig.status === "active" && gig.start_requested_at && isPoster && (
-            <button
-              disabled={busy}
-              onClick={() => run(() => supabase.rpc("approve_start", { p_gig_id: id }))}
-              className="w-full rounded-lg bg-emerald-600 py-2.5 font-medium text-white disabled:opacity-60"
-            >
-              ACCEPT START — LET&apos;S GO
-            </button>
+          {(view === "poster-review" || view === "poster-delayed") && (
+            <div className="space-y-2">
+              {view === "poster-delayed" && (
+                <p role="status" className="rounded-lg bg-yellow-50 p-3 text-sm text-yellow-800">
+                  You delayed the start. {people[gig.selected_provider_id!] ? `@${people[gig.selected_provider_id!]}` : "Your helper"} can wait or withdraw. Accept the start whenever you are ready.
+                </p>
+              )}
+              <button
+                disabled={busy}
+                onClick={() => run(() => supabase.rpc("approve_start", { p_gig_id: id }))}
+                className="w-full rounded-lg bg-emerald-600 py-2.5 font-medium text-white disabled:opacity-60"
+              >
+                ACCEPT START — LET&apos;S GO
+              </button>
+              {view === "poster-review" && delayAvailable(gig) && (
+                <button
+                  disabled={busy}
+                  onClick={() => { if (window.confirm("Delay the start? Your helper will be asked to wait, and can choose to withdraw.")) void run(() => supabase.rpc("delay_start", { p_gig_id: id })); }}
+                  className="flex min-h-11 w-full items-center justify-center rounded-lg border border-neutral-300 bg-white px-4 py-2.5 font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-60"
+                >
+                  Delay start
+                </button>
+              )}
+            </div>
           )}
-          {gig.status === "active" && gig.start_requested_at && isSelectedProvider && (
+          {view === "helper-waiting" && (
             <p className="rounded-lg bg-yellow-50 p-3 text-sm text-yellow-800">Waiting for the Poster to approve start.</p>
+          )}
+          {view === "helper-delayed" && (
+            <section aria-label="Start delayed" className="space-y-3 rounded-xl border border-yellow-300 bg-yellow-50 p-4">
+              <h2 className="font-medium text-yellow-900">The poster asked you to wait</h2>
+              {willWait ? (
+                <p role="status" className="text-sm text-yellow-900">Okay. You will be notified as soon as the poster approves the start.</p>
+              ) : (
+                <>
+                  <p className="text-sm text-yellow-900">The start was delayed. You can wait for the poster to approve it, or withdraw from this gig.</p>
+                  <div className="flex gap-3">
+                    <button type="button" disabled={busy} onClick={() => setWillWait(true)}
+                      className="min-h-11 flex-1 rounded-lg bg-emerald-600 px-4 font-medium text-white hover:bg-emerald-700 disabled:opacity-60">I&apos;ll wait</button>
+                    <button type="button" disabled={busy}
+                      onClick={() => { if (window.confirm("Withdraw from this gig? It will close for you, and you cannot claim it again.")) void run(() => supabase.rpc("withdraw_from_gig", { p_gig_id: id })); }}
+                      className="min-h-11 flex-1 rounded-lg border border-neutral-300 bg-white px-4 font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-60">Withdraw</button>
+                  </div>
+                </>
+              )}
+            </section>
           )}
 
           {gig.status === "in_progress" && !gig.incomplete_choice_phase && (
@@ -536,13 +575,17 @@ function GigDetails({ id }: { id: string }) {
 
       {canRepost(gig, user?.id) && (
         <section aria-label="Repost this gig" className="space-y-2 rounded-xl border border-neutral-200 bg-white p-4">
-          <h2 className="font-medium">Need this done again?</h2>
-          <p className="text-sm text-neutral-500">Start a new gig with the same details. This one stays in your history as it is.</p>
+          <h2 className="font-medium">{helperWithdrew(gig) ? "Your helper withdrew" : "Need this done again?"}</h2>
+          <p className="text-sm text-neutral-500">
+            {helperWithdrew(gig)
+              ? "Post it again so every helper can see it. This one stays in your history as it is."
+              : "Start a new gig with the same details. This one stays in your history as it is."}
+          </p>
           {gig.requested_helper_id && <p className="text-sm text-neutral-500">This was a private request. Reposting it as a new gig makes it visible to every helper.</p>}
           <Link href={repostHref(gig.id)} className="flex min-h-11 w-full items-center justify-center rounded-lg bg-emerald-600 px-4 py-2.5 text-center font-medium text-white hover:bg-emerald-700">
-            Repost as a new gig
+            {helperWithdrew(gig) ? "Post it publicly as a new gig" : "Repost as a new gig"}
           </Link>
-          {gig.requested_helper_id && requestedName && (
+          {gig.requested_helper_id && requestedName && !helperWithdrew(gig) && (
             <Link href={repostPrivateHref(gig.id, requestedName, gig.service_type)} className="flex min-h-11 w-full items-center justify-center rounded-lg border border-emerald-600 px-4 py-2.5 text-center font-medium text-emerald-700 hover:bg-emerald-50">
               Send to @{requestedName} again
             </Link>

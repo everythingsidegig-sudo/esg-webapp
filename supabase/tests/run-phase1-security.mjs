@@ -4,7 +4,8 @@ import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
 const root = new URL("../", import.meta.url);
-const negotiation = process.argv.includes("--negotiation");
+const delayStart = process.argv.includes("--delay-start");
+const negotiation = process.argv.includes("--negotiation") || delayStart;
 const profileSave = process.argv.includes("--profile-save") || negotiation;
 const requests = process.argv.includes("--requests") || profileSave;
 // origin/main's migrations 0011-0018 (taxonomy, deletion eligibility, account settings,
@@ -275,6 +276,20 @@ if (profileSave) {
   if (/create (?:or replace )?(?:function|policy|trigger|table)|drop |alter /i.test(code)) throw new Error("The profile grant migration must not change functions, policies, triggers or tables");
   console.log("PASS: profile grant migration scope (UPDATE on phone, skills_other_text and services_other_text for authenticated only; no policy, trigger or function change)");
 }
+if (delayStart) {
+  const sql = await readFile(new URL("migrations/20240101000022_delay_start_and_withdraw.sql", root), "utf8");
+  const code = sql.replace(/--.*$/gm, "");
+  const created = [...code.matchAll(/create function public\.([a-z_]+)\(/g)].map((entry) => entry[1]).sort();
+  if (created.join(",") !== "delay_start,withdraw_from_gig") throw new Error(`The delay-start migration must create exactly its two functions, found: ${created}`);
+  if (/create or replace function/i.test(code)) throw new Error("The delay-start migration must not replace any existing function");
+  for (const entry of code.matchAll(/create function public\.[a-z_]+\([\s\S]*?\n\$\$;/g)) {
+    if (!entry[0].includes("security definer set search_path = ''")) throw new Error("Every delay-start function must be SECURITY DEFINER with an empty search_path");
+    if (!/if auth\.uid\(\) is null then\s*raise exception 'Authentication required' using errcode = '42501'/.test(entry[0])) throw new Error("Every delay-start function must start with an explicit authentication guard");
+  }
+  if (!/alter table public\.gigs\s+add column start_delayed_at timestamptz,\s+add column helper_withdrawn_at timestamptz;/.test(code)) throw new Error("The delay-start migration must add exactly the two nullable gig columns");
+  if (/\bto\s+(anon|public)\b/i.test(code.replace(/revoke[\s\S]*?;/gi, "")) || /grant (insert|update|delete)\b/i.test(code)) throw new Error("The delay-start migration must grant execute to authenticated only");
+  console.log("PASS: delay-start migration scope (two nullable gig columns, two new SECURITY DEFINER functions with authentication guards, execute for authenticated only)");
+}
 if (negotiation) {
   const sql = await readFile(new URL("migrations/20240101000021_price_negotiation.sql", root), "utf8");
   const code = sql.replace(/--.*$/gm, "");
@@ -364,6 +379,7 @@ try {
     ...(requests ? ["migrations/20240101000019_helper_requests.sql"] : []),
     ...(profileSave ? ["migrations/20240101000020_profile_column_update_grants.sql"] : []),
     ...(negotiation ? ["migrations/20240101000021_price_negotiation.sql"] : []),
+    ...(delayStart ? ["migrations/20240101000022_delay_start_and_withdraw.sql"] : []),
     "tests/phase1_security.sql",
     ...(phase2a ? ["tests/phase2a_integrity.sql"] : []),
     ...(onboarding ? ["tests/onboarding_post_gig.sql"] : []),
@@ -376,19 +392,20 @@ try {
     ...(requests ? ["tests/helper_requests.sql"] : []),
     ...(profileSave ? ["tests/profile_column_grants.sql"] : []),
     ...(negotiation ? ["tests/price_negotiation.sql"] : []),
+    ...(delayStart ? ["tests/delay_start.sql"] : []),
   ]) {
     const sql = await readFile(new URL(file, root), "utf8");
     await db.exec(sql);
     if (file.startsWith("tests/")) {
       // Every assertion is an unconditional top-level SELECT. Successful SQL
       // execution means every call returned without raising its failure error.
-      const assertions = [...sql.matchAll(/^select pg_temp\.(?:assert|expect_denied|phase2_assert|phase2_expect_error|journey_assert|journey_error_any|journey_error|dw_assert|dw_denied|dw_error|gt_assert|gt_denied|gt_error|pt_assert|pt_denied|pt_error|hl_assert|hl_denied|hl_error|ad_assert|ad_error|of_assert|of_error|of_denied|rq_assert|rq_error|rq_denied|po_assert|po_error|po_denied|pn_assert|pn_error|pn_denied)\(/gm)].length;
+      const assertions = [...sql.matchAll(/^select pg_temp\.(?:assert|expect_denied|phase2_assert|phase2_expect_error|journey_assert|journey_error_any|journey_error|dw_assert|dw_denied|dw_error|gt_assert|gt_denied|gt_error|pt_assert|pt_denied|pt_error|hl_assert|hl_denied|hl_error|ad_assert|ad_error|of_assert|of_error|of_denied|rq_assert|rq_error|rq_denied|po_assert|po_error|po_denied|pn_assert|pn_error|pn_denied|ds_assert|ds_error|ds_denied)\(/gm)].length;
       passed += assertions;
       console.log(`PASS: ${file}: ${assertions} assertions`);
     }
     console.log(`Executed ${file}`);
   }
-  const cleanup = await db.query("select to_regclass('pg_temp.security_fixture') is null and to_regclass('pg_temp.phase2_fixture') is null and to_regclass('pg_temp.journey_fixture') is null and to_regclass('pg_temp.dw_fixture') is null and to_regclass('pg_temp.gt_fixture') is null and to_regclass('pg_temp.pt_fixture') is null and to_regclass('pg_temp.hl_fixture') is null and to_regclass('pg_temp.ad_fixture') is null and to_regclass('pg_temp.of_fixture') is null and to_regclass('pg_temp.rq_fixture') is null and to_regclass('pg_temp.po_fixture') is null and to_regclass('pg_temp.pn_fixture') is null as clean");
+  const cleanup = await db.query("select to_regclass('pg_temp.security_fixture') is null and to_regclass('pg_temp.phase2_fixture') is null and to_regclass('pg_temp.journey_fixture') is null and to_regclass('pg_temp.dw_fixture') is null and to_regclass('pg_temp.gt_fixture') is null and to_regclass('pg_temp.pt_fixture') is null and to_regclass('pg_temp.hl_fixture') is null and to_regclass('pg_temp.ad_fixture') is null and to_regclass('pg_temp.of_fixture') is null and to_regclass('pg_temp.rq_fixture') is null and to_regclass('pg_temp.po_fixture') is null and to_regclass('pg_temp.pn_fixture') is null and to_regclass('pg_temp.ds_fixture') is null as clean");
   if (!cleanup.rows[0].clean) throw new Error("SQL fixtures did not roll back");
   console.log(`PASS: ${passed} security assertions in isolated PostgreSQL/WASM`);
   console.log("Hosted Supabase, PostgREST, Auth, Storage and Realtime integration remain unverified.");

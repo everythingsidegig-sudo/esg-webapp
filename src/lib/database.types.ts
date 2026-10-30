@@ -81,6 +81,9 @@ export interface Gig {
   selected_provider_id: string | null;
   start_requested_at: string | null;
   start_approved_at: string | null;
+  // Migration 0022: the poster delayed a start request / the helper withdrew while it was delayed.
+  start_delayed_at: string | null;
+  helper_withdrawn_at: string | null;
   resolution_path: "complete" | "partial_pay" | null;
   incomplete_choice_phase: boolean;
   amount_paid: number | null;
@@ -176,6 +179,8 @@ export interface Database {
       create_gig: { Args: { p_request_id: string; p_service_type: string; p_title: string; p_description: string; p_amount: number; p_price_type: string; p_scheduled_at: string | null; p_location_text: string; p_lat: number | null; p_lng: number | null; p_photo_url?: string | null; p_publish?: boolean; p_tag_ids?: string[]; p_private_address?: string | null; p_requested_helper_id?: string | null }; Returns: Gig };
       create_claim: { Args: { p_gig_id: string; p_offer_amount?: number | null; p_message?: string | null }; Returns: Claim };
       withdraw_claim: { Args: { p_gig_id: string }; Returns: void };
+      delay_start: { Args: { p_gig_id: string }; Returns: void };
+      withdraw_from_gig: { Args: { p_gig_id: string }; Returns: void };
       propose_price: { Args: { p_gig_id: string; p_amount: number }; Returns: PriceProposal };
       respond_price_proposal: { Args: { p_proposal_id: string; p_accept: boolean }; Returns: void };
       withdraw_price_proposal: { Args: { p_proposal_id: string }; Returns: void };
