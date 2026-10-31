@@ -177,7 +177,7 @@ export default function FindHelper() {
     <div className="space-y-5">
       <h1 className="text-xl font-semibold">Find a Helper</h1>
 
-      <AreaPicker area={searcherLocation} onChange={setSearcherLocation} />
+      <AreaPicker area={searcherLocation} onChange={setSearcherLocation} radiusKm={radiusKm} />
 
       <fieldset className="min-w-0 w-full">
         <legend className="text-sm font-medium">Choose a category</legend>

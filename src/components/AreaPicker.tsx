@@ -22,7 +22,7 @@ const POSTCODE_LIKE = /^[A-Za-z]{0,3}[-\s]?\d{3,5}\s?\d{0,2}$/;
 // A visitor does not need an account to say where they are looking: a ZIP or postal code, a
 // neighborhood or city, or the current location -- then fine-tune it with the map pin. The
 // text, the saved coordinates and the pin always describe the same place.
-export default function AreaPicker({ area, onChange }: { area: Area; onChange: (area: Area) => void }) {
+export default function AreaPicker({ area, onChange, radiusKm }: { area: Area; onChange: (area: Area) => void; radiusKm?: number | null }) {
   const [query, setQuery] = useState("");
   const [matches, setMatches] = useState<AreaMatch[]>([]);
   const [busy, setBusy] = useState(false);
@@ -168,7 +168,7 @@ export default function AreaPicker({ area, onChange }: { area: Area; onChange: (
         </ul>
       )}
       {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
-      {area.lat != null && area.lng != null && <MapPicker lat={area.lat} lng={area.lng} onPick={(point) => { void pinMoved(point); }} />}
+      {area.lat != null && area.lng != null && <MapPicker lat={area.lat} lng={area.lng} radiusKm={radiusKm} onPick={(point) => { void pinMoved(point); }} />}
       <p className="text-xs text-neutral-500">A general area is enough. Coordinates are rounded and never include a street address.</p>
     </section>
   );

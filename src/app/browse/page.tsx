@@ -81,7 +81,7 @@ function BrowseInner() {
     <div className="space-y-5">
       <h1 className="text-xl font-semibold">Gigs Nearby</h1>
 
-      <AreaPicker area={area} onChange={setArea} />
+      <AreaPicker area={area} onChange={setArea} radiusKm={radiusKm} />
 
       <div className="flex flex-wrap gap-3">
         <fieldset className="min-w-0 w-full">
