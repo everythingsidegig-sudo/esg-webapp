@@ -89,7 +89,9 @@ export default function FindHelper() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
-  const [radiusKm, setRadiusKm] = useState<number | null>(null);
+  // Defaults to a visible radius, same as Browse's slider, rather than hidden behind
+  // "Any distance" -- opting into no limit is still one click away.
+  const [radiusKm, setRadiusKm] = useState<number | null>(DEFAULT_RADIUS_KM);
   const [searcherLocation, setSearcherLocation] = useState<Area>({ text: "", lat: null, lng: null });
   const { user, loading: authLoading } = useAuth();
   const gated = !authLoading && !user;

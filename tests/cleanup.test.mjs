@@ -1277,7 +1277,7 @@ function setDistance(app, tree, km) {
   return app.render();
 }
 
-test("Find a Helper: Any distance (default) includes helpers with and without a public location", async () => {
+test("Find a Helper: Any distance includes helpers with and without a public location", async () => {
   const profiles = [
     { id: "a", username: "NearHelper", photo_url: null, skills: ["Cleaning"], wom_count: 1, public_lat: 0.01, public_lng: 0, profile_tags: [] },
     { id: "b", username: "NoLocationHelper", photo_url: null, skills: ["Cleaning"], wom_count: 2, public_lat: null, public_lng: null, profile_tags: [] },
@@ -1292,7 +1292,9 @@ test("Find a Helper: Any distance (default) includes helpers with and without a 
   chip("Cleaning").props.onClick();
   tree = app.render(); await flush();
   tree = app.render();
-  assert.deepEqual(helperUsernames(tree).sort(), ["NearHelper", "NoLocationHelper"], "Any distance shows every category match regardless of location, unchanged from before this feature");
+  // A radius is active by default (same as Browse's slider); explicitly choose Any distance.
+  tree = setDistance(app, tree, null);
+  assert.deepEqual(helperUsernames(tree).sort(), ["NearHelper", "NoLocationHelper"], "Any distance shows every category match regardless of location");
 });
 
 test("Find a Helper distance filter narrows by 5/10/25 km boundaries, excludes helpers without a public location, and sorts nearest-first", async () => {
@@ -1315,6 +1317,7 @@ test("Find a Helper distance filter narrows by 5/10/25 km boundaries, excludes h
   chip("Cleaning").props.onClick();
   tree = app.render(); await flush();
   tree = app.render();
+  tree = setDistance(app, tree, null);
   assert.deepEqual(helperUsernames(tree).sort(), ["Beyond26km", "Far24km", "Mid9km", "Near4km", "NoLocation"], "Any distance still includes everyone");
 
   tree = setDistance(app, tree, 5);
@@ -2668,7 +2671,11 @@ async function yardWorkHelperPage(profiles, tagLinks = [], filters = []) {
   let tree = app.render();
   nodes(tree, (node) => node.type === "selection-chip" && node.props.children === "Yard Work")[0].props.onClick();
   tree = app.render(); await flush();
-  return { app, queries, tree: app.render() };
+  tree = app.render();
+  // A radius is active by default; most callers care about category/query shape, not
+  // distance, so this restores the old "Any distance" starting point for all of them.
+  tree = setDistance(app, tree, null);
+  return { app, queries, tree };
 }
 const noTagsNoLocationHelper = { id: "b", username: "AccountB", photo_url: null, skills: ["Yard Work"], wom_count: 0, public_location_text: null, public_lat: null, public_lng: null };
 
@@ -2726,7 +2733,11 @@ async function openFindHelper({ profiles = [helperSkillsProfile("a", "HelperOne"
   let tree = app.render();
   nodes(tree, (node) => node.type === "selection-chip" && node.props.children === "Cleaning")[0].props.onClick();
   tree = app.render(); await flush();
-  return { app, filters, tree: app.render() };
+  tree = app.render();
+  // A radius is active by default; these tests care about auth/gating, not distance, and
+  // most fixture profiles have no public location, which a default radius would exclude.
+  tree = setDistance(app, tree, null);
+  return { app, filters, tree };
 }
 const helperCards = (tree) => nodes(tree, (node) => node.props?.profile?.username);
 // HelperCard is a local component the harness never invokes: call it to get its rendered link.
@@ -2823,8 +2834,10 @@ test("Find a Helper restores a search from ?category=, ignores unknown values, a
   });
   restored.auth.user = null;
   restored.render(); await flush(); restored.render(); await flush();
-  const tree = restored.render();
+  let tree = restored.render();
   assert.equal(nodes(tree, (node) => node.type === "selection-chip" && node.props.children === "Cleaning")[0].props.selected, true);
+  // A radius is active by default; HelperOne has no public location, which it would exclude.
+  tree = setDistance(restored, tree, null);
   assert.deepEqual(helperCards(tree).map((card) => card.props.profile.username), ["HelperOne"]);
   assert.deepEqual(history, ["/find-helper?category=Cleaning"]);
 
