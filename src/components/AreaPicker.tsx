@@ -10,10 +10,11 @@ import type { AreaMatch } from "@/lib/area-search";
 export type Area = { text: string; lat: number | null; lng: number | null };
 
 // Same journey-location record /location writes, so Browse and Post a Gig pick the chosen
-// area up too. Coordinates are always the rounded ones (postcode lookup, area search, the map
-// pin and approximateCoordinates all round to two decimals); a street address is never stored.
+// area up too, and it survives closing the browser -- signing back in later finds it already
+// set. Coordinates are always the rounded ones (postcode lookup, area search, the map pin and
+// approximateCoordinates all round to two decimals); a street address is never stored.
 function saveArea(area: Area) {
-  try { sessionStorage.setItem(LOCATION_KEY, JSON.stringify(area)); } catch { /* storage unavailable: the choice still applies for this page */ }
+  try { localStorage.setItem(LOCATION_KEY, JSON.stringify(area)); } catch { /* storage unavailable: the choice still applies for this page */ }
 }
 
 const POSTCODE_LIKE = /^[A-Za-z]{0,3}[-\s]?\d{3,5}\s?\d{0,2}$/;
@@ -31,7 +32,7 @@ export default function AreaPicker({ area, onChange }: { area: Area; onChange: (
 
   // Collapsed to a one-line summary once an area is set, so the search box, "use my
   // location" and the map don't stay permanently open and take up the page. A caller
-  // that starts with an empty area and fills it in shortly after hydration (sessionStorage
+  // that starts with an empty area and fills it in shortly after hydration (localStorage
   // isn't visible to the server render) still collapses once, the first time that happens;
   // syncedInitialArea stops that from fighting a later manual "Update location" click.
   const [expanded, setExpanded] = useState(!area.text);

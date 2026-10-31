@@ -22,7 +22,7 @@ function BrowseInner() {
   const supabase = createClient();
   // The area saved on /location (or wherever it was last set) carries over here, the
   // same way Find a Helper picks it up; editable right on this page too via AreaPicker.
-  // sessionStorage isn't visible to the server render, so this is read after hydration
+  // localStorage isn't visible to the server render, so this is read after hydration
   // (as Find a Helper already does) rather than as the initial state, which would mismatch.
   const [area, setArea] = useState<Area>({ text: "", lat: null, lng: null });
   const { lat, lng } = area;

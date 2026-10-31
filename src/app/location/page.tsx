@@ -142,13 +142,13 @@ function LocationEntryInner() {
       setError("Enter a general area of 1–200 characters or use your current location.");
       return;
     }
-    try { sessionStorage.setItem(LOCATION_KEY, JSON.stringify({ text: zipArea ?? locationText.trim(), ...coords })); }
+    try { localStorage.setItem(LOCATION_KEY, JSON.stringify({ text: zipArea ?? locationText.trim(), ...coords })); }
     catch { setError("Enable site storage in your browser to continue."); return; }
     setConfirmed(true);
   }
 
   function browseGigs() {
-    // continueJourney() already saved this area to sessionStorage; Browse reads it
+    // continueJourney() already saved this area to localStorage; Browse reads it
     // the same way Find a Helper does.
     router.push("/browse");
   }

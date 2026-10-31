@@ -98,6 +98,7 @@ async function component(path, name, overrides = {}) {
     "@/lib/area-lookup": { resolveAreaQuery: async () => ({ kind: "none" }) },
     "@/components/AreaPicker": { default: "area-picker" },
     "@/components/MapPicker": { default: "map-picker" },
+    "@/components/RadiusSlider": { default: "radius-slider" },
     "@/components/HelperSignInPrompt": { default: "helper-signin-prompt" },
     "@/components/LogoutButton": { default: "logout-button" },
     "@/components/MessagesLink": { default: "messages-link" },
@@ -106,7 +107,11 @@ async function component(path, name, overrides = {}) {
     ...overrides.mocks,
   };
   const loadedModule = { exports: {} };
-  runInNewContext(`(function(require, module, exports) { ${code}\n})`, { URL, URLSearchParams, console, crypto, sessionStorage: overrides.storage,
+  runInNewContext(`(function(require, module, exports) { ${code}\n})`, { URL, URLSearchParams, console, crypto,
+    // The journey location moved from sessionStorage to localStorage so it survives a new
+    // sign-in; a test's single `storage` mock backs both, same as a real page only ever
+    // reading/writing whichever one it actually calls.
+    sessionStorage: overrides.storage, localStorage: overrides.storage,
     // Timers are inert unless a test supplies its own: debounced lookups never fire on their own.
     AbortController, setTimeout: () => 0, clearTimeout() {},
     ...overrides.globals })( (id) => mocks[id] ?? require(id), loadedModule, loadedModule.exports );
@@ -1253,6 +1258,21 @@ test("Find a Helper clears tag selection and re-queries when the category change
 
 const originLocationMock = { loadJourneyLocation: () => ({ text: "Origin", lat: 0, lng: 0 }), haversineKm };
 
+// The distance control is now "Any distance" (checkbox) plus a RadiusSlider (mocked as a
+// "radius-slider" node) shown only while that checkbox is unchecked. Passing km === null
+// checks "Any distance"; any other km unchecks it (uncovering the slider) and sets its value.
+function setDistance(app, tree, km) {
+  const checkbox = nodes(tree, (node) => node.type === "input" && node.props.type === "checkbox")[0];
+  if (km === null) {
+    if (checkbox.props.checked) return app.render();
+    checkbox.props.onChange({ target: { checked: true } });
+    return app.render();
+  }
+  if (checkbox.props.checked) { checkbox.props.onChange({ target: { checked: false } }); tree = app.render(); }
+  nodes(tree, (node) => node.type === "radius-slider")[0].props.onChange(km);
+  return app.render();
+}
+
 test("Find a Helper: Any distance (default) includes helpers with and without a public location", async () => {
   const profiles = [
     { id: "a", username: "NearHelper", photo_url: null, skills: ["Cleaning"], wom_count: 1, public_lat: 0.01, public_lng: 0, profile_tags: [] },
@@ -1293,17 +1313,13 @@ test("Find a Helper distance filter narrows by 5/10/25 km boundaries, excludes h
   tree = app.render();
   assert.deepEqual(helperUsernames(tree).sort(), ["Beyond26km", "Far24km", "Mid9km", "Near4km", "NoLocation"], "Any distance still includes everyone");
 
-  const select = () => nodes(tree, (node) => node.type === "select")[0];
-  select().props.onChange({ target: { value: "5" } });
-  tree = app.render();
+  tree = setDistance(app, tree, 5);
   assert.deepEqual(helperUsernames(tree), ["Near4km"], "5 km radius includes only the 4 km helper; excludes the one with no location entirely (not just from the radius)");
 
-  select().props.onChange({ target: { value: "10" } });
-  tree = app.render();
+  tree = setDistance(app, tree, 10);
   assert.deepEqual(helperUsernames(tree), ["Near4km", "Mid9km"], "10 km radius adds the 9 km helper, nearest-first order");
 
-  select().props.onChange({ target: { value: "25" } });
-  tree = app.render();
+  tree = setDistance(app, tree, 25);
   assert.deepEqual(helperUsernames(tree), ["Near4km", "Mid9km", "Far24km"], "25 km radius adds the 24 km helper but excludes the 26 km one");
 });
 
@@ -1325,8 +1341,7 @@ test("Find a Helper combines category, tag, and distance filters together", asyn
   tree = app.render(); await flush();
   tree = app.render();
   tree = pickSpecialization(app, "Deep Cleaning");
-  nodes(tree, (node) => node.type === "select")[0].props.onChange({ target: { value: "10" } });
-  tree = app.render();
+  tree = setDistance(app, tree, 10);
   assert.deepEqual(helperUsernames(tree), ["NearSpecialist", "NearLegacy"], "within radius: matching specialist first, legacy fallback still included; far specialist (111 km away) and radius-excluded helpers are gone");
 });
 
@@ -1861,6 +1876,9 @@ test("Post Gig offers 'Use my current location', filling a locality and submitti
   assert.ok(locateButton(first), "the option exists on the Post a Gig form");
   locateButton(first).props.onClick(); await flush();
   let tree = app.render();
+  // A successful lookup collapses the picker to a summary; reopen it to check the filled value.
+  button(tree, "Update location").props.onClick();
+  tree = app.render();
   assert.equal(locationInput(tree).props.value, "Kävlinge, Sweden");
   assert.deepEqual(lookups, [{ lat: 55.79, lng: 13.11 }], "only rounded coordinates leave the browser");
   for (const [predicate, value] of [
@@ -1886,7 +1904,10 @@ test("Post Gig 'Use my current location': denial and lookup failure never write 
     geolocation: { getCurrentPosition: (success) => success({ coords: { latitude: 55.789, longitude: 13.114 } }) },
     reverse: async () => { throw new Error("offline"); }, initialText: "Existing area",
   });
-  locateButton(offline.tree).props.onClick(); await flush();
+  // Existing text means the picker opens collapsed; reopen it to reach "Use my current location".
+  button(offline.tree, "Update location").props.onClick();
+  const offlineExpanded = offline.app.render();
+  locateButton(offlineExpanded).props.onClick(); await flush();
   tree = offline.app.render();
   assert.equal(nodes(tree, (node) => node.props.role === "status" && node.props.children === "Couldn't determine your area automatically. Enter it manually.").length, 1);
   assert.equal(locationInput(tree).props.value, "Existing area", "a failed lookup leaves what was there, never 'Current location'");
@@ -1953,7 +1974,7 @@ test("Location is confirmed before either journey choice appears", async () => {
   const app = await component("src/app/location/page.tsx", "LocationEntryInner", {
     storage: { setItem: (_key, value) => locations.push(JSON.parse(value)) },
     mocks: {
-      "@/lib/location": { LOCATION_KEY: "esg:general-area" },
+      "@/lib/location": { LOCATION_KEY: "esg:general-area", loadJourneyLocation: () => ({ text: "", lat: null, lng: null }) },
       "next/navigation": { useRouter: () => ({ push: (url) => destinations.push(url) }) },
     },
   });
@@ -2027,7 +2048,7 @@ test("Help & Earn Money passes rounded current coordinates to Browse", async () 
     storage: { setItem: (_key, value) => locations.push(JSON.parse(value)) },
     globals: { navigator: { geolocation: { getCurrentPosition: (success) => success({ coords: { latitude: 12.345, longitude: -45.678 } }) } } },
     mocks: {
-      "@/lib/location": { LOCATION_KEY: "esg:general-area", reverseGeocodeGeneralArea: async (lat, lng) => { lookups.push({ lat, lng }); return "Kävlinge, Sweden"; } },
+      "@/lib/location": { LOCATION_KEY: "esg:general-area", loadJourneyLocation: () => ({ text: "", lat: null, lng: null }), reverseGeocodeGeneralArea: async (lat, lng) => { lookups.push({ lat, lng }); return "Kävlinge, Sweden"; } },
       "next/navigation": { useSearchParams: () => new URLSearchParams({ journey: "earn_money" }), useRouter: () => ({ push: (url) => destinations.push(url) }) },
     },
   });
@@ -2038,7 +2059,9 @@ test("Help & Earn Money passes rounded current coordinates to Browse", async () 
   await flush();
   tree = app.render(); button(tree, "Continue").props.onClick();
   tree = app.render(); nodes(tree, (node) => node.props["aria-label"] === "Help & Earn Money")[0].props.onClick();
-  assert.deepEqual(destinations, ["/browse?lat=12.35&lng=-45.68"]);
+  // Browse now reads the saved area itself (sessionStorage/localStorage), the same way Find a
+  // Helper does, instead of needing it repeated in the URL.
+  assert.deepEqual(destinations, ["/browse"]);
   assert.deepEqual(lookups, [{ lat: 12.35, lng: -45.68 }]);
   assert.deepEqual(locations, [{ text: "Kävlinge, Sweden", lat: 12.35, lng: -45.68 }]);
 });
@@ -2049,7 +2072,7 @@ test("reverse-geocoding failure keeps coordinates and the Current location fallb
     storage: { setItem: (_key, value) => locations.push(JSON.parse(value)) },
     globals: { navigator: { geolocation: { getCurrentPosition: (success) => success({ coords: { latitude: 55.789, longitude: 13.114 } }) } } },
     mocks: {
-      "@/lib/location": { LOCATION_KEY: "esg:general-area", reverseGeocodeGeneralArea: async () => { throw new Error("offline"); } },
+      "@/lib/location": { LOCATION_KEY: "esg:general-area", loadJourneyLocation: () => ({ text: "", lat: null, lng: null }), reverseGeocodeGeneralArea: async () => { throw new Error("offline"); } },
       "next/navigation": { useRouter: () => ({ push() {} }) },
     },
   });
@@ -2068,7 +2091,7 @@ test("geolocation denial preserves manual location entry", async () => {
     storage: { setItem: (_key, value) => locations.push(JSON.parse(value)) },
     globals: { navigator: { geolocation: { getCurrentPosition: (_success, failure) => failure() } } },
     mocks: {
-      "@/lib/location": { LOCATION_KEY: "esg:general-area", reverseGeocodeGeneralArea: async () => null },
+      "@/lib/location": { LOCATION_KEY: "esg:general-area", loadJourneyLocation: () => ({ text: "", lat: null, lng: null }), reverseGeocodeGeneralArea: async () => null },
       "next/navigation": { useRouter: () => ({ push() {} }) },
     },
   });
@@ -2672,12 +2695,13 @@ test("Find a Helper: a helper without public coordinates shows for Any distance 
   const located = { id: "a", username: "NearHelper", photo_url: null, skills: ["Yard Work"], wom_count: 1, public_lat: 0.01, public_lng: 0 };
   const { app, tree: first } = await yardWorkHelperPage([noTagsNoLocationHelper, located]);
   assert.deepEqual(helperUsernames(first).sort(), ["AccountB", "NearHelper"], "Any distance (default) includes the helper with no coordinates");
-  for (const radius of ["5", "10", "25"]) {
-    nodes(app.render(), (node) => node.type === "select")[0].props.onChange({ target: { value: radius } });
-    assert.deepEqual(helperUsernames(app.render()), ["NearHelper"], `${radius} km excludes the helper with no public coordinates`);
+  let tree = first;
+  for (const radius of [5, 10, 25]) {
+    tree = setDistance(app, tree, radius);
+    assert.deepEqual(helperUsernames(tree), ["NearHelper"], `${radius} km excludes the helper with no public coordinates`);
   }
-  nodes(app.render(), (node) => node.type === "select")[0].props.onChange({ target: { value: "" } });
-  assert.deepEqual(helperUsernames(app.render()).sort(), ["AccountB", "NearHelper"], "back to Any distance, the helper returns");
+  tree = setDistance(app, tree, null);
+  assert.deepEqual(helperUsernames(tree).sort(), ["AccountB", "NearHelper"], "back to Any distance, the helper returns");
 });
 
 // ---------------------------------------------------------------------------
@@ -2764,12 +2788,11 @@ test("Find a Helper shows the distance whenever both positions are known, only a
   const crowdedText = textOf(crowded.type({ ...crowded.props, profile: { ...crowded.props.profile, skills: ["A", "B", "Cleaning", "C", "D", "E", "F", "B"] } }));
   assert.match(crowdedText, /Offers:\s*Cleaning · A · B · C · D · E · F\b/, "all of them, the searched one first, none dropped or repeated");
   assert.doesNotMatch(crowdedText, /more/, "no skill is hidden behind a +N more");
-  nodes(tree, (node) => node.type === "select")[0].props.onChange({ target: { value: "5" } });
-  assert.deepEqual(helperCards(app.render()).map((card) => card.props.profile.username), ["NearHelper"], "a radius filters");
+  const afterRadius = setDistance(app, tree, 5);
+  assert.deepEqual(helperCards(afterRadius).map((card) => card.props.profile.username), ["NearHelper"], "a radius filters");
   // No position at all: a radius cannot apply, and the visitor is told how to add one.
   const noPosition = await openFindHelper({ profiles, mocks: { "@/lib/location": { loadJourneyLocation: () => ({ text: "", lat: null, lng: null }), haversineKm } } });
-  nodes(noPosition.tree, (node) => node.type === "select")[0].props.onChange({ target: { value: "5" } });
-  const hinted = noPosition.app.render();
+  const hinted = setDistance(noPosition.app, noPosition.tree, 5);
   assert.match(textOf(nodes(hinted, (node) => node.props.role === "status")[0]), /Add a ZIP code or use your location/);
   assert.equal(helperCards(hinted).length, 2, "nothing is hidden by a radius that cannot be measured");
 });
@@ -2878,7 +2901,10 @@ test("AreaPicker: a neighborhood, city or ambiguous postcode lists areas (never 
 test("AreaPicker: the map follows the chosen area, and moving the pin re-labels the area with the pinned (rounded) point", async () => {
   const area = { text: "Stockholm, Sweden", lat: 59.33, lng: 18.07 };
   const { app, props, chosen, storage } = await openAreaPicker({ area, reverse: async (lat, lng) => { assert.deepEqual([lat, lng], [59.31, 18.06]); return "Södermalm, Stockholm, Sweden"; } });
-  const tree = app.render(props);
+  // An area is already set, so the picker opens collapsed to a summary; "Update location" reopens it.
+  let tree = app.render(props);
+  button(tree, "Update location").props.onClick();
+  tree = app.render(props);
   const map = nodes(tree, (node) => node.type === "map-picker")[0];
   assert.deepEqual([map.props.lat, map.props.lng], [59.33, 18.07], "the pin sits where the entered area is");
   map.props.onPick({ lat: 59.31, lng: 18.06 });
@@ -2886,22 +2912,30 @@ test("AreaPicker: the map follows the chosen area, and moving the pin re-labels 
   await flush(); await flush();
   assert.deepEqual(chosen.at(-1), { text: "Södermalm, Stockholm, Sweden", lat: 59.31, lng: 18.06 }, "entered location and pin coordinates agree");
   assert.deepEqual(JSON.parse(storage.get("esg:general-area")), chosen.at(-1));
-  // No coordinates (a place without a position): no map to show.
+  // No coordinates (a place without a position): no map to show, even expanded.
   const bare = await openAreaPicker({ area: { text: "Somewhere", lat: null, lng: null } });
+  const bareTree = bare.app.render(bare.props);
+  button(bareTree, "Update location").props.onClick();
   assert.equal(nodes(bare.app.render(bare.props), (node) => node.type === "map-picker").length, 0);
 });
 
 test("AreaPicker: the moved pin is saved at once, even while its place name is still being looked up", async () => {
   const area = { text: "Stockholm, Sweden", lat: 59.33, lng: 18.07 };
   const { app, props, storage } = await openAreaPicker({ area, reverse: () => new Promise(() => {}) });
-  nodes(app.render(props), (node) => node.type === "map-picker")[0].props.onPick({ lat: 59.4, lng: 18.1 });
+  let tree = app.render(props);
+  button(tree, "Update location").props.onClick();
+  tree = app.render(props);
+  nodes(tree, (node) => node.type === "map-picker")[0].props.onPick({ lat: 59.4, lng: 18.1 });
   assert.deepEqual(JSON.parse(storage.get("esg:general-area")), { text: "Pinned location", lat: 59.4, lng: 18.1 }, "leaving the page now keeps the pin, not the old place");
 });
 
 test("AreaPicker: if the pin's place name cannot be looked up, the pin stays and the text says 'Pinned location'", async () => {
   const area = { text: "Stockholm, Sweden", lat: 59.33, lng: 18.07 };
   const { app, props, chosen } = await openAreaPicker({ area, reverse: async () => { throw new Error("offline"); } });
-  nodes(app.render(props), (node) => node.type === "map-picker")[0].props.onPick({ lat: 59.4, lng: 18.1 });
+  let tree = app.render(props);
+  button(tree, "Update location").props.onClick();
+  tree = app.render(props);
+  nodes(tree, (node) => node.type === "map-picker")[0].props.onPick({ lat: 59.4, lng: 18.1 });
   await flush(); await flush();
   assert.deepEqual(chosen.at(-1), { text: "Pinned location", lat: 59.4, lng: 18.1 });
 });
@@ -3678,7 +3712,7 @@ async function openLocationPage({ lookup, reverse, geolocation } = {}) {
     globals: { setTimeout: (fn) => { Promise.resolve().then(fn); return 1; }, clearTimeout() {}, navigator: { geolocation } },
     mocks: {
       "@/lib/area-lookup": { resolveAreaQuery: lookup ?? (async () => ({ kind: "none" })) },
-      "@/lib/location": { LOCATION_KEY: "esg:general-area", reverseGeocodeGeneralArea: reverse ?? (async () => null) },
+      "@/lib/location": { LOCATION_KEY: "esg:general-area", loadJourneyLocation: () => ({ text: "", lat: null, lng: null }), reverseGeocodeGeneralArea: reverse ?? (async () => null) },
       "next/navigation": { useRouter: () => ({ push() {} }) },
     },
   });

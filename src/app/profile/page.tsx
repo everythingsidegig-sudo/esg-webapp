@@ -127,7 +127,7 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
   // Postcode/area suggestions as the helper types, same lookup /location and
   // find-helper use. Kept local to this field: it saves to the profile's own
   // public_location fields via set_helper_location, never to the shared
-  // journey location in sessionStorage.
+  // journey location in localStorage.
   const [helperSearching, setHelperSearching] = useState(false);
   const [helperChoices, setHelperChoices] = useState<AreaMatch[]>([]);
   const helperLocationRequest = useRef(0);
