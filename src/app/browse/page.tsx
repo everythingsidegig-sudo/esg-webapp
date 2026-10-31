@@ -4,13 +4,13 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import SelectionChip from "@/components/SelectionChip";
 import TagChip from "@/components/TagChip";
-import { useSearchParams } from "next/navigation";
+import AreaPicker, { type Area } from "@/components/AreaPicker";
 import { createClient } from "@/lib/supabase/client";
 import { formatMoney } from "@/lib/money";
 import type { GigWithTags, Tag } from "@/lib/database.types";
 import { SERVICE_TYPES as CATEGORIES } from "@/lib/services";
 import { loadTagCatalog, gigTagNames } from "@/lib/tags";
-import { haversineKm } from "@/lib/location";
+import { haversineKm, loadJourneyLocation } from "@/lib/location";
 import RadiusSlider from "@/components/RadiusSlider";
 
 const SERVICE_TYPES = [
@@ -20,9 +20,12 @@ const SERVICE_TYPES = [
 
 function BrowseInner() {
   const supabase = createClient();
-  const searchParams = useSearchParams();
-  const lat = searchParams.get("lat") ? Number(searchParams.get("lat")) : null;
-  const lng = searchParams.get("lng") ? Number(searchParams.get("lng")) : null;
+  // The area saved on /location (or wherever it was last set) carries over here, the
+  // same way Find a Helper picks it up; editable right on this page too via AreaPicker.
+  // sessionStorage isn't visible to the server render, so this is read after hydration
+  // (as Find a Helper already does) rather than as the initial state, which would mismatch.
+  const [area, setArea] = useState<Area>({ text: "", lat: null, lng: null });
+  const { lat, lng } = area;
 
   const [gigs, setGigs] = useState<GigWithTags[]>([]);
   const [service, setService] = useState("All Services");
@@ -31,6 +34,12 @@ function BrowseInner() {
   const [error, setError] = useState<string | null>(null);
   const [tagCatalog, setTagCatalog] = useState<Record<string, Tag[]>>({});
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    const saved = loadJourneyLocation();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (saved.text) setArea(saved);
+  }, []);
 
   useEffect(() => {
     Promise.resolve(supabase
@@ -71,6 +80,8 @@ function BrowseInner() {
   return (
     <div className="space-y-5">
       <h1 className="text-xl font-semibold">Gigs Nearby</h1>
+
+      <AreaPicker area={area} onChange={setArea} />
 
       <div className="flex flex-wrap gap-3">
         <fieldset className="min-w-0 w-full">

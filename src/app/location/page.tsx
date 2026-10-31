@@ -148,12 +148,9 @@ function LocationEntryInner() {
   }
 
   function browseGigs() {
-    const params = new URLSearchParams();
-    if (coords) {
-      params.set("lat", String(coords.lat));
-      params.set("lng", String(coords.lng));
-    }
-    router.push(params.size ? `/browse?${params.toString()}` : "/browse");
+    // continueJourney() already saved this area to sessionStorage; Browse reads it
+    // the same way Find a Helper does.
+    router.push("/browse");
   }
 
   if (confirmed) return (
