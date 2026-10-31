@@ -114,8 +114,8 @@ export default function AreaPicker({ area, onChange, radiusKm }: { area: Area; o
 
   if (!expanded) {
     return (
-      <section aria-label="Search area">
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2.5">
+      <section aria-label="Search area" className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+        <div className="flex flex-1 flex-wrap items-center justify-between gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2.5">
           <p role="status" className="flex flex-wrap items-center gap-x-2 text-sm text-neutral-700">
             <span>📍 {area.text}</span>
             {area.lat == null && <span className="text-neutral-500">(no map position, so distance can&apos;t be shown)</span>}
@@ -125,6 +125,13 @@ export default function AreaPicker({ area, onChange, radiusKm }: { area: Area; o
             Update location
           </button>
         </div>
+        {/* A static preview, not the full picker: stays put while collapsed so dragging the
+            radius slider still visibly moves the circle, without reopening the map to see it. */}
+        {area.lat != null && area.lng != null && (
+          <div className="sm:w-40 sm:shrink-0">
+            <MapPicker lat={area.lat} lng={area.lng} radiusKm={radiusKm} interactive={false} compact />
+          </div>
+        )}
       </section>
     );
   }
