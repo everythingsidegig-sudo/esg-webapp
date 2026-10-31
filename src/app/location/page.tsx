@@ -9,7 +9,7 @@ import type { AreaMatch } from "@/lib/area-search";
 import AuthGuard from "@/components/AuthGuard";
 import MapPicker, { type MapPoint } from "@/components/MapPicker";
 import { approximateCoordinates } from "@/lib/journey";
-import { LOCATION_KEY, reverseGeocodeGeneralArea } from "@/lib/location";
+import { LOCATION_KEY, loadJourneyLocation, reverseGeocodeGeneralArea } from "@/lib/location";
 
 function LocationEntryInner() {
   const router = useRouter();
@@ -18,9 +18,18 @@ function LocationEntryInner() {
   // again would only offer choices for a place the visitor has already pinned.
   const resolvedText = useRef<string | null>(null);
 
-  const [locationText, setLocationText] = useState("");
-  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
-  const [confirmed, setConfirmed] = useState(false);
+  // A location already saved this session (or just restored after an email-link sign-in) means
+  // the visitor already did this step; land them straight on "What would you like to do?"
+  // instead of asking them to pick an area again.
+  const [initialLocation] = useState(loadJourneyLocation);
+
+  const [locationText, setLocationText] = useState(initialLocation.text);
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(
+    initialLocation.lat != null && initialLocation.lng != null
+      ? { lat: initialLocation.lat, lng: initialLocation.lng }
+      : null
+  );
+  const [confirmed, setConfirmed] = useState(Boolean(initialLocation.text));
   const [error, setError] = useState<string | null>(null);
   const [locating, setLocating] = useState(false);
 
@@ -28,7 +37,7 @@ function LocationEntryInner() {
   // city search is running in the background (Continue never waits for that: typed text is enough).
   const [lookingUpZip, setLookingUpZip] = useState(false);
   const [searching, setSearching] = useState(false);
-  const [zipArea, setZipArea] = useState<string | null>(null);
+  const [zipArea, setZipArea] = useState<string | null>(initialLocation.text || null);
   const [choices, setChoices] = useState<AreaMatch[]>([]);
 
   // A postcode (US ZIP, Swedish postcode, ...) or a neighborhood/city typed here resolves to a place

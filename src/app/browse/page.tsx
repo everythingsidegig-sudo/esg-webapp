@@ -78,7 +78,7 @@ function BrowseInner() {
 
   return (
     <div className="space-y-5">
-      <h1 className="text-xl font-semibold">Find Providers Nearby</h1>
+      <h1 className="text-xl font-semibold">Gigs Nearby</h1>
 
       <div className="flex flex-wrap gap-3">
         <fieldset className="min-w-0 w-full">
