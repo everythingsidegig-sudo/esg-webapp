@@ -10,21 +10,13 @@ import { formatMoney } from "@/lib/money";
 import type { GigWithTags, Tag } from "@/lib/database.types";
 import { SERVICE_TYPES as CATEGORIES } from "@/lib/services";
 import { loadTagCatalog, gigTagNames } from "@/lib/tags";
+import { haversineKm } from "@/lib/location";
+import RadiusSlider from "@/components/RadiusSlider";
 
 const SERVICE_TYPES = [
   "All Services",
   ...CATEGORIES,
 ];
-
-function haversineMiles(lat1: number, lng1: number, lat2: number, lng2: number) {
-  const R = 3958.8;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLng = ((lng2 - lng1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
 
 function BrowseInner() {
   const supabase = createClient();
@@ -34,7 +26,7 @@ function BrowseInner() {
 
   const [gigs, setGigs] = useState<GigWithTags[]>([]);
   const [service, setService] = useState("All Services");
-  const [radius, setRadius] = useState(5);
+  const [radiusKm, setRadiusKm] = useState(10);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tagCatalog, setTagCatalog] = useState<Record<string, Tag[]>>({});
@@ -72,9 +64,9 @@ function BrowseInner() {
       .filter((g) => selectedTagNames.size === 0 || gigTagNames(g).some((name) => selectedTagNames.has(name)))
       .filter((g) => {
         if (!lat || !lng || g.lat == null || g.lng == null) return true;
-        return haversineMiles(lat, lng, g.lat, g.lng) <= radius;
+        return haversineKm(lat, lng, g.lat, g.lng) <= radiusKm;
       });
-  }, [gigs, service, selectedTagNames, radius, lat, lng]);
+  }, [gigs, service, selectedTagNames, radiusKm, lat, lng]);
 
   return (
     <div className="space-y-5">
@@ -101,17 +93,9 @@ function BrowseInner() {
           </fieldset>
         )}
         {lat && lng && (
-          <select
-            value={radius}
-            onChange={(e) => setRadius(Number(e.target.value))}
-            className="rounded-lg border border-neutral-300 px-3 py-2 text-sm"
-          >
-            {[1, 5, 10].map((r) => (
-              <option key={r} value={r}>
-                Within {r} mi
-              </option>
-            ))}
-          </select>
+          <div className="w-full max-w-xs">
+            <RadiusSlider valueKm={radiusKm} onChange={setRadiusKm} id="browse-radius" />
+          </div>
         )}
       </div>
 

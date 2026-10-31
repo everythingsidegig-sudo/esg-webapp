@@ -14,13 +14,9 @@ import type { PublicProfile, PublicProfileWithTags, Tag } from "@/lib/database.t
 import { SERVICE_TYPES, SPECIALIZATION_PROMPTS } from "@/lib/services";
 import { loadTagCatalog, profileTagsForCategory, withProfileTags } from "@/lib/tags";
 import { haversineKm, loadJourneyLocation } from "@/lib/location";
+import RadiusSlider from "@/components/RadiusSlider";
 
-const DISTANCE_OPTIONS = [
-  { label: "Any distance", km: null },
-  { label: "Within 5 km", km: 5 },
-  { label: "Within 10 km", km: 10 },
-  { label: "Within 25 km", km: 25 },
-];
+const DEFAULT_RADIUS_KM = 10;
 
 // A signed-out visitor can see the list but not the profile behind a card: the click is
 // intercepted to show the sign-in prompt. The link itself still points at the profile route,
@@ -224,14 +220,14 @@ export default function FindHelper() {
       )}
 
       {category && (
-        <label className="block text-sm font-medium">Distance
-          <select value={radiusKm ?? ""} onChange={(e) => setRadiusKm(e.target.value ? Number(e.target.value) : null)}
-            className="mt-1 rounded-lg border border-neutral-300 px-3 py-2 text-sm">
-            {DISTANCE_OPTIONS.map((option) => (
-              <option key={option.label} value={option.km ?? ""}>{option.label}</option>
-            ))}
-          </select>
-        </label>
+        <div className="max-w-xs space-y-2">
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={radiusKm === null}
+              onChange={(e) => setRadiusKm(e.target.checked ? null : DEFAULT_RADIUS_KM)} />
+            Any distance
+          </label>
+          {radiusKm !== null && <RadiusSlider valueKm={radiusKm} onChange={setRadiusKm} id="find-helper-radius" />}
+        </div>
       )}
 
       {category && radiusKm !== null && (searcherLocation.lat == null || searcherLocation.lng == null) && (
