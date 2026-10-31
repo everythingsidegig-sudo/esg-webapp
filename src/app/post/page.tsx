@@ -5,10 +5,14 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import SelectionChip from "@/components/SelectionChip";
+import MapPicker, { type MapPoint } from "@/components/MapPicker";
 import { useAuth } from "@/lib/auth-context";
 import { createClient } from "@/lib/supabase/client";
 import { approximateCoordinates, friendlyError, gigInputError } from "@/lib/journey";
 import { loadJourneyLocation, reverseGeocodeGeneralArea } from "@/lib/location";
+import { resolveAreaQuery } from "@/lib/area-lookup";
+import { postcodeCandidates } from "@/lib/zip-location";
+import type { AreaMatch } from "@/lib/area-search";
 import { SERVICE_TYPES } from "@/lib/services";
 import { CURRENCY } from "@/lib/money";
 import { PRICE_CHOICES, requestUsername, requestableCategories } from "@/lib/helper-request";
@@ -75,9 +79,91 @@ function PostGigForm() {
   const [uploadedPhoto, setUploadedPhoto] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const pending = useRef(false);
+
+  // Postcode/area suggestions plus a draggable map pin, same lookup /location and
+  // find-helper use, so the gig's location can be confirmed and fine-tuned instead
+  // of typed blind. Free text without a match is still accepted: gigInputError only
+  // requires non-empty text, so a neighborhood the lookup can't find still posts.
   const [locating, setLocating] = useState(false);
   const [locationNotice, setLocationNotice] = useState<string | null>(null);
-  const pending = useRef(false);
+  const [locationSearching, setLocationSearching] = useState(false);
+  const [locationChoices, setLocationChoices] = useState<AreaMatch[]>([]);
+  const locationRequest = useRef(0);
+  const locationResolvedText = useRef<string | null>(null);
+
+  useEffect(() => {
+    const text = locationText.trim();
+    if (text.length < 3 || text === locationResolvedText.current) { setLocationChoices([]); return; }
+    const postcode = postcodeCandidates(text).length > 0;
+    const request = ++locationRequest.current;
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      setLocationSearching(true);
+      setLocationNotice(null);
+      try {
+        const result = await resolveAreaQuery(text, controller.signal);
+        if (request !== locationRequest.current) return;
+        if (result.kind === "single") {
+          locationResolvedText.current = result.area.areaLabel;
+          setLocationText(result.area.areaLabel);
+          setCoordinates({ lat: result.area.lat, lng: result.area.lng });
+          setLocationChoices([]);
+        } else if (result.kind === "choices") {
+          setLocationChoices(result.choices);
+        } else {
+          setLocationChoices([]);
+          if (postcode) setLocationNotice("Couldn't find that postcode. Check it, add the country, or enter it as typed.");
+        }
+      } catch {
+        if (request === locationRequest.current) {
+          setLocationChoices([]);
+          setLocationNotice("Couldn't search for that place right now. You can still continue with what you typed.");
+        }
+      } finally {
+        if (request === locationRequest.current) setLocationSearching(false);
+      }
+    }, 450);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [locationText]);
+
+  function chooseLocationMatch(match: AreaMatch) {
+    locationRequest.current++;
+    locationResolvedText.current = match.areaLabel;
+    setLocationText(match.areaLabel);
+    setCoordinates({ lat: match.lat, lng: match.lng });
+    setLocationChoices([]);
+    setLocationNotice(null);
+  }
+
+  async function pinMoved(point: MapPoint) {
+    const request = ++locationRequest.current;
+    setCoordinates(point);
+    try {
+      const label = await reverseGeocodeGeneralArea(point.lat, point.lng);
+      if (label && request === locationRequest.current) { locationResolvedText.current = label; setLocationText(label); }
+    } catch { /* keep the existing label: the pin's coordinates are authoritative */ }
+  }
+
+  function useMyLocation() {
+    if (locating) return;
+    setLocationNotice(null);
+    if (!navigator.geolocation) { setLocationNotice("Geolocation isn't available in this browser. Enter an area manually."); return; }
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(async (position) => {
+      const request = ++locationRequest.current;
+      try {
+        const approx = approximateCoordinates(position.coords.latitude, position.coords.longitude) as { lat: number; lng: number };
+        setCoordinates(approx);
+        const label = await reverseGeocodeGeneralArea(approx.lat, approx.lng);
+        if (label && request === locationRequest.current) { locationResolvedText.current = label; setLocationText(label); }
+        else if (!label) setLocationNotice("Couldn't determine your area automatically. Enter it manually.");
+      } catch {
+        setLocationNotice("Couldn't determine your area automatically. Enter it manually.");
+      } finally { setLocating(false); }
+    }, () => { setLocationNotice("We couldn't access your location. Enter your area manually."); setLocating(false); },
+    { timeout: 10000, maximumAge: 60000 });
+  }
   const input = "w-full rounded-lg border border-neutral-300 px-3 py-2";
 
   useEffect(() => {
@@ -140,27 +226,6 @@ function PostGigForm() {
     loadTagCatalog(supabase).then((catalog) => { if (active) setTagCatalog(catalog); }).catch(() => {});
     return () => { active = false; };
   }, [supabase]);
-
-  // Same behavior as the profile helper-location button: rounded coordinates
-  // only, resolved to a locality label; never the literal "Current location".
-  function useMyLocation() {
-    if (locating) return;
-    setLocationNotice(null);
-    if (!navigator.geolocation) { setLocationNotice("Geolocation isn't available in this browser. Enter an area manually."); return; }
-    setLocating(true);
-    navigator.geolocation.getCurrentPosition(async (position) => {
-      try {
-        const approx = approximateCoordinates(position.coords.latitude, position.coords.longitude) as { lat: number; lng: number };
-        setCoordinates(approx);
-        const label = await reverseGeocodeGeneralArea(approx.lat, approx.lng);
-        if (label) setLocationText(label);
-        else setLocationNotice("Couldn't determine your area automatically. Enter it manually.");
-      } catch {
-        setLocationNotice("Couldn't determine your area automatically. Enter it manually.");
-      } finally { setLocating(false); }
-    }, () => { setLocationNotice("We couldn't access your location. Enter your area manually."); setLocating(false); },
-    { timeout: 10000, maximumAge: 60000 });
-  }
 
   function toggleTag(id: string) {
     setTagIds((current) => current.includes(id) ? current.filter((item) => item !== id)
@@ -304,9 +369,29 @@ function PostGigForm() {
         </div>
       ) : <p className="text-sm">Pricing: Fixed</p>}
       <label className="block">Expected Date/Time<input type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} className={input} /></label>
-      <label className="block">Approximate Location<input maxLength={200} value={locationText} onChange={(e) => { setLocationText(e.target.value); setCoordinates({ lat: null, lng: null }); }} className={input} /></label>
+      <label className="block">Approximate Location
+        <input maxLength={200} value={locationText}
+          onChange={(e) => { locationResolvedText.current = null; setLocationText(e.target.value); setCoordinates({ lat: null, lng: null }); }}
+          className={input} />
+      </label>
+      {locationSearching && <p role="status" className="text-sm text-neutral-500">Searching…</p>}
+      {locationChoices.length > 0 && (
+        <ul aria-label="Matching areas" className="divide-y divide-neutral-100 overflow-hidden rounded-lg border border-neutral-200 bg-white">
+          {locationChoices.map((match) => (
+            <li key={`${match.label}|${match.lat}|${match.lng}`}>
+              <button type="button" onClick={() => chooseLocationMatch(match)} className="min-h-11 w-full px-3 py-2 text-left text-sm hover:bg-neutral-50">{match.areaLabel}</button>
+            </li>
+          ))}
+        </ul>
+      )}
       <button type="button" onClick={useMyLocation} className="text-sm font-medium text-emerald-700">{locating ? "Locating…" : "📍 Use my current location"}</button>
       {locationNotice && <p role="status" className="text-sm text-neutral-600">{locationNotice}</p>}
+      {coordinates.lat != null && coordinates.lng != null && (
+        <div className="space-y-2">
+          <MapPicker lat={coordinates.lat} lng={coordinates.lng} onPick={(point) => { void pinMoved(point); }} />
+          <p className="text-xs text-neutral-500">Drag the pin to fine-tune the approximate area.</p>
+        </div>
+      )}
       <p className="text-sm text-neutral-500">Use a neighborhood, ZIP or city here. This is what everyone can see. Coordinates, if collected, are rounded to a general area.</p>
       <label className="block">Exact address (optional, private)<input maxLength={300} autoComplete="street-address" value={privateAddress} onChange={(e) => setPrivateAddress(e.target.value)} className={input} /></label>
       <p className="text-sm text-neutral-500">Only you and the helper you accept can see this. It is never shown on the gig page to anyone else.</p>
