@@ -15,10 +15,17 @@ export type MapPoint = { lat: number; lng: number };
 // An optional `radiusKm` draws a circle around the pin -- the active search radius, where one
 // exists (Browse, Find a Helper); omitted elsewhere, where a pin just marks a single spot.
 //
+// `interactive={false}` makes a small, static preview instead: no drag, click or pan/zoom, no
+// captions, just the pin and (if `radiusKm`) the circle -- for keeping the radius visible next
+// to a collapsed AreaPicker summary, where dragging the slider should still visibly move
+// something without reopening the full picker.
+//
 // Leaflet touches `window` when it loads, so it is imported only inside the effect, in the
 // browser. If it (or the tile service) fails, the page says so and the entered location still
 // stands on its own -- the map is never required to continue.
-export default function MapPicker({ lat, lng, onPick, radiusKm }: { lat: number; lng: number; onPick: (point: MapPoint) => void; radiusKm?: number | null }) {
+export default function MapPicker({ lat, lng, onPick, radiusKm, interactive = true, compact = false }: {
+  lat: number; lng: number; onPick?: (point: MapPoint) => void; radiusKm?: number | null; interactive?: boolean; compact?: boolean;
+}) {
   const container = useRef<HTMLDivElement>(null);
   const handle = useRef<{ map: LeafletMap; marker: Marker; circle: Circle | null; L: typeof import("leaflet") } | null>(null);
   const pick = useRef(onPick);
@@ -35,7 +42,10 @@ export default function MapPicker({ lat, lng, onPick, radiusKm }: { lat: number;
         // Bundlers expose the CommonJS module as `default`; a plain require does not.
         const L = ((leaflet as unknown as { default?: typeof import("leaflet") }).default ?? leaflet) as typeof import("leaflet");
         if (cancelled || !container.current) return;
-        const map = L.map(container.current, { center: [lat, lng], zoom: 12, scrollWheelZoom: false });
+        const map = L.map(container.current, {
+          center: [lat, lng], zoom: 12, scrollWheelZoom: false,
+          ...(interactive ? {} : { dragging: false, doubleClickZoom: false, boxZoom: false, keyboard: false, touchZoom: false, zoomControl: false }),
+        });
         const tiles = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
           maxZoom: 18, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap contributors</a>',
         }).addTo(map);
@@ -43,17 +53,23 @@ export default function MapPicker({ lat, lng, onPick, radiusKm }: { lat: number;
         tiles.on("tileload", () => setTilesFailed(false));
         // An emoji pin: no marker image files to resolve through the bundler.
         const icon = L.divIcon({ className: "", html: '<div style="font-size:32px;line-height:32px;transform:translate(-50%,-100%)" aria-hidden="true">📍</div>', iconSize: [0, 0] });
-        const marker = L.marker([lat, lng], { draggable: true, icon, title: "Drag to adjust the pin", alt: "Location pin" }).addTo(map);
-        const settle = (point: { lat: number; lng: number }) => {
-          const rounded = approximateCoordinates(point.lat, point.lng) as MapPoint;
-          marker.setLatLng([rounded.lat, rounded.lng]);
-          pick.current(rounded);
-        };
-        marker.on("dragend", () => settle(marker.getLatLng()));
-        map.on("click", (event) => settle(event.latlng));
+        const marker = L.marker([lat, lng], { draggable: interactive, icon, title: interactive ? "Drag to adjust the pin" : "Location pin", alt: "Location pin" }).addTo(map);
+        if (interactive) {
+          const settle = (point: { lat: number; lng: number }) => {
+            const rounded = approximateCoordinates(point.lat, point.lng) as MapPoint;
+            marker.setLatLng([rounded.lat, rounded.lng]);
+            pick.current?.(rounded);
+          };
+          marker.on("dragend", () => settle(marker.getLatLng()));
+          map.on("click", (event) => settle(event.latlng));
+        }
         const circle = radiusKm
           ? L.circle([lat, lng], { radius: radiusKm * 1000, color: "#059669", weight: 1.5, fillColor: "#059669", fillOpacity: 0.08 }).addTo(map)
           : null;
+        // A compact preview has no room to pan or zoom, so it fits the circle instead of
+        // using the same fixed zoom as the full interactive map (where a 50km circle would
+        // otherwise render far outside the tiny box, invisible).
+        if (compact && circle) map.fitBounds(circle.getBounds(), { padding: [4, 4] });
         handle.current = { map, marker, circle, L };
       } catch {
         if (!cancelled) setFailed(true);
@@ -82,19 +98,25 @@ export default function MapPicker({ lat, lng, onPick, radiusKm }: { lat: number;
     } else {
       current.circle = current.L.circle([lat, lng], { radius: radiusKm * 1000, color: "#059669", weight: 1.5, fillColor: "#059669", fillOpacity: 0.08 }).addTo(current.map);
     }
-  }, [lat, lng, radiusKm]);
+    if (compact && current.circle) current.map.fitBounds(current.circle.getBounds(), { padding: [4, 4] });
+  }, [lat, lng, radiusKm, compact]);
 
   if (failed) {
-    return <p role="status" className="rounded-lg bg-neutral-100 px-3 py-2 text-sm text-neutral-600">The map couldn&apos;t load. Your area is still saved, so you can continue without it.</p>;
+    return compact ? null
+      : <p role="status" className="rounded-lg bg-neutral-100 px-3 py-2 text-sm text-neutral-600">The map couldn&apos;t load. Your area is still saved, so you can continue without it.</p>;
   }
   return (
     <div className="space-y-1.5">
-      <div ref={container} role="application" aria-label="Map: tap or drag the pin to adjust your area" className="relative z-0 h-64 w-full overflow-hidden rounded-xl border border-neutral-200 isolate" />
-      {tilesFailed && <p role="status" className="text-xs text-neutral-500">Map tiles are slow or unavailable. You can still set the pin, or just keep the area you entered.</p>}
-      <p className="text-xs text-neutral-500">
-        Tap the map or drag the pin to adjust. The pin is rounded to a general area.
-        {radiusKm ? ` The circle shows your ${radiusKm} km search radius.` : ""}
-      </p>
+      <div ref={container} role={interactive ? "application" : "img"}
+        aria-label={interactive ? "Map: tap or drag the pin to adjust your area" : "Map preview of your area"}
+        className={`relative z-0 w-full overflow-hidden rounded-xl border border-neutral-200 isolate ${compact ? "h-28" : "h-64"}`} />
+      {!compact && tilesFailed && <p role="status" className="text-xs text-neutral-500">Map tiles are slow or unavailable. You can still set the pin, or just keep the area you entered.</p>}
+      {!compact && (
+        <p className="text-xs text-neutral-500">
+          Tap the map or drag the pin to adjust. The pin is rounded to a general area.
+          {radiusKm ? ` The circle shows your ${radiusKm} km search radius.` : ""}
+        </p>
+      )}
     </div>
   );
 }
