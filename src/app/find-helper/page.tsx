@@ -179,6 +179,15 @@ export default function FindHelper() {
 
       <AreaPicker area={searcherLocation} onChange={setSearcherLocation} radiusKm={radiusKm} />
 
+      <div className="max-w-xs space-y-2">
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={radiusKm === null}
+            onChange={(e) => setRadiusKm(e.target.checked ? null : DEFAULT_RADIUS_KM)} />
+          Any distance
+        </label>
+        {radiusKm !== null && <RadiusSlider valueKm={radiusKm} onChange={setRadiusKm} id="find-helper-radius" />}
+      </div>
+
       <fieldset className="min-w-0 w-full">
         <legend className="text-sm font-medium">Choose a category</legend>
         <div role="radiogroup" aria-labelledby="find-helper-category-label" className="mt-2 flex flex-wrap gap-2">
@@ -219,17 +228,6 @@ export default function FindHelper() {
               className="inline-flex min-h-9 items-center rounded-full border border-dashed border-emerald-600 px-3 text-sm font-medium text-emerald-700 hover:bg-emerald-50">+ Add</button>
           </div>
         </fieldset>
-      )}
-
-      {category && (
-        <div className="max-w-xs space-y-2">
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={radiusKm === null}
-              onChange={(e) => setRadiusKm(e.target.checked ? null : DEFAULT_RADIUS_KM)} />
-            Any distance
-          </label>
-          {radiusKm !== null && <RadiusSlider valueKm={radiusKm} onChange={setRadiusKm} id="find-helper-radius" />}
-        </div>
       )}
 
       {category && radiusKm !== null && (searcherLocation.lat == null || searcherLocation.lng == null) && (
