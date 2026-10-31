@@ -29,12 +29,27 @@ export default function AreaPicker({ area, onChange }: { area: Area; onChange: (
   const [locating, setLocating] = useState(false);
   const latest = useRef(0);
 
+  // Collapsed to a one-line summary once an area is set, so the search box, "use my
+  // location" and the map don't stay permanently open and take up the page. A caller
+  // that starts with an empty area and fills it in shortly after hydration (sessionStorage
+  // isn't visible to the server render) still collapses once, the first time that happens;
+  // syncedInitialArea stops that from fighting a later manual "Update location" click.
+  const [expanded, setExpanded] = useState(!area.text);
+  const syncedInitialArea = useRef(Boolean(area.text));
+
+  useEffect(() => {
+    if (syncedInitialArea.current || !area.text) return;
+    syncedInitialArea.current = true;
+    setExpanded(false);
+  }, [area.text]);
+
   function choose(next: Area) {
     saveArea(next);
     onChange(next);
     setQuery("");
     setMatches([]);
     setError(null);
+    setExpanded(false);
   }
 
   useEffect(() => {
@@ -96,9 +111,34 @@ export default function AreaPicker({ area, onChange }: { area: Area; onChange: (
     if (request === latest.current) choose({ text: label ?? "Pinned location", ...point });
   }
 
+  if (!expanded) {
+    return (
+      <section aria-label="Search area">
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2.5">
+          <p role="status" className="flex flex-wrap items-center gap-x-2 text-sm text-neutral-700">
+            <span>📍 {area.text}</span>
+            {area.lat == null && <span className="text-neutral-500">(no map position, so distance can&apos;t be shown)</span>}
+          </p>
+          <button type="button" onClick={() => setExpanded(true)}
+            className="shrink-0 text-sm font-medium text-emerald-700 hover:underline">
+            Update location
+          </button>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section aria-label="Search area" className="space-y-2">
-      <p className="text-sm font-medium">Where are you looking?</p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm font-medium">Where are you looking?</p>
+        {area.text && (
+          <button type="button" onClick={() => setExpanded(false)}
+            className="text-sm font-medium text-neutral-500 hover:underline">
+            Cancel
+          </button>
+        )}
+      </div>
       {area.text && (
         <p role="status" className="flex flex-wrap items-center gap-x-2 text-sm text-neutral-700">
           <span>📍 {area.text}</span>

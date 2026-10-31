@@ -92,6 +92,20 @@ function PostGigForm() {
   const locationRequest = useRef(0);
   const locationResolvedText = useRef<string | null>(null);
 
+  // Collapsed to a one-line summary once a location is set, same as AreaPicker (/location,
+  // find-helper, Browse), so the input, suggestions and map don't stay open permanently. A
+  // repost or a retained request can fill locationText in asynchronously after mount; the
+  // effect below still collapses the first time that happens without fighting a later
+  // manual "Update location" click.
+  const [locationExpanded, setLocationExpanded] = useState(!locationText);
+  const syncedInitialLocation = useRef(Boolean(locationText));
+
+  useEffect(() => {
+    if (syncedInitialLocation.current || !locationText) return;
+    syncedInitialLocation.current = true;
+    setLocationExpanded(false);
+  }, [locationText]);
+
   useEffect(() => {
     const text = locationText.trim();
     if (text.length < 3 || text === locationResolvedText.current) { setLocationChoices([]); return; }
@@ -109,6 +123,7 @@ function PostGigForm() {
           setLocationText(result.area.areaLabel);
           setCoordinates({ lat: result.area.lat, lng: result.area.lng });
           setLocationChoices([]);
+          setLocationExpanded(false);
         } else if (result.kind === "choices") {
           setLocationChoices(result.choices);
         } else {
@@ -134,6 +149,7 @@ function PostGigForm() {
     setCoordinates({ lat: match.lat, lng: match.lng });
     setLocationChoices([]);
     setLocationNotice(null);
+    setLocationExpanded(false);
   }
 
   async function pinMoved(point: MapPoint) {
@@ -141,7 +157,7 @@ function PostGigForm() {
     setCoordinates(point);
     try {
       const label = await reverseGeocodeGeneralArea(point.lat, point.lng);
-      if (label && request === locationRequest.current) { locationResolvedText.current = label; setLocationText(label); }
+      if (label && request === locationRequest.current) { locationResolvedText.current = label; setLocationText(label); setLocationExpanded(false); }
     } catch { /* keep the existing label: the pin's coordinates are authoritative */ }
   }
 
@@ -156,7 +172,7 @@ function PostGigForm() {
         const approx = approximateCoordinates(position.coords.latitude, position.coords.longitude) as { lat: number; lng: number };
         setCoordinates(approx);
         const label = await reverseGeocodeGeneralArea(approx.lat, approx.lng);
-        if (label && request === locationRequest.current) { locationResolvedText.current = label; setLocationText(label); }
+        if (label && request === locationRequest.current) { locationResolvedText.current = label; setLocationText(label); setLocationExpanded(false); }
         else if (!label) setLocationNotice("Couldn't determine your area automatically. Enter it manually.");
       } catch {
         setLocationNotice("Couldn't determine your area automatically. Enter it manually.");
@@ -369,28 +385,47 @@ function PostGigForm() {
         </div>
       ) : <p className="text-sm">Pricing: Fixed</p>}
       <label className="block">Expected Date/Time<input type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} className={input} /></label>
-      <label className="block">Approximate Location
-        <input maxLength={200} value={locationText}
-          onChange={(e) => { locationResolvedText.current = null; setLocationText(e.target.value); setCoordinates({ lat: null, lng: null }); }}
-          className={input} />
-      </label>
-      {locationSearching && <p role="status" className="text-sm text-neutral-500">Searching…</p>}
-      {locationChoices.length > 0 && (
-        <ul aria-label="Matching areas" className="divide-y divide-neutral-100 overflow-hidden rounded-lg border border-neutral-200 bg-white">
-          {locationChoices.map((match) => (
-            <li key={`${match.label}|${match.lat}|${match.lng}`}>
-              <button type="button" onClick={() => chooseLocationMatch(match)} className="min-h-11 w-full px-3 py-2 text-left text-sm hover:bg-neutral-50">{match.areaLabel}</button>
-            </li>
-          ))}
-        </ul>
-      )}
-      <button type="button" onClick={useMyLocation} className="text-sm font-medium text-emerald-700">{locating ? "Locating…" : "📍 Use my current location"}</button>
-      {locationNotice && <p role="status" className="text-sm text-neutral-600">{locationNotice}</p>}
-      {coordinates.lat != null && coordinates.lng != null && (
-        <div className="space-y-2">
-          <MapPicker lat={coordinates.lat} lng={coordinates.lng} onPick={(point) => { void pinMoved(point); }} />
-          <p className="text-xs text-neutral-500">Drag the pin to fine-tune the approximate area.</p>
+      {!locationExpanded ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-neutral-300 bg-white px-3 py-2.5">
+          <p className="text-sm text-neutral-700">📍 {locationText}</p>
+          <button type="button" onClick={() => setLocationExpanded(true)}
+            className="shrink-0 text-sm font-medium text-emerald-700 hover:underline">
+            Update location
+          </button>
         </div>
+      ) : (
+        <>
+          <div className="flex items-center justify-between gap-2">
+            <label htmlFor="post-location" className="block text-sm">Approximate Location</label>
+            {locationText && (
+              <button type="button" onClick={() => setLocationExpanded(false)}
+                className="text-sm font-medium text-neutral-500 hover:underline">
+                Cancel
+              </button>
+            )}
+          </div>
+          <input id="post-location" maxLength={200} value={locationText}
+            onChange={(e) => { locationResolvedText.current = null; setLocationText(e.target.value); setCoordinates({ lat: null, lng: null }); }}
+            className={input} />
+          {locationSearching && <p role="status" className="text-sm text-neutral-500">Searching…</p>}
+          {locationChoices.length > 0 && (
+            <ul aria-label="Matching areas" className="divide-y divide-neutral-100 overflow-hidden rounded-lg border border-neutral-200 bg-white">
+              {locationChoices.map((match) => (
+                <li key={`${match.label}|${match.lat}|${match.lng}`}>
+                  <button type="button" onClick={() => chooseLocationMatch(match)} className="min-h-11 w-full px-3 py-2 text-left text-sm hover:bg-neutral-50">{match.areaLabel}</button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <button type="button" onClick={useMyLocation} className="text-sm font-medium text-emerald-700">{locating ? "Locating…" : "📍 Use my current location"}</button>
+          {locationNotice && <p role="status" className="text-sm text-neutral-600">{locationNotice}</p>}
+          {coordinates.lat != null && coordinates.lng != null && (
+            <div className="space-y-2">
+              <MapPicker lat={coordinates.lat} lng={coordinates.lng} onPick={(point) => { void pinMoved(point); }} />
+              <p className="text-xs text-neutral-500">Drag the pin to fine-tune the approximate area.</p>
+            </div>
+          )}
+        </>
       )}
       <p className="text-sm text-neutral-500">Use a neighborhood, ZIP or city here. This is what everyone can see. Coordinates, if collected, are rounded to a general area.</p>
       <label className="block">Exact address (optional, private)<input maxLength={300} autoComplete="street-address" value={privateAddress} onChange={(e) => setPrivateAddress(e.target.value)} className={input} /></label>
