@@ -404,7 +404,7 @@ function profileTagsOnlyClient(rpcCalls) {
   };
 }
 
-test("Profile helper location starts empty and shows no opt-out control until a profile has ever opted in", async () => {
+test("Profile helper location starts empty and expanded until a profile has ever opted in", async () => {
   const client = profileTagsOnlyClient([]);
   const withSkillNoLocation = { ...profile, skills: ["Cleaning"], public_location_text: null, public_lat: null, public_lng: null };
   const app = await component("src/app/profile/page.tsx", "ProfileEditor", {
@@ -414,7 +414,6 @@ test("Profile helper location starts empty and shows no opt-out control until a 
   const tree = app.render({ profile: withSkillNoLocation });
   const areaInput = nodes(tree, (node) => node.type === "input" && node.props.placeholder === "Neighborhood, ZIP or city")[0];
   assert.equal(areaInput.props.value, "", "helper location is never silently pre-filled for an existing profile that hasn't opted in");
-  assert.equal(button(tree, "Opt out"), undefined, "no opt-out control shown when nothing has ever been opted into");
 });
 
 test("Profile helper location: saving calls set_helper_location with the entered area", async () => {
@@ -438,7 +437,7 @@ test("Profile helper location: saving calls set_helper_location with the entered
   assert.equal(rpcCalls[0].payload.p_lng, null);
 });
 
-test("Profile helper location: opting out calls set_helper_location with all nulls", async () => {
+test("Profile helper location: clearing the area and saving sends all nulls", async () => {
   const rpcCalls = [];
   const client = profileTagsOnlyClient(rpcCalls);
   const withLocation = { ...profile, skills: ["Cleaning"], public_location_text: "Downtown", public_lat: 12.34, public_lng: -56.78 };
@@ -446,9 +445,14 @@ test("Profile helper location: opting out calls set_helper_location with all nul
     client, mocks: { "@/lib/tags": { loadTagCatalog: async () => ({}), MAX_PROFILE_TAGS: 8 } },
   });
   app.render({ profile: withLocation }); await flush();
-  const tree = app.render({ profile: withLocation });
-  assert.ok(button(tree, "Opt out"), "opt-out control appears once a location is already set");
-  button(tree, "Opt out").props.onClick();
+  let tree = app.render({ profile: withLocation });
+  // An area is already set, so the picker opens collapsed; "Update location" reopens it.
+  button(tree, "Update location").props.onClick();
+  tree = app.render({ profile: withLocation });
+  const areaInput = nodes(tree, (node) => node.type === "input" && node.props.placeholder === "Neighborhood, ZIP or city")[0];
+  areaInput.props.onChange({ target: { value: "" } });
+  tree = app.render({ profile: withLocation });
+  button(tree, "Save location").props.onClick();
   await flush();
   assert.equal(rpcCalls.length, 1);
   assert.equal(rpcCalls[0].name, "set_helper_location");

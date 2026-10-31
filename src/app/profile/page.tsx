@@ -123,6 +123,14 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
   const [savingLocation, setSavingLocation] = useState(false);
   const [locationMessage, setLocationMessage] = useState<string | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
+  // Collapsed to a summary once a location is already saved, same as elsewhere (/location,
+  // Find a Helper, Post a Gig); no hydration concern here since ProfileEditor only mounts
+  // once `profile` is already loaded client-side.
+  const [helperLocationExpanded, setHelperLocationExpanded] = useState(!profile.public_location_text);
+  // "Save location" is only actionable once something actually differs from what's saved,
+  // same rule as the profile form's own "Update profile" button above.
+  const helperLocationDirty = helperLocationText.trim() !== (profile.public_location_text ?? "")
+    || helperCoords.lat !== profile.public_lat || helperCoords.lng !== profile.public_lng;
 
   // Postcode/area suggestions as the helper types, same lookup /location and
   // find-helper use. Kept local to this field: it saves to the profile's own
@@ -204,29 +212,28 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
     { timeout: 10000, maximumAge: 60000 });
   }
 
+  // An empty area clears the helper location (the old separate "Opt out" button's effect,
+  // now just a Save with nothing typed) rather than needing its own control.
   async function saveHelperLocation() {
-    if (pending.current) return;
-    if (!helperLocationText.trim() || helperLocationText.trim().length > 200) {
-      setLocationError("Enter a general area of 1–200 characters."); return;
-    }
+    if (pending.current || !helperLocationDirty) return;
+    const text = helperLocationText.trim();
+    if (text.length > 200) { setLocationError("Enter a general area of up to 200 characters."); return; }
     pending.current = true; setSavingLocation(true); setLocationError(null); setLocationMessage(null);
     try {
-      const { error } = await supabase.rpc("set_helper_location", { p_location_text: helperLocationText.trim(), p_lat: helperCoords.lat, p_lng: helperCoords.lng });
+      const { error } = await supabase.rpc("set_helper_location", {
+        p_location_text: text || null, p_lat: text ? helperCoords.lat : null, p_lng: text ? helperCoords.lng : null,
+      });
       if (error) throw error;
-      setLocationMessage("Helper location saved. You may now appear in nearby Find a Helper results.");
+      setHelperLocationText(text);
+      if (!text) setHelperCoords({ lat: null, lng: null });
+      setLocationMessage(text
+        ? "Helper location saved. You may now appear in nearby Find a Helper results."
+        : "Location cleared. You won't appear in location-based Find a Helper results.");
+      setHelperLocationExpanded(false);
+      // profile.public_location_text/lat/lng feed helperLocationDirty above; without this
+      // refresh, Save would look dirty again immediately after successfully saving.
+      try { await refreshProfile(); } catch { /* the save itself already succeeded */ }
     } catch (error) { setLocationError(friendlyError(error, "Couldn't save your helper location. Please try again.")); }
-    finally { pending.current = false; setSavingLocation(false); }
-  }
-
-  async function clearHelperLocation() {
-    if (pending.current) return;
-    pending.current = true; setSavingLocation(true); setLocationError(null); setLocationMessage(null);
-    try {
-      const { error } = await supabase.rpc("set_helper_location", { p_location_text: null, p_lat: null, p_lng: null });
-      if (error) throw error;
-      setHelperLocationText(""); setHelperCoords({ lat: null, lng: null });
-      setLocationMessage("Opted out. You won't appear in location-based Find a Helper results.");
-    } catch (error) { setLocationError(friendlyError(error, "Couldn't update your helper location. Please try again.")); }
     finally { pending.current = false; setSavingLocation(false); }
   }
 
@@ -412,30 +419,46 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
         <p className="text-sm text-neutral-500">
           Share an approximate area so people nearby can find you in Find a Helper. This is separate from your private address, is rounded before anyone sees it, and is never enabled unless you set it here. Leave it blank to stay out of location-based search.
         </p>
-        <fieldset disabled={savingLocation || locatingHelper} className="space-y-2">
-          <label className="block text-sm">Approximate area
-            <input maxLength={200} value={helperLocationText} onChange={(e) => { helperResolvedText.current = null; setHelperLocationText(e.target.value); setHelperCoords({ lat: null, lng: null }); }} className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2" placeholder="Neighborhood, ZIP or city" />
-          </label>
-          {helperSearching && <p role="status" className="text-sm text-neutral-500">Searching…</p>}
-          {helperChoices.length > 0 && (
-            <ul aria-label="Matching areas" className="divide-y divide-neutral-100 overflow-hidden rounded-lg border border-neutral-200 bg-white">
-              {helperChoices.map((match) => (
-                <li key={`${match.label}|${match.lat}|${match.lng}`}>
-                  <button type="button" onClick={() => chooseHelperMatch(match)} className="min-h-11 w-full px-3 py-2 text-left text-sm hover:bg-neutral-50">{match.areaLabel}</button>
-                </li>
-              ))}
-            </ul>
-          )}
-          <button type="button" onClick={useMyHelperLocation} className="text-sm text-emerald-700">{locatingHelper ? "Locating…" : "Use my current location"}</button>
-          <div className="flex gap-3">
-            <button type="button" onClick={() => void saveHelperLocation()} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-60">
+        {!helperLocationExpanded ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2.5">
+            <p className="text-sm text-neutral-700">{helperLocationText ? `📍 ${helperLocationText}` : "No location set"}</p>
+            <button type="button" onClick={() => setHelperLocationExpanded(true)}
+              className="shrink-0 text-sm font-medium text-emerald-700 hover:underline">
+              {helperLocationText ? "Update location" : "Set location"}
+            </button>
+          </div>
+        ) : (
+          <fieldset disabled={savingLocation || locatingHelper} className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <label htmlFor="helper-location" className="block text-sm">Approximate area</label>
+              {helperLocationText && (
+                <button type="button" onClick={() => { setHelperLocationExpanded(false); setHelperLocationText(profile.public_location_text ?? ""); setHelperCoords({ lat: profile.public_lat, lng: profile.public_lng }); setLocationError(null); }}
+                  className="text-sm font-medium text-neutral-500 hover:underline">
+                  Cancel
+                </button>
+              )}
+            </div>
+            <input id="helper-location" maxLength={200} value={helperLocationText} onChange={(e) => { helperResolvedText.current = null; setHelperLocationText(e.target.value); setHelperCoords({ lat: null, lng: null }); }} className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2" placeholder="Neighborhood, ZIP or city" />
+            {helperSearching && <p role="status" className="text-sm text-neutral-500">Searching…</p>}
+            {helperChoices.length > 0 && (
+              <ul aria-label="Matching areas" className="divide-y divide-neutral-100 overflow-hidden rounded-lg border border-neutral-200 bg-white">
+                {helperChoices.map((match) => (
+                  <li key={`${match.label}|${match.lat}|${match.lng}`}>
+                    <button type="button" onClick={() => chooseHelperMatch(match)} className="min-h-11 w-full px-3 py-2 text-left text-sm hover:bg-neutral-50">{match.areaLabel}</button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <button type="button" onClick={useMyHelperLocation} className="text-sm text-emerald-700">{locatingHelper ? "Locating…" : "Use my current location"}</button>
+            <button type="button" onClick={() => void saveHelperLocation()} disabled={!helperLocationDirty}
+              className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed ${helperLocationDirty
+                ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                : "bg-neutral-200 text-neutral-500"}`}>
               {savingLocation ? "Saving…" : "Save location"}
             </button>
-            {(profile.public_location_text || helperLocationText) && (
-              <button type="button" onClick={() => void clearHelperLocation()} className="rounded-lg border px-4 py-2 text-sm font-medium disabled:opacity-60">Opt out</button>
-            )}
-          </div>
-        </fieldset>
+            <p className="text-xs text-neutral-500">Clear the area and save to remove it and stop appearing in location-based search.</p>
+          </fieldset>
+        )}
         {locationMessage && <p role="status" className="text-sm text-emerald-700">{locationMessage}</p>}
         {locationError && <p role="alert" className="text-sm text-red-600">{locationError}</p>}
       </div>
