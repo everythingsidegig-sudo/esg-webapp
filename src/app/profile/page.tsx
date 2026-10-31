@@ -11,6 +11,9 @@ import { useAuth } from "@/lib/auth-context";
 import { createClient } from "@/lib/supabase/client";
 import { approximateCoordinates, friendlyError } from "@/lib/journey";
 import { reverseGeocodeGeneralArea, clearGeneralAreaState } from "@/lib/location";
+import { resolveAreaQuery } from "@/lib/area-lookup";
+import { postcodeCandidates } from "@/lib/zip-location";
+import type { AreaMatch } from "@/lib/area-search";
 import { SPECIALIZATION_PROMPTS } from "@/lib/services";
 import { loadTagCatalog, MAX_PROFILE_TAGS } from "@/lib/tags";
 import { formatMoney } from "@/lib/money";
@@ -121,6 +124,61 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
   const [locationMessage, setLocationMessage] = useState<string | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
 
+  // Postcode/area suggestions as the helper types, same lookup /location and
+  // find-helper use. Kept local to this field: it saves to the profile's own
+  // public_location fields via set_helper_location, never to the shared
+  // journey location in sessionStorage.
+  const [helperSearching, setHelperSearching] = useState(false);
+  const [helperChoices, setHelperChoices] = useState<AreaMatch[]>([]);
+  const helperLocationRequest = useRef(0);
+  const helperResolvedText = useRef<string | null>(null);
+
+  useEffect(() => {
+    const text = helperLocationText.trim();
+    if (text.length < 3 || text === helperResolvedText.current) { setHelperChoices([]); return; }
+    const postcode = postcodeCandidates(text).length > 0;
+    const request = ++helperLocationRequest.current;
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      setHelperSearching(true);
+      setLocationError(null);
+      try {
+        const result = await resolveAreaQuery(text, controller.signal);
+        if (request !== helperLocationRequest.current) return;
+        if (result.kind === "single") {
+          helperResolvedText.current = result.area.areaLabel;
+          setHelperLocationText(result.area.areaLabel);
+          setHelperCoords({ lat: result.area.lat, lng: result.area.lng });
+          setHelperChoices([]);
+        } else if (result.kind === "choices") {
+          setHelperChoices(result.choices);
+        } else {
+          setHelperChoices([]);
+          if (postcode) setLocationError("Couldn't find that postcode. Check it, add the country, or use your current location.");
+        }
+      } catch {
+        if (request === helperLocationRequest.current) {
+          setHelperChoices([]);
+          setLocationError(postcode
+            ? "Couldn't look up that postcode right now. Try again, or use your current location."
+            : "Couldn't search for that place right now. You can still continue with what you typed, or use your current location.");
+        }
+      } finally {
+        if (request === helperLocationRequest.current) setHelperSearching(false);
+      }
+    }, 450);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [helperLocationText]);
+
+  function chooseHelperMatch(match: AreaMatch) {
+    helperLocationRequest.current++;
+    helperResolvedText.current = match.areaLabel;
+    setHelperLocationText(match.areaLabel);
+    setHelperCoords({ lat: match.lat, lng: match.lng });
+    setHelperChoices([]);
+    setLocationError(null);
+  }
+
   function useMyHelperLocation() {
     if (locatingHelper) return;
     setLocationError(null);
@@ -131,7 +189,11 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
       setHelperCoords(approx);
       try {
         const label = await reverseGeocodeGeneralArea(approx.lat, approx.lng);
-        if (label) setHelperLocationText((current) => current || label);
+        if (label) {
+          helperLocationRequest.current++;
+          helperResolvedText.current = label;
+          setHelperLocationText((current) => current || label);
+        }
         else setLocationError("Couldn't determine your area automatically. Enter it manually.");
       } catch {
         setLocationError("Couldn't determine your area automatically. Enter it manually.");
@@ -352,8 +414,18 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
         </p>
         <fieldset disabled={savingLocation || locatingHelper} className="space-y-2">
           <label className="block text-sm">Approximate area
-            <input maxLength={200} value={helperLocationText} onChange={(e) => { setHelperLocationText(e.target.value); setHelperCoords({ lat: null, lng: null }); }} className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2" placeholder="Neighborhood, ZIP or city" />
+            <input maxLength={200} value={helperLocationText} onChange={(e) => { helperResolvedText.current = null; setHelperLocationText(e.target.value); setHelperCoords({ lat: null, lng: null }); }} className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2" placeholder="Neighborhood, ZIP or city" />
           </label>
+          {helperSearching && <p role="status" className="text-sm text-neutral-500">Searching…</p>}
+          {helperChoices.length > 0 && (
+            <ul aria-label="Matching areas" className="divide-y divide-neutral-100 overflow-hidden rounded-lg border border-neutral-200 bg-white">
+              {helperChoices.map((match) => (
+                <li key={`${match.label}|${match.lat}|${match.lng}`}>
+                  <button type="button" onClick={() => chooseHelperMatch(match)} className="min-h-11 w-full px-3 py-2 text-left text-sm hover:bg-neutral-50">{match.areaLabel}</button>
+                </li>
+              ))}
+            </ul>
+          )}
           <button type="button" onClick={useMyHelperLocation} className="text-sm text-emerald-700">{locatingHelper ? "Locating…" : "Use my current location"}</button>
           <div className="flex gap-3">
             <button type="button" onClick={() => void saveHelperLocation()} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-60">
