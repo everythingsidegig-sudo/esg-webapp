@@ -214,20 +214,24 @@ select pg_temp.phase2_assert((select count(*)=1 and bool_and(type='skip') from p
 reset role;
 select pg_temp.phase2_assert((select wom_count=1 and lemon_count=1 from public.profiles where id=pg_temp.phase2_id('a')),'skip retries never change counters');
 reset role;
--- ESG-FDBK-001 v1.0: the optional comment alongside WOM/Lemon/Skip.
+-- ESG-FDBK-001 v1.0: the optional comment alongside WOM/Lemon/Skip. Uses 'skip'
+-- throughout -- poster/a are shared, global-counter identities reused across every
+-- fb_* gig in this file, and these checks are about comment storage, not counting,
+-- so 'skip' (which touches no counter) keeps this block from disturbing the
+-- wom_count/lemon_count assertions elsewhere that depend on exact values.
 select set_config('request.jwt.claim.sub',pg_temp.phase2_id('poster')::text,true);
 select set_config('request.jwt.claims',jsonb_build_object('sub',pg_temp.phase2_id('poster'),'role','authenticated')::text,true);
 set local role authenticated;
-select public.submit_feedback(pg_temp.phase2_id('fb_comment'),'wom','  Great to work with!  ');
+select public.submit_feedback(pg_temp.phase2_id('fb_comment'),'skip','  Great to work with!  ');
 select pg_temp.phase2_assert((select comment from public.feedback where gig_id=pg_temp.phase2_id('fb_comment') and from_id=pg_temp.phase2_id('poster'))='Great to work with!','comment is trimmed and stored');
-select public.submit_feedback(pg_temp.phase2_id('fb_comment'),'lemon','Different comment on retry');
-select pg_temp.phase2_assert((select comment from public.feedback where gig_id=pg_temp.phase2_id('fb_comment') and from_id=pg_temp.phase2_id('poster'))='Great to work with!','first submission wins: retry cannot change the stored comment, same as type');
-select pg_temp.phase2_expect_error(format('select public.submit_feedback(pg_temp.phase2_id(''fb_comment''),''wom'',%L)',repeat('x',501)),'22023','a comment over 500 characters is rejected','Keep your comment to 500 characters or fewer.');
+select public.submit_feedback(pg_temp.phase2_id('fb_comment'),'skip','Different comment on retry');
+select pg_temp.phase2_assert((select comment from public.feedback where gig_id=pg_temp.phase2_id('fb_comment') and from_id=pg_temp.phase2_id('poster'))='Great to work with!','first submission wins: retry cannot change the stored comment');
+select pg_temp.phase2_expect_error(format('select public.submit_feedback(pg_temp.phase2_id(''fb_comment''),''skip'',%L)',repeat('x',501)),'22023','a comment over 500 characters is rejected','Keep your comment to 500 characters or fewer.');
 reset role;
 select set_config('request.jwt.claim.sub',pg_temp.phase2_id('a')::text,true);
 select set_config('request.jwt.claims',jsonb_build_object('sub',pg_temp.phase2_id('a'),'role','authenticated')::text,true);
 set local role authenticated;
-select public.submit_feedback(pg_temp.phase2_id('fb_comment'),'wom','   ');
+select public.submit_feedback(pg_temp.phase2_id('fb_comment'),'skip','   ');
 select pg_temp.phase2_assert((select comment is null from public.feedback where gig_id=pg_temp.phase2_id('fb_comment') and from_id=pg_temp.phase2_id('a')),'a whitespace-only comment is stored as no comment, not an empty string');
 reset role;
 select set_config('request.jwt.claim.sub',pg_temp.phase2_id('a')::text,true);
