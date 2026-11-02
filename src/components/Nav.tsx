@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import NotificationsBell from "@/components/NotificationsBell";
+import GigUpdatesBell from "@/components/GigUpdatesBell";
 import MessagesLink from "@/components/MessagesLink";
 import LogoutButton from "@/components/LogoutButton";
 
@@ -27,7 +27,7 @@ export default function Nav() {
         <div className="flex min-h-11 items-center gap-1 sm:gap-2">
           {user ? <>
             <MessagesLink />
-            <NotificationsBell />
+            <GigUpdatesBell />
             <LogoutButton className="hidden min-h-11 rounded-full px-3 text-sm font-medium text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 disabled:opacity-60 sm:inline-flex sm:items-center" />
           </> : loading ? <span className="px-2 text-sm text-neutral-500">Loading…</span> : (
             <Link href="/auth/sign-in" className="flex min-h-11 items-center rounded-full px-3 text-sm font-semibold text-emerald-700 hover:bg-emerald-50">

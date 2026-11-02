@@ -1408,12 +1408,12 @@ async function openMyGigs(options = {}, mocks = {}) {
   return { app, tree: app.render() };
 }
 
-test("bottom navigation is exactly Home | Explore | My Gigs | Profile; header has Messages and Notifications, no username", async () => {
-  const app = await component("src/components/Nav.tsx", "Nav", { mocks: { "@/components/NotificationsBell": { default: "notifications-bell" } } });
+test("bottom navigation is exactly Home | Explore | My Gigs | Profile; header has Messages and Gig Updates, no username", async () => {
+  const app = await component("src/components/Nav.tsx", "Nav", { mocks: { "@/components/GigUpdatesBell": { default: "notifications-bell" } } });
   const tree = app.render();
   const header = nodes(tree, (node) => node.type === "header")[0];
   assert.equal(nodes(header, (node) => node.type === "messages-link").length, 1, "Messages icon in the header");
-  assert.equal(nodes(header, (node) => node.type === "notifications-bell").length, 1, "Notifications icon in the header");
+  assert.equal(nodes(header, (node) => node.type === "notifications-bell").length, 1, "Gig Updates icon in the header");
   assert.equal(nodes(header, (node) => node.type === "a" && node.props.href === "/profile").length, 0, "no username link: Profile is already in the bottom bar");
   const nav = nodes(tree, (node) => node.type === "nav")[0];
   const links = nodes(nav, (node) => node.type === "a");
@@ -1546,7 +1546,7 @@ test("Messages header link carries an accessible unread count and opens the inbo
   }
 });
 
-test("Notifications: accessible unread count, and each one opens its gig (new proposals land on the proposals list)", async () => {
+test("Gig Updates: accessible unread count, and each one opens its gig (new proposals land on the proposals list)", async () => {
   const items = [
     { id: "n1", gig_id: "g1", type: "claim_received", message: "New proposal", read: false },
     { id: "n2", gig_id: "g2", type: "selected", message: "You were selected", read: false },
@@ -1556,11 +1556,11 @@ test("Notifications: accessible unread count, and each one opens its gig (new pr
   const query = { select() { return query; }, eq() { return query; }, order() { return query; }, limit() { return Promise.resolve({ data: items }); },
     update(payload) { updates.push(payload); return { eq: async () => ({ error: null }) }; } };
   const client = { from: () => query, channel() { const c = { on() { return c; }, subscribe() { return c; } }; return c; }, removeChannel() {} };
-  const app = await component("src/components/NotificationsBell.tsx", "NotificationsBell", { client, mocks: { "next/navigation": { useRouter: () => ({ push: (url) => pushed.push(url) }) } } });
+  const app = await component("src/components/GigUpdatesBell.tsx", "GigUpdatesBell", { client, mocks: { "next/navigation": { useRouter: () => ({ push: (url) => pushed.push(url) }) } } });
   app.render(); await flush();
   let tree = app.render();
-  const bell = () => nodes(tree, (node) => node.type === "button" && /^Notifications/.test(node.props["aria-label"] ?? ""))[0];
-  assert.equal(bell().props["aria-label"], "Notifications, 2 unread");
+  const bell = () => nodes(tree, (node) => node.type === "button" && /^Gig Updates/.test(node.props["aria-label"] ?? ""))[0];
+  assert.equal(bell().props["aria-label"], "Gig Updates, 2 unread");
   bell().props.onClick(); tree = app.render();
   const open = (label) => nodes(tree, (node) => node.type === "button" && node.props.children === label)[0];
   await open("New proposal").props.onClick();
@@ -2153,7 +2153,7 @@ test("header shows a single Sign In action for unauthenticated users", async () 
   const app = await component("src/components/Nav.tsx", "Nav", {
     client: { auth: { signOut: async () => ({ error: null }) } },
     mocks: {
-      "@/components/NotificationsBell": { default: "notifications-bell" },
+      "@/components/GigUpdatesBell": { default: "notifications-bell" },
       "next/navigation": { usePathname: () => "/", useRouter: () => ({ replace() {} }) },
     },
   });
@@ -3712,7 +3712,7 @@ test("My Gigs fetches gigs addressed to the helper (no claim needed) and marks t
 });
 
 test("A request notification opens the request panel; other notifications still open their gig or proposals", async () => {
-  const bell = await loadLib("src/components/NotificationsBell.tsx", {
+  const bell = await loadLib("src/components/GigUpdatesBell.tsx", {
     react: {}, "next/navigation": {}, "@/lib/supabase/client": {}, "@/lib/auth-context": {}, "react/jsx-runtime": { jsx() {}, jsxs() {} },
   });
   assert.equal(bell.notificationHref({ gig_id: "g1", type: "gig_request" }), "/gigs/g1#request");
@@ -4264,7 +4264,7 @@ test("Gig page: the chat is told when the price can be negotiated (helper chosen
 });
 
 test("A price notification opens the chat where the proposal waits; other notification links are unchanged", async () => {
-  const bell = await loadLib("src/components/NotificationsBell.tsx", {
+  const bell = await loadLib("src/components/GigUpdatesBell.tsx", {
     react: {}, "next/navigation": {}, "@/lib/supabase/client": {}, "@/lib/auth-context": {}, "react/jsx-runtime": { jsx() {}, jsxs() {} },
   });
   for (const type of ["price_proposed", "price_accepted", "price_declined", "price_withdrawn"]) assert.equal(bell.notificationHref({ gig_id: "g1", type }), "/gigs/g1#messages", type);
