@@ -6,7 +6,7 @@ create temporary table phase2_snapshot (name text primary key, payload jsonb not
 insert into phase2_fixture
 select name,gen_random_uuid() from unnest(array[
   'poster','a','b','outsider','open','reverse','closed','draft','rejected','withdrawn',
-  'fb_wom','fb_lemon','fb_skip','fb_incomplete','fb_unresolved','other_open',
+  'fb_wom','fb_lemon','fb_skip','fb_incomplete','fb_unresolved','fb_comment','other_open',
   'claim_a','claim_b','reverse_a','reverse_b','rejected_a','withdrawn_a','wrong_claim'
 ]) as names(name);
 grant select,update on phase2_fixture to anon,authenticated;
@@ -52,14 +52,14 @@ select id,
   case when name='other_open' then pg_temp.phase2_id('outsider') else pg_temp.phase2_id('poster') end,
   'Other','Phase2 '||name,'Integrity test',10,
   case when name='draft' then 'draft'::public.gig_status
-    when name in ('closed','fb_wom','fb_lemon','fb_skip') then 'completed'::public.gig_status
+    when name in ('closed','fb_wom','fb_lemon','fb_skip','fb_comment') then 'completed'::public.gig_status
     when name='fb_incomplete' then 'incomplete'::public.gig_status
     else 'active'::public.gig_status end,
-  case when name in ('closed','fb_wom','fb_lemon','fb_skip','fb_incomplete','fb_unresolved')
+  case when name in ('closed','fb_wom','fb_lemon','fb_skip','fb_incomplete','fb_unresolved','fb_comment')
     then pg_temp.phase2_id('a') end
 from phase2_fixture where name in (
   'open','reverse','closed','draft','rejected','withdrawn',
-  'fb_wom','fb_lemon','fb_skip','fb_incomplete','fb_unresolved','other_open'
+  'fb_wom','fb_lemon','fb_skip','fb_incomplete','fb_unresolved','fb_comment','other_open'
 );
 insert into public.claims(id,gig_id,provider_id,state) values
   (pg_temp.phase2_id('reverse_a'),pg_temp.phase2_id('reverse'),pg_temp.phase2_id('a'),'pending'),
@@ -214,6 +214,22 @@ select pg_temp.phase2_assert((select count(*)=1 and bool_and(type='skip') from p
 reset role;
 select pg_temp.phase2_assert((select wom_count=1 and lemon_count=1 from public.profiles where id=pg_temp.phase2_id('a')),'skip retries never change counters');
 reset role;
+-- ESG-FDBK-001 v1.0: the optional comment alongside WOM/Lemon/Skip.
+select set_config('request.jwt.claim.sub',pg_temp.phase2_id('poster')::text,true);
+select set_config('request.jwt.claims',jsonb_build_object('sub',pg_temp.phase2_id('poster'),'role','authenticated')::text,true);
+set local role authenticated;
+select public.submit_feedback(pg_temp.phase2_id('fb_comment'),'wom','  Great to work with!  ');
+select pg_temp.phase2_assert((select comment from public.feedback where gig_id=pg_temp.phase2_id('fb_comment') and from_id=pg_temp.phase2_id('poster'))='Great to work with!','comment is trimmed and stored');
+select public.submit_feedback(pg_temp.phase2_id('fb_comment'),'lemon','Different comment on retry');
+select pg_temp.phase2_assert((select comment from public.feedback where gig_id=pg_temp.phase2_id('fb_comment') and from_id=pg_temp.phase2_id('poster'))='Great to work with!','first submission wins: retry cannot change the stored comment, same as type');
+select pg_temp.phase2_expect_error(format('select public.submit_feedback(pg_temp.phase2_id(''fb_comment''),''wom'',%L)',repeat('x',501)),'22023','a comment over 500 characters is rejected','Keep your comment to 500 characters or fewer.');
+reset role;
+select set_config('request.jwt.claim.sub',pg_temp.phase2_id('a')::text,true);
+select set_config('request.jwt.claims',jsonb_build_object('sub',pg_temp.phase2_id('a'),'role','authenticated')::text,true);
+set local role authenticated;
+select public.submit_feedback(pg_temp.phase2_id('fb_comment'),'wom','   ');
+select pg_temp.phase2_assert((select comment is null from public.feedback where gig_id=pg_temp.phase2_id('fb_comment') and from_id=pg_temp.phase2_id('a')),'a whitespace-only comment is stored as no comment, not an empty string');
+reset role;
 select set_config('request.jwt.claim.sub',pg_temp.phase2_id('a')::text,true);
 select set_config('request.jwt.claims',jsonb_build_object('sub',pg_temp.phase2_id('a'),'role','authenticated')::text,true);
 set local role authenticated;
@@ -240,6 +256,6 @@ select pg_temp.phase2_assert((select wom_count=2 from public.public_profiles whe
 select pg_temp.phase2_assert((select count(*) from public.feedback where gig_id=pg_temp.phase2_id('fb_unresolved'))=0,'failed unresolved feedback creates no record');
 select pg_temp.phase2_assert(has_function_privilege('authenticated','public.create_claim(uuid,numeric,text)','EXECUTE') and not has_function_privilege('anon','public.create_claim(uuid,numeric,text)','EXECUTE'),'Phase 1 execution boundary retained for create_claim');
 select pg_temp.phase2_assert(has_function_privilege('authenticated','public.select_provider(uuid,uuid)','EXECUTE') and not has_function_privilege('anon','public.select_provider(uuid,uuid)','EXECUTE'),'Phase 1 execution boundary retained for select_provider');
-select pg_temp.phase2_assert(has_function_privilege('authenticated','public.submit_feedback(uuid,public.feedback_type)','EXECUTE') and not has_function_privilege('anon','public.submit_feedback(uuid,public.feedback_type)','EXECUTE'),'Phase 1 execution boundary retained for submit_feedback');
+select pg_temp.phase2_assert(has_function_privilege('authenticated','public.submit_feedback(uuid,public.feedback_type,text)','EXECUTE') and not has_function_privilege('anon','public.submit_feedback(uuid,public.feedback_type,text)','EXECUTE'),'Phase 1 execution boundary retained for submit_feedback');
 select pg_temp.phase2_assert(not has_function_privilege('authenticated','public.notify(uuid,uuid,text,text)','EXECUTE') and not has_schema_privilege('anon','esg_private','USAGE'),'Phase 1 internal/private helper boundaries retained');
 rollback;
