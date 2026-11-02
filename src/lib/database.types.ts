@@ -200,7 +200,7 @@ export interface Database {
       submit_completion: { Args: { p_gig_id: string; p_outcome: CompletionOutcome }; Returns: void };
       submit_incomplete_choice: { Args: { p_gig_id: string; p_choice: IncompleteChoice }; Returns: void };
       submit_payment_amount: { Args: { p_gig_id: string; p_amount: number }; Returns: void };
-      submit_feedback: { Args: { p_gig_id: string; p_type: FeedbackType }; Returns: void };
+      submit_feedback: { Args: { p_gig_id: string; p_type: FeedbackType; p_comment?: string | null }; Returns: void };
       publish_gig: { Args: { p_gig_id: string }; Returns: void };
       cancel_gig: { Args: { p_gig_id: string }; Returns: void };
       get_public_stats: { Args: { p_profile_id: string }; Returns: { gigs_worked_count: number; wom_count: number; wom_percentage: number | null }[] };

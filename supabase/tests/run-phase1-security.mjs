@@ -4,7 +4,8 @@ import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
 const root = new URL("../", import.meta.url);
-const keepClaims = process.argv.includes("--keep-claims");
+const feedbackComments = process.argv.includes("--feedback-comments");
+const keepClaims = process.argv.includes("--keep-claims") || feedbackComments;
 const unansweredStart = process.argv.includes("--unanswered-start") || keepClaims;
 const delayStart = process.argv.includes("--delay-start") || unansweredStart;
 const negotiation = process.argv.includes("--negotiation") || delayStart;
@@ -278,6 +279,18 @@ if (profileSave) {
   if (/create (?:or replace )?(?:function|policy|trigger|table)|drop |alter /i.test(code)) throw new Error("The profile grant migration must not change functions, policies, triggers or tables");
   console.log("PASS: profile grant migration scope (UPDATE on phone, skills_other_text and services_other_text for authenticated only; no policy, trigger or function change)");
 }
+if (feedbackComments) {
+  const sql = await readFile(new URL("migrations/20240101000025_feedback_comments.sql", root), "utf8");
+  const code = sql.replace(/--.*$/gm, "");
+  if (!/drop function if exists public\.submit_feedback\(uuid, public\.feedback_type\);/.test(code)) throw new Error("The feedback-comments migration must drop the old two-argument submit_feedback before recreating it");
+  if (!/create function public\.submit_feedback\(p_gig_id uuid, p_type public\.feedback_type, p_comment text default null\) returns void/.test(code)) throw new Error("The feedback-comments migration must recreate submit_feedback with an optional p_comment parameter");
+  if (!code.includes("security definer set search_path = ''")) throw new Error("submit_feedback must remain SECURITY DEFINER with an empty search_path");
+  if (!/if auth\.uid\(\) is null then\s*raise exception 'Authentication required' using errcode = '42501'/.test(code)) throw new Error("submit_feedback must keep its explicit authentication guard");
+  if (!/alter table public\.feedback add column comment text;/.test(code)) throw new Error("The feedback-comments migration must add exactly one nullable comment column to feedback");
+  if (/\bto\s+(anon|public)\b/i.test(code.replace(/revoke[\s\S]*?;/gi, "")) || /grant (insert|update|delete)\b/i.test(code)) throw new Error("The feedback-comments migration must grant execute to authenticated only");
+  if (/drop table|create table|create policy|drop policy/i.test(code)) throw new Error("The feedback-comments migration must not change tables beyond adding the comment column, or touch policies");
+  console.log("PASS: feedback-comments migration scope (one nullable feedback.comment column, submit_feedback recreated with optional p_comment, auth guard and SECURITY DEFINER preserved, execute for authenticated only)");
+}
 if (keepClaims) {
   const sql = await readFile(new URL("migrations/20240101000024_keep_other_claims.sql", root), "utf8");
   const code = sql.replace(/--.*$/gm, "");
@@ -416,6 +429,7 @@ try {
     ...(delayStart ? ["migrations/20240101000022_delay_start_and_withdraw.sql"] : []),
     ...(unansweredStart ? ["migrations/20240101000023_unanswered_start_and_remove_helper.sql"] : []),
     ...(keepClaims ? ["migrations/20240101000024_keep_other_claims.sql"] : []),
+    ...(feedbackComments ? ["migrations/20240101000025_feedback_comments.sql"] : []),
     "tests/phase1_security.sql",
     ...(phase2a ? ["tests/phase2a_integrity.sql"] : []),
     ...(onboarding ? ["tests/onboarding_post_gig.sql"] : []),

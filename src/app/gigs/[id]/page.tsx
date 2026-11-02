@@ -32,6 +32,8 @@ function GigDetails({ id }: { id: string }) {
   const [myCompletion, setMyCompletion] = useState<CompletionOutcome | null>(null);
   const [myIncompleteChoice, setMyIncompleteChoice] = useState<IncompleteChoice | null>(null);
   const [myFeedback, setMyFeedback] = useState<FeedbackType | null>(null);
+  const [myFeedbackComment, setMyFeedbackComment] = useState<string | null>(null);
+  const [feedbackComment, setFeedbackComment] = useState("");
   const [paymentInput, setPaymentInput] = useState("");
   const [offerAmount, setOfferAmount] = useState<string | null>(null);
   const [offerMessage, setOfferMessage] = useState("");
@@ -116,11 +118,13 @@ function GigDetails({ id }: { id: string }) {
 
       const { data: feedbackRow } = await supabase
         .from("feedback")
-        .select("type")
+        .select("type, comment")
         .eq("gig_id", id)
         .eq("from_id", user.id)
         .maybeSingle();
-      setMyFeedback((feedbackRow as { type: FeedbackType } | null)?.type ?? null);
+      const myFeedbackRow = feedbackRow as { type: FeedbackType; comment: string | null } | null;
+      setMyFeedback(myFeedbackRow?.type ?? null);
+      setMyFeedbackComment(myFeedbackRow?.comment ?? null);
     }
   }, [supabase, id, user]);
 
@@ -602,30 +606,46 @@ function GigDetails({ id }: { id: string }) {
             <div className="space-y-2 rounded-xl border border-neutral-200 bg-white p-4">
               <h2 className="font-medium">Feedback</h2>
               {myFeedback ? (
-                <p className="text-sm text-neutral-500">Thanks — you submitted feedback ({myFeedback}).</p>
+                <div className="space-y-1">
+                  <p className="text-sm text-neutral-500">Thanks — you submitted feedback ({myFeedback}).</p>
+                  {myFeedbackComment && <p className="rounded-lg bg-neutral-50 px-3 py-2 text-sm text-neutral-700">&ldquo;{myFeedbackComment}&rdquo;</p>}
+                </div>
               ) : (
-                <div className="flex gap-2">
-                  <button
-                    disabled={busy}
-                    onClick={() => run(() => supabase.rpc("submit_feedback", { p_gig_id: id, p_type: "wom" }))}
-                    className="flex-1 rounded-lg bg-emerald-600 py-2 text-sm font-medium text-white disabled:opacity-60"
-                  >
-                    👍 WOM (Recommend)
-                  </button>
-                  <button
-                    disabled={busy}
-                    onClick={() => run(() => supabase.rpc("submit_feedback", { p_gig_id: id, p_type: "lemon" }))}
-                    className="flex-1 rounded-lg bg-neutral-700 py-2 text-sm font-medium text-white disabled:opacity-60"
-                  >
-                    👎 Lemon (Private)
-                  </button>
-                  <button
-                    disabled={busy}
-                    onClick={() => run(() => supabase.rpc("submit_feedback", { p_gig_id: id, p_type: "skip" }))}
-                    className="flex-1 rounded-lg bg-neutral-300 py-2 text-sm font-medium text-neutral-800 disabled:opacity-60"
-                  >
-                    Skip
-                  </button>
+                <div className="space-y-2">
+                  <label className="block text-sm">Comment (optional)
+                    <textarea
+                      disabled={busy}
+                      maxLength={500}
+                      value={feedbackComment}
+                      onChange={(e) => setFeedbackComment(e.target.value)}
+                      placeholder="Anything you'd like to add?"
+                      rows={2}
+                      className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm disabled:opacity-60"
+                    />
+                  </label>
+                  <div className="flex gap-2">
+                    <button
+                      disabled={busy}
+                      onClick={() => run(() => supabase.rpc("submit_feedback", { p_gig_id: id, p_type: "wom", p_comment: feedbackComment.trim() || null }))}
+                      className="flex-1 rounded-lg bg-emerald-600 py-2 text-sm font-medium text-white disabled:opacity-60"
+                    >
+                      👍 WOM (Recommend)
+                    </button>
+                    <button
+                      disabled={busy}
+                      onClick={() => run(() => supabase.rpc("submit_feedback", { p_gig_id: id, p_type: "lemon", p_comment: feedbackComment.trim() || null }))}
+                      className="flex-1 rounded-lg bg-neutral-700 py-2 text-sm font-medium text-white disabled:opacity-60"
+                    >
+                      👎 Lemon (Private)
+                    </button>
+                    <button
+                      disabled={busy}
+                      onClick={() => run(() => supabase.rpc("submit_feedback", { p_gig_id: id, p_type: "skip", p_comment: feedbackComment.trim() || null }))}
+                      className="flex-1 rounded-lg bg-neutral-300 py-2 text-sm font-medium text-neutral-800 disabled:opacity-60"
+                    >
+                      Skip
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
