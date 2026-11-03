@@ -4,7 +4,8 @@ import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
 const root = new URL("../", import.meta.url);
-const withdrawExitRemove = process.argv.includes("--withdraw-exit-remove");
+const blockUser = process.argv.includes("--block-user");
+const withdrawExitRemove = process.argv.includes("--withdraw-exit-remove") || blockUser;
 const feedbackComments = process.argv.includes("--feedback-comments") || withdrawExitRemove;
 const keepClaims = process.argv.includes("--keep-claims") || feedbackComments;
 const unansweredStart = process.argv.includes("--unanswered-start") || keepClaims;
@@ -280,6 +281,51 @@ if (profileSave) {
   if (/create (?:or replace )?(?:function|policy|trigger|table)|drop |alter /i.test(code)) throw new Error("The profile grant migration must not change functions, policies, triggers or tables");
   console.log("PASS: profile grant migration scope (UPDATE on phone, skills_other_text and services_other_text for authenticated only; no policy, trigger or function change)");
 }
+if (blockUser) {
+  const sql = await readFile(new URL("migrations/20240101000027_block_user.sql", root), "utf8");
+  const code = sql.replace(/--.*$/gm, "");
+  if (!/create table public\.blocks \(/.test(code) || !/unique \(blocker_id, blocked_id\)/.test(code) || !/check \(blocker_id <> blocked_id\)/.test(code)) {
+    throw new Error("The block-user migration must create the blocks table with a (blocker_id, blocked_id) unique constraint and a no-self-block check");
+  }
+  if (!/alter table public\.blocks enable row level security;/.test(code)) throw new Error("blocks must have row level security enabled");
+  if (!/create policy blocks_select_own on public\.blocks for select to authenticated using \(\s*blocker_id = auth\.uid\(\)\s*\);/.test(code)) {
+    throw new Error("blocks must only be readable by the blocker (the blocked party is never told who blocked them)");
+  }
+  if (!/revoke all on table public\.blocks from public, anon, authenticated;/.test(code) || !/grant select on table public\.blocks to authenticated;/.test(code)) {
+    throw new Error("blocks must be select-only for authenticated, with no client insert/update/delete grant (writes only through block_user())");
+  }
+  if (!/create or replace function esg_private\.is_blocked\(p_a uuid, p_b uuid\) returns boolean/.test(code)) throw new Error("The block-user migration must create esg_private.is_blocked(uuid, uuid)");
+  if (!/grant execute on function esg_private\.is_blocked\(uuid, uuid\) to authenticated;/.test(code) || /esg_private\.is_blocked\(uuid, uuid\)[^;]*to (anon|public)/i.test(code)) {
+    throw new Error("esg_private.is_blocked must stay authenticated-only, matching has_own_claim/is_gig_poster's own convention");
+  }
+  if (!/create function public\.block_user\(p_blocked_id uuid\) returns void/.test(code)) throw new Error("The block-user migration must create public.block_user(uuid)");
+  if (!/security definer set search_path = ''/.test(code.match(/create function public\.block_user\([\s\S]*?\n\$\$;/)?.[0] ?? "")) throw new Error("block_user must be SECURITY DEFINER with an empty search_path");
+  if (!/if auth\.uid\(\) is null then\s*raise exception 'Authentication required' using errcode = '42501'/.test(code.match(/create function public\.block_user\([\s\S]*?\n\$\$;/)?.[0] ?? "")) throw new Error("block_user must start with an explicit authentication guard");
+  const blockBody = code.match(/create function public\.block_user\([\s\S]*?\n\$\$;/)?.[0] ?? "";
+  if (!/status in \('in_progress', 'awaiting_payment', 'disputed'\)/.test(blockBody)) throw new Error("block_user must refuse to block while a gig between the pair is in_progress/awaiting_payment/disputed, rather than forcing the two-sided Incomplete handshake with only one side's input");
+  if (/gig_completions|gig_incomplete_choices|submit_payment_amount/.test(blockBody)) throw new Error("block_user must not try to drive the Completion/Incomplete lifecycle itself -- confirmed scope is to refuse the block outright while in progress");
+  if (!/revoke execute on function public\.block_user\(uuid\) from public, anon, authenticated;/.test(code) || !/grant execute on function public\.block_user\(uuid\) to authenticated;/.test(code)) {
+    throw new Error("block_user must be grant-scoped to authenticated only");
+  }
+  if (!/drop policy gigs_select on public\.gigs;/.test(code) || !/create policy gigs_select on public\.gigs for select to anon using/.test(code) || !/create policy gigs_select_discovery on public\.gigs for select to authenticated using/.test(code)) {
+    throw new Error("The block-user migration must split gigs_select into an anon-only policy and a new authenticated gigs_select_discovery policy carrying the block check");
+  }
+  if (!/create policy gigs_select on public\.gigs for select to anon using \(\s*status = 'active' and selected_provider_id is null and requested_helper_id is null\s*\);/.test(code)) {
+    throw new Error("The anon-facing gigs_select policy must keep its exact prior predicate, unmodified and with no esg_private reference");
+  }
+  if (!/drop policy public_profiles_select_all on public\.public_profiles;/.test(code) || !/create policy public_profiles_select_all on public\.public_profiles for select to anon using \(true\);/.test(code)
+      || !/create policy public_profiles_select_authenticated on public\.public_profiles for select to authenticated using/.test(code)) {
+    throw new Error("The block-user migration must split public_profiles_select_all into an anon-only policy and a new authenticated public_profiles_select_authenticated policy carrying the block check");
+  }
+  const createClaimBody = code.match(/create or replace function public\.create_claim\([\s\S]*?\n\$\$;/)?.[0] ?? "";
+  if (!createClaimBody || !/esg_private\.is_blocked\(auth\.uid\(\), v_gig\.poster_id\)/.test(createClaimBody)) {
+    throw new Error("create_claim must be recreated with a block check before a new claim can be inserted");
+  }
+  if (!/select \* into v_claim from public\.claims\s*\n\s*where gig_id = p_gig_id and provider_id = auth\.uid\(\);\s*\n\s*if found then/.test(createClaimBody)) {
+    throw new Error("create_claim's existing-claim retry short-circuit must stay ahead of the block check, so a stale (block-closed) claim is still just handed back unchanged");
+  }
+  console.log("PASS: block-user migration scope (blocks table with blocker-only RLS and no client write grant, is_blocked authenticated-only helper, block_user refuses while a gig is in_progress/awaiting_payment/disputed rather than driving Completion/Incomplete itself, discovery/profile policies split with the block check added only to the authenticated side, create_claim blocks new claims while still returning a stale claim unchanged)");
+}
 if (withdrawExitRemove) {
   const sql = await readFile(new URL("migrations/20240101000026_withdraw_exit_remove_reasons.sql", root), "utf8");
   const code = sql.replace(/--.*$/gm, "");
@@ -466,6 +512,7 @@ try {
     ...(keepClaims ? ["migrations/20240101000024_keep_other_claims.sql"] : []),
     ...(feedbackComments ? ["migrations/20240101000025_feedback_comments.sql"] : []),
     ...(withdrawExitRemove ? ["migrations/20240101000026_withdraw_exit_remove_reasons.sql"] : []),
+    ...(blockUser ? ["migrations/20240101000027_block_user.sql"] : []),
     "tests/phase1_security.sql",
     ...(phase2a ? ["tests/phase2a_integrity.sql"] : []),
     ...(onboarding ? ["tests/onboarding_post_gig.sql"] : []),
@@ -482,19 +529,20 @@ try {
     ...(unansweredStart ? ["tests/unanswered_start.sql"] : []),
     ...(keepClaims ? ["tests/keep_claims.sql"] : []),
     ...(withdrawExitRemove ? ["tests/withdraw_exit_remove.sql"] : []),
+    ...(blockUser ? ["tests/block_user.sql"] : []),
   ]) {
     const sql = await readFile(new URL(file, root), "utf8");
     await db.exec(sql);
     if (file.startsWith("tests/")) {
       // Every assertion is an unconditional top-level SELECT. Successful SQL
       // execution means every call returned without raising its failure error.
-      const assertions = [...sql.matchAll(/^select pg_temp\.(?:assert|expect_denied|phase2_assert|phase2_expect_error|journey_assert|journey_error_any|journey_error|dw_assert|dw_denied|dw_error|gt_assert|gt_denied|gt_error|pt_assert|pt_denied|pt_error|hl_assert|hl_denied|hl_error|ad_assert|ad_error|of_assert|of_error|of_denied|rq_assert|rq_error|rq_denied|po_assert|po_error|po_denied|pn_assert|pn_error|pn_denied|ds_assert|ds_error|ds_denied|us_assert|us_error|us_denied|kc_assert|kc_error|kc_denied|wer_assert|wer_error|wer_denied)\(/gm)].length;
+      const assertions = [...sql.matchAll(/^select pg_temp\.(?:assert|expect_denied|phase2_assert|phase2_expect_error|journey_assert|journey_error_any|journey_error|dw_assert|dw_denied|dw_error|gt_assert|gt_denied|gt_error|pt_assert|pt_denied|pt_error|hl_assert|hl_denied|hl_error|ad_assert|ad_error|of_assert|of_error|of_denied|rq_assert|rq_error|rq_denied|po_assert|po_error|po_denied|pn_assert|pn_error|pn_denied|ds_assert|ds_error|ds_denied|us_assert|us_error|us_denied|kc_assert|kc_error|kc_denied|wer_assert|wer_error|wer_denied|bl_assert|bl_error|bl_denied)\(/gm)].length;
       passed += assertions;
       console.log(`PASS: ${file}: ${assertions} assertions`);
     }
     console.log(`Executed ${file}`);
   }
-  const cleanup = await db.query("select to_regclass('pg_temp.security_fixture') is null and to_regclass('pg_temp.phase2_fixture') is null and to_regclass('pg_temp.journey_fixture') is null and to_regclass('pg_temp.dw_fixture') is null and to_regclass('pg_temp.gt_fixture') is null and to_regclass('pg_temp.pt_fixture') is null and to_regclass('pg_temp.hl_fixture') is null and to_regclass('pg_temp.ad_fixture') is null and to_regclass('pg_temp.of_fixture') is null and to_regclass('pg_temp.rq_fixture') is null and to_regclass('pg_temp.po_fixture') is null and to_regclass('pg_temp.pn_fixture') is null and to_regclass('pg_temp.ds_fixture') is null and to_regclass('pg_temp.us_fixture') is null and to_regclass('pg_temp.kc_fixture') is null and to_regclass('pg_temp.wer_fixture') is null as clean");
+  const cleanup = await db.query("select to_regclass('pg_temp.security_fixture') is null and to_regclass('pg_temp.phase2_fixture') is null and to_regclass('pg_temp.journey_fixture') is null and to_regclass('pg_temp.dw_fixture') is null and to_regclass('pg_temp.gt_fixture') is null and to_regclass('pg_temp.pt_fixture') is null and to_regclass('pg_temp.hl_fixture') is null and to_regclass('pg_temp.ad_fixture') is null and to_regclass('pg_temp.of_fixture') is null and to_regclass('pg_temp.rq_fixture') is null and to_regclass('pg_temp.po_fixture') is null and to_regclass('pg_temp.pn_fixture') is null and to_regclass('pg_temp.ds_fixture') is null and to_regclass('pg_temp.us_fixture') is null and to_regclass('pg_temp.kc_fixture') is null and to_regclass('pg_temp.wer_fixture') is null and to_regclass('pg_temp.bl_fixture') is null as clean");
   if (!cleanup.rows[0].clean) throw new Error("SQL fixtures did not roll back");
   console.log(`PASS: ${passed} security assertions in isolated PostgreSQL/WASM`);
   console.log("Hosted Supabase, PostgREST, Auth, Storage and Realtime integration remain unverified.");
