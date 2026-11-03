@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import type { Notification } from "@/lib/database.types";
 
-// Every notification opens its gig -- the permanent place to manage it. A new
+// Every update opens its gig -- the permanent place to manage it. A new
 // proposal lands on the poster's proposals list within that gig.
 export function notificationHref(n: Pick<Notification, "gig_id" | "type">) {
   if (n.type === "claim_received") return `/gigs/${n.gig_id}#proposals`;
@@ -17,7 +17,7 @@ export function notificationHref(n: Pick<Notification, "gig_id" | "type">) {
   return `/gigs/${n.gig_id}`;
 }
 
-export default function NotificationsBell() {
+export default function GigUpdatesBell() {
   const { user } = useAuth();
   const supabase = createClient();
   const router = useRouter();
@@ -73,7 +73,7 @@ export default function NotificationsBell() {
       <button
         onClick={() => setOpen((o) => !o)}
         className="relative flex h-11 w-11 items-center justify-center rounded-full text-xl hover:bg-neutral-100"
-        aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"}
+        aria-label={unreadCount > 0 ? `Gig Updates, ${unreadCount} unread` : "Gig Updates"}
         aria-expanded={open}
       >
         <span aria-hidden="true">🤝</span>
@@ -85,7 +85,7 @@ export default function NotificationsBell() {
       </button>
       {open && (
         <div className="absolute right-0 z-20 mt-2 max-h-96 w-[min(20rem,calc(100vw-2rem))] overflow-y-auto rounded-lg border border-neutral-200 bg-white shadow-lg">
-          <div className="border-b border-neutral-100 px-3 py-2 text-sm font-semibold">Notifications</div>
+          <div className="border-b border-neutral-100 px-3 py-2 text-sm font-semibold">Gig Updates</div>
           {items.length === 0 && <div className="p-4 text-sm text-neutral-500">No updates yet.</div>}
           {items.map((n) => (
             <button
