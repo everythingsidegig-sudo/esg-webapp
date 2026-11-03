@@ -10,7 +10,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { createClient } from "@/lib/supabase/client";
 import { approximateCoordinates, friendlyError } from "@/lib/journey";
-import { reverseGeocodeGeneralArea, clearGeneralAreaState } from "@/lib/location";
+import { LOCATION_KEY, reverseGeocodeGeneralArea, clearGeneralAreaState } from "@/lib/location";
 import { resolveAreaQuery } from "@/lib/area-lookup";
 import { postcodeCandidates } from "@/lib/zip-location";
 import type { AreaMatch } from "@/lib/area-search";
@@ -226,8 +226,13 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
       if (error) throw error;
       setHelperLocationText(text);
       if (!text) setHelperCoords({ lat: null, lng: null });
+      // The same area Browse/Find a Helper/`/location` read, so setting it here carries over to
+      // them immediately instead of needing a separate pick on /location.
+      try {
+        if (text) localStorage.setItem(LOCATION_KEY, JSON.stringify({ text, lat: helperCoords.lat, lng: helperCoords.lng }));
+      } catch { /* the account save already succeeded; this is just this browser's convenience copy */ }
       setLocationMessage(text
-        ? "Helper location saved. You may now appear in nearby Find a Helper results."
+        ? "Location saved. You may now appear in nearby Find a Helper results, and it's used to find gigs near you."
         : "Location cleared. You won't appear in location-based Find a Helper results.");
       setHelperLocationExpanded(false);
       // profile.public_location_text/lat/lng feed helperLocationDirty above; without this
@@ -413,11 +418,10 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
     {message && <p role="status" className="text-sm text-emerald-700">{message}</p>}
     {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
 
-    {profile.skills.length > 0 && (
-      <div className="space-y-3 rounded-lg border border-neutral-200 bg-white p-4">
-        <h2 className="text-sm font-medium">Helper location (optional)</h2>
+    <div className="space-y-3 rounded-lg border border-neutral-200 bg-white p-4">
+        <h2 className="text-sm font-medium">Your area (optional)</h2>
         <p className="text-sm text-neutral-500">
-          Share an approximate area so people nearby can find you in Find a Helper. This is separate from your private address, is rounded before anyone sees it, and is never enabled unless you set it here. Leave it blank to stay out of location-based search.
+          Set an approximate area to find gigs and helpers nearby, and so people can find you in Find a Helper. It&apos;s rounded before anyone sees it, and only ever used if you set it here. Leave it blank to stay out of location-based search.
         </p>
         {!helperLocationExpanded ? (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2.5">
@@ -462,7 +466,6 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
         {locationMessage && <p role="status" className="text-sm text-emerald-700">{locationMessage}</p>}
         {locationError && <p role="alert" className="text-sm text-red-600">{locationError}</p>}
       </div>
-    )}
 
     <div className="sm:hidden">
       <LogoutButton className="flex w-full items-center justify-center rounded-lg border border-neutral-300 bg-white px-4 py-2.5 font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-60" />

@@ -2,15 +2,27 @@
 
 import { Suspense } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { hasPromptedForLocation, loadJourneyLocation, markLocationPrompted } from "@/lib/location";
 
 // Both landing options are public entry points. Authentication is requested
 // only at the point an account is actually needed: Post a Gig (its own
 // AuthGuard) and opening a specific gig (gigs/[id]'s AuthGuard).
 function HomeInner() {
+  const router = useRouter();
   // ESG-AUTH-004 v1.0 §10: Account Deleted confirmation, shown once on the
   // signed-out Home a deletion redirects to.
   const deleted = useSearchParams().get("accountDeleted") === "1";
+
+  // First visit with no area set yet: ask once, up front, before either journey -- then continue
+  // straight there. Once an area is set (or this has already run once), both links work as before.
+  function goVia(event: React.MouseEvent, destination: string) {
+    if (loadJourneyLocation().text || hasPromptedForLocation()) return;
+    event.preventDefault();
+    markLocationPrompted();
+    router.push(`/location?next=${encodeURIComponent(destination)}`);
+  }
+
   return (
     <div className="flex flex-col items-center gap-8 py-12 text-center">
       {deleted && (
@@ -25,6 +37,7 @@ function HomeInner() {
       <div className="grid w-full max-w-md gap-4 sm:grid-cols-2">
         <Link
           href="/need-help"
+          onClick={(event) => goVia(event, "/need-help")}
           className="rounded-xl border border-neutral-200 bg-white p-6 shadow-sm transition hover:shadow-md"
         >
           <div className="mb-3 text-4xl" aria-hidden="true">🙋</div>
@@ -33,6 +46,7 @@ function HomeInner() {
         </Link>
         <Link
           href="/browse"
+          onClick={(event) => goVia(event, "/browse")}
           className="rounded-xl border border-neutral-200 bg-white p-6 shadow-sm transition hover:shadow-md"
         >
           <div className="mb-3 text-4xl" aria-hidden="true">💪</div>
