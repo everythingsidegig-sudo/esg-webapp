@@ -70,6 +70,23 @@ language plpgsql as $$ begin perform pg_temp.kc_error(p_user, p_sql, '42501', p_
 create function pg_temp.kc_call(p_user text, p_fn text, p_gig text) returns void language sql as $$
   select pg_temp.kc_exec(p_user, pg_catalog.format($q$select public.%I(%L)$q$, p_fn, pg_temp.kc_id(p_gig)));
 $$;
+-- remove_helper gained a mandatory reason in migration 0026; this file also runs standalone against
+-- 0001-0024 (its own --keep-claims flag), where the one-argument form is still the only one, so
+-- the call shape is detected at runtime rather than hardcoded.
+create function pg_temp.kc_remove_helper_sql(p_gig text) returns text language plpgsql as $$
+begin
+  if exists (select 1 from pg_catalog.pg_proc where pronamespace = 'public'::regnamespace and proname = 'remove_helper' and pronargs = 2) then
+    return pg_catalog.format($q$select public.remove_helper(%L, 'Removed for testing')$q$, pg_temp.kc_id(p_gig));
+  else
+    return pg_catalog.format($q$select public.remove_helper(%L)$q$, pg_temp.kc_id(p_gig));
+  end if;
+end;
+$$;
+create function pg_temp.kc_remove_helper(p_user text, p_gig text) returns void language plpgsql as $$
+begin
+  perform pg_temp.kc_exec(p_user, pg_temp.kc_remove_helper_sql(p_gig));
+end;
+$$;
 create function pg_temp.kc_state(p_gig text) returns text language sql as $$
   select g.status::text || '/' || coalesce((select username from public.profiles where id = g.selected_provider_id), '-') || '/' ||
     (g.start_requested_at is not null)::text || '/' || g.start_wait_count::text || '/' || (g.helper_withdrawn_at is not null)::text || '/' || (g.helper_removed_at is not null)::text
@@ -172,7 +189,8 @@ select pg_temp.kc_assert(not has_function_privilege('authenticated', 'public.clo
 select pg_temp.kc_assert((select count(*) from pg_catalog.pg_proc p where p.pronamespace = 'public'::regnamespace
   and p.proname in ('select_provider', 'withdraw_from_gig', 'withdraw_unanswered', 'remove_helper', 'close_pending_claims') and p.prosecdef and p.proconfig @> array['search_path=""']) = 5, 'all five functions are SECURITY DEFINER with an empty search_path');
 select pg_temp.kc_assert(has_function_privilege('authenticated', 'public.select_provider(uuid,uuid)', 'EXECUTE') and not has_function_privilege('anon', 'public.select_provider(uuid,uuid)', 'EXECUTE')
-  and has_function_privilege('authenticated', 'public.remove_helper(uuid)', 'EXECUTE') and not has_function_privilege('anon', 'public.remove_helper(uuid)', 'EXECUTE'), 'replacing the functions kept their grants');
+  and has_function_privilege('authenticated', (select oid::regprocedure from pg_catalog.pg_proc where pronamespace = 'public'::regnamespace and proname = 'remove_helper'), 'EXECUTE')
+  and not has_function_privilege('anon', (select oid::regprocedure from pg_catalog.pg_proc where pronamespace = 'public'::regnamespace and proname = 'remove_helper'), 'EXECUTE'), 'replacing the functions kept their grants');
 
 -- ---------------------------------------------------------------------------
 -- 2. Choosing a helper keeps the other offers.
@@ -194,7 +212,7 @@ select pg_temp.kc_assert(pg_temp.kc_query('other2', pg_catalog.format($$select c
 select pg_temp.kc_assert(pg_temp.kc_public('g_pick') = '0', 'an assigned gig is not public');
 select pg_temp.kc_error('outsider', pg_catalog.format($$select public.create_claim(%L, 70)$$, pg_temp.kc_id('g_pick')), 'P0001', 'nobody new can make an offer while a helper is chosen', 'Gig is not open for claims');
 select pg_temp.kc_assert(pg_temp.kc_claim('g_pick', 'outsider') = 'none', 'and the refused offer left no claim behind');
-select pg_temp.kc_denied('other2', pg_catalog.format($$select public.remove_helper(%L)$$, pg_temp.kc_id('g_pick')), 'a waiting helper cannot remove the chosen one');
+select pg_temp.kc_denied('other2', pg_temp.kc_remove_helper_sql('g_pick'), 'a waiting helper cannot remove the chosen one');
 select pg_temp.kc_call('other2', 'withdraw_claim', 'g_pick');
 select pg_temp.kc_assert(pg_temp.kc_claim('g_pick', 'other2') = 'withdrawn', 'a waiting helper can still withdraw their offer');
 
@@ -220,7 +238,7 @@ select pg_temp.kc_assert(pg_temp.kc_pending('g_cancel') = 0 and pg_temp.kc_claim
 -- 4. The poster removes the helper: the gig reopens for the waiting offers.
 -- ---------------------------------------------------------------------------
 select pg_temp.kc_assert(pg_temp.kc_chat('helper', 'g_rm') = 2 and pg_temp.kc_proposals('g_rm') = 1, 'before removal there is a conversation and an open proposal');
-select pg_temp.kc_call('poster', 'remove_helper', 'g_rm');
+select pg_temp.kc_remove_helper('poster', 'g_rm');
 select pg_temp.kc_assert(pg_temp.kc_state('g_rm') = 'active/-/false/0/false/false', 'the gig reopens: active, no helper, nothing recorded as closed');
 select pg_temp.kc_assert(pg_temp.kc_claim('g_rm', 'helper') = 'rejected' and pg_temp.kc_pending('g_rm') = 2, 'the removed helper is out, both waiting offers are pending');
 select pg_temp.kc_assert((select agreed_amount is null and start_requested_at is null and start_wait_until is null from public.gigs where id = pg_temp.kc_id('g_rm')), 'the agreement and start fields are cleared');
@@ -238,32 +256,32 @@ select pg_temp.kc_assert((select selected_provider_id = pg_temp.kc_id('other2') 
 select pg_temp.kc_assert(pg_temp.kc_chat('other2', 'g_rm') = 0 and pg_temp.kc_address('other2', 'g_rm') = '1 Private Street', 'the new helper starts with an empty chat and gets the address');
 select pg_temp.kc_assert(pg_temp.kc_pending('g_rm') = 1 and pg_temp.kc_claim('g_rm', 'other1') = 'pending', 'the remaining offer keeps waiting');
 -- And again: removing the second helper reopens it for the last waiting offer; removing that one closes it for good.
-select pg_temp.kc_call('poster', 'remove_helper', 'g_rm');
+select pg_temp.kc_remove_helper('poster', 'g_rm');
 select pg_temp.kc_assert(pg_temp.kc_state('g_rm') = 'active/-/false/0/false/false' and pg_temp.kc_pending('g_rm') = 1, 'removing the second helper reopens it for the last offer');
 select pg_temp.kc_exec('poster', pg_catalog.format($$select public.select_provider(%L, %L)$$, pg_temp.kc_id('g_rm'),
   (select id from public.claims where gig_id = pg_temp.kc_id('g_rm') and provider_id = pg_temp.kc_id('other1'))));
-select pg_temp.kc_call('poster', 'remove_helper', 'g_rm');
+select pg_temp.kc_remove_helper('poster', 'g_rm');
 select pg_temp.kc_assert(pg_temp.kc_state('g_rm') = 'cancelled/-/false/0/false/true' and pg_temp.kc_pending('g_rm') = 0, 'with no offer left the gig closes as cancelled, as before');
 
 -- Removing while the helper is mid-wait: the wait bookkeeping is reset for the next helper.
 select pg_temp.kc_assert(pg_temp.kc_state('g_rmw') = 'active/KChelper/true/1/false/false', 'g_rmw starts with a start request and one wait taken');
-select pg_temp.kc_call('poster', 'remove_helper', 'g_rmw');
+select pg_temp.kc_remove_helper('poster', 'g_rmw');
 select pg_temp.kc_assert(pg_temp.kc_state('g_rmw') = 'active/-/false/0/false/false' and (select start_wait_until is null from public.gigs where id = pg_temp.kc_id('g_rmw')), 'removing mid-wait reopens the gig with the wait count and timer reset');
 
 -- Nobody else waiting: the old behaviour.
 select pg_temp.kc_assert(pg_temp.kc_chat('helper', 'g_rm_last') = 2 and pg_temp.kc_proposals('g_rm_last') = 1, 'g_rm_last has a conversation');
-select pg_temp.kc_call('poster', 'remove_helper', 'g_rm_last');
+select pg_temp.kc_remove_helper('poster', 'g_rm_last');
 select pg_temp.kc_assert(pg_temp.kc_state('g_rm_last') = 'cancelled/-/false/0/false/true', 'removing the only helper closes the gig as cancelled');
 select pg_temp.kc_assert(pg_temp.kc_chat('poster', 'g_rm_last') = 2 and pg_temp.kc_proposals('g_rm_last') = 1, 'and leaves its conversation alone (nothing reopens)');
 -- The waiting helpers withdrew before the chosen one left.
 select pg_temp.kc_call('other1', 'withdraw_claim', 'g_rm_gone');
 select pg_temp.kc_call('other2', 'withdraw_claim', 'g_rm_gone');
-select pg_temp.kc_call('poster', 'remove_helper', 'g_rm_gone');
+select pg_temp.kc_remove_helper('poster', 'g_rm_gone');
 select pg_temp.kc_assert(pg_temp.kc_state('g_rm_gone') = 'cancelled/-/false/0/false/true', 'if every waiting helper withdrew, removal closes the gig');
 -- A private request has no other offers.
-select pg_temp.kc_call('poster', 'remove_helper', 'g_priv');
+select pg_temp.kc_remove_helper('poster', 'g_priv');
 select pg_temp.kc_assert(pg_temp.kc_state('g_priv') = 'cancelled/-/false/0/false/true' and pg_temp.kc_public('g_priv') = '0', 'a private request closes and stays private');
-select pg_temp.kc_error('poster', pg_catalog.format($$select public.remove_helper(%L)$$, pg_temp.kc_id('g_prog')), 'P0001', 'removal is still refused once the gig is in progress', 'before the gig starts');
+select pg_temp.kc_error('poster', pg_temp.kc_remove_helper_sql('g_prog'), 'P0001', 'removal is still refused once the gig is in progress', 'before the gig starts');
 
 -- ---------------------------------------------------------------------------
 -- 5. The helper leaves after silence or a delay: same reopening, same lemon rule.
@@ -288,9 +306,9 @@ select pg_temp.kc_call('poster', 'cancel_gig', 'g_wd');
 select pg_temp.kc_assert(pg_temp.kc_state('g_wd') like 'cancelled/%' and pg_temp.kc_pending('g_wd') = 0 and pg_temp.kc_claim('g_wd', 'other1') = 'rejected', 'cancelling the reopened gig rejects the waiting offers');
 
 -- The existing rules around it are untouched.
-select pg_temp.kc_denied('anon', pg_catalog.format($$select public.remove_helper(%L)$$, pg_temp.kc_id('g_can')), 'anon still cannot remove a helper');
-select pg_temp.kc_denied('stranger', pg_catalog.format($$select public.remove_helper(%L)$$, pg_temp.kc_id('g_can')), 'nor a stranger');
-select pg_temp.kc_denied('helper', pg_catalog.format($$select public.remove_helper(%L)$$, pg_temp.kc_id('g_can')), 'nor the helper');
+select pg_temp.kc_denied('anon', pg_temp.kc_remove_helper_sql('g_can'), 'anon still cannot remove a helper');
+select pg_temp.kc_denied('stranger', pg_temp.kc_remove_helper_sql('g_can'), 'nor a stranger');
+select pg_temp.kc_denied('helper', pg_temp.kc_remove_helper_sql('g_can'), 'nor the helper');
 select pg_temp.kc_denied('anon', pg_catalog.format($$select public.select_provider(%L, gen_random_uuid())$$, pg_temp.kc_id('g_late')), 'anon cannot choose a helper');
 select pg_temp.kc_denied('stranger', pg_catalog.format($$select public.select_provider(%L, gen_random_uuid())$$, pg_temp.kc_id('g_late')), 'nor a stranger');
 select pg_temp.kc_error('poster', pg_catalog.format($$select public.select_provider(%L, gen_random_uuid())$$, pg_temp.kc_id('g_late')), 'P0001', 'choosing a made-up offer still fails', 'Claim not found or not actionable');

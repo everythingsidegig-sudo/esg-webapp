@@ -10,12 +10,18 @@ import { rpcActionError } from "@/lib/journey";
 import { formatMoney, offerError } from "@/lib/money";
 import { priceLabel, requestStage } from "@/lib/helper-request";
 import { canRepost, repostHref, repostPrivateHref } from "@/lib/repost";
-import { START_MAX_WAITS, delayAvailable, helperRemoved, helperWithdrew, removeAvailable, silence, startView, timeUntil, waitAvailable } from "@/lib/start-flow";
+import { START_MAX_WAITS, canWithdrawBeforeStart, delayAvailable, helperRemoved, helperWithdrew, removeAvailable, silence, startView, timeUntil, waitAvailable } from "@/lib/start-flow";
 import StatusBadge from "@/components/StatusBadge";
 import ChatPanel from "@/components/ChatPanel";
 import TagChip from "@/components/TagChip";
 import { gigTagNames } from "@/lib/tags";
-import type { Claim, ClaimState, CompletionOutcome, FeedbackType, GigWithTags, IncompleteChoice, PublicProfile } from "@/lib/database.types";
+import type { Claim, ClaimState, CompletionOutcome, ExitReason, FeedbackType, GigWithTags, IncompleteChoice, PublicProfile } from "@/lib/database.types";
+
+const EXIT_REASONS: { value: ExitReason; label: string }[] = [
+  { value: "unable_to_locate_poster", label: "Unable to locate the poster" },
+  { value: "safety_concern", label: "Safety concern" },
+  { value: "other", label: "Other" },
+];
 
 type ClaimWithProfile = Claim & { profile?: PublicProfile };
 
@@ -46,6 +52,12 @@ function GigDetails({ id }: { id: string }) {
   const [error, setError] = useState<string | null>(null);
   const [people, setPeople] = useState<Record<string, string>>({});
   const scrolledToHash = useRef(false);
+  // ESG-CAN-001/002: exiting In Progress needs a reason first; removing a selected provider needs one too.
+  const [showExitForm, setShowExitForm] = useState(false);
+  const [exitReason, setExitReason] = useState<ExitReason | "">("");
+  const [exitComment, setExitComment] = useState("");
+  const [showRemoveForm, setShowRemoveForm] = useState(false);
+  const [removeReason, setRemoveReason] = useState("");
 
   const loadAll = useCallback(async () => {
     const { data: gigData } = await supabase.from("gigs").select("*, gig_tags(tag:tags(id,name))").eq("id", id).maybeSingle();
@@ -315,7 +327,14 @@ function GigDetails({ id }: { id: string }) {
       )}
 
       {isSelectedProvider && gig.status === "active" && !gig.start_requested_at && (
-        <p className="rounded-lg bg-green-50 p-3 text-sm text-green-800">{isRequestedHelper ? "You accepted this request." : "Your offer was accepted."} Press START when you&apos;re ready to begin.</p>
+        <div className="space-y-2">
+          <p className="rounded-lg bg-green-50 p-3 text-sm text-green-800">{isRequestedHelper ? "You accepted this request." : "Your offer was accepted."} Press START when you&apos;re ready to begin.</p>
+          {canWithdrawBeforeStart(gig, now) && (
+            <button type="button" disabled={busy}
+              onClick={() => { if (window.confirm("Withdraw from this gig? It will close for you, and you cannot claim it again.")) void run(() => supabase.rpc("withdraw_before_start", { p_gig_id: id })); }}
+              className="text-sm font-medium text-neutral-500 hover:text-neutral-700">Withdraw</button>
+          )}
+        </div>
       )}
 
       {isPoster && gig.status === "draft" && (
@@ -450,11 +469,18 @@ function GigDetails({ id }: { id: string }) {
             <section aria-label="Start request" className="space-y-3 rounded-xl border border-yellow-300 bg-yellow-50 p-4">
               <p className="text-sm text-yellow-800">Waiting for the Poster to approve start.</p>
               {quiet?.phase === "answering" && (
-                <p className="text-sm text-yellow-900">
-                  {quiet.waitsLeft > 0
-                    ? `The poster has time to answer. If they stay quiet you can wait again in ${timeUntil(quiet.nextAt, now)}.`
-                    : `You have waited ${START_MAX_WAITS} times. If the poster is still quiet you can withdraw in ${timeUntil(quiet.nextAt, now)}.`}
-                </p>
+                <>
+                  <p className="text-sm text-yellow-900">
+                    {quiet.waitsLeft > 0
+                      ? `The poster has time to answer. If they stay quiet you can wait again in ${timeUntil(quiet.nextAt, now)}.`
+                      : `You have waited ${START_MAX_WAITS} times. If the poster is still quiet you can withdraw in ${timeUntil(quiet.nextAt, now)}.`}
+                  </p>
+                  {canWithdrawBeforeStart(gig, now) && (
+                    <button type="button" disabled={busy}
+                      onClick={() => { if (window.confirm("Withdraw from this gig? It will close for you, and you cannot claim it again.")) void run(() => supabase.rpc("withdraw_before_start", { p_gig_id: id })); }}
+                      className="text-sm font-medium text-yellow-900 underline hover:no-underline">Withdraw</button>
+                  )}
+                </>
               )}
               {quiet?.phase === "can-wait" && (
                 <>
@@ -476,15 +502,36 @@ function GigDetails({ id }: { id: string }) {
               )}
             </section>
           )}
-          {isPoster && gig.status === "active" && removeAvailable(gig) && (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => { if (window.confirm(`Remove ${helperName ? `@${helperName}` : "your helper"} from this gig? They will be told. ${claims.length > 0 ? "The gig reopens so you can choose another offer." : "The gig will close and you can post it again for everyone."}`)) void run(() => supabase.rpc("remove_helper", { p_gig_id: id })); }}
-              className="flex min-h-11 w-full items-center justify-center rounded-lg border border-red-300 bg-white px-4 py-2.5 font-medium text-red-700 hover:bg-red-50 disabled:opacity-60"
-            >
-              Remove helper
-            </button>
+          {isPoster && gig.status === "active" && gig.selected_provider_id && removeAvailable(gig) && (
+            showRemoveForm ? (
+              <div className="space-y-2 rounded-xl border border-red-200 bg-white p-4">
+                <label className="block text-sm">Reason for removing {helperName ? `@${helperName}` : "your helper"}
+                  <textarea disabled={busy} maxLength={500} rows={2} value={removeReason} onChange={(e) => setRemoveReason(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm disabled:opacity-60" />
+                </label>
+                <p className="text-xs text-neutral-500">{helperName ? `@${helperName}` : "Your helper"} will be told. {claims.length > 0 ? "The gig reopens so you can choose another offer." : "The gig will close and you can post it again for everyone."}</p>
+                <div className="flex gap-2">
+                  <button type="button" disabled={busy || !removeReason.trim()}
+                    onClick={() => void run(() => supabase.rpc("remove_helper", { p_gig_id: id, p_reason: removeReason.trim() }))}
+                    className="flex-1 rounded-lg bg-red-600 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60">
+                    Confirm removal
+                  </button>
+                  <button type="button" disabled={busy} onClick={() => { setShowRemoveForm(false); setRemoveReason(""); }}
+                    className="flex-1 rounded-lg border border-neutral-300 bg-white py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-60">
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setShowRemoveForm(true)}
+                className="flex min-h-11 w-full items-center justify-center rounded-lg border border-red-300 bg-white px-4 py-2.5 font-medium text-red-700 hover:bg-red-50 disabled:opacity-60"
+              >
+                Remove helper
+              </button>
+            )
           )}
           {view === "helper-delayed" && (
             <section aria-label="Start delayed" className="space-y-3 rounded-xl border border-yellow-300 bg-yellow-50 p-4">
@@ -532,6 +579,46 @@ function GigDetails({ id }: { id: string }) {
                 </div>
               )}
             </div>
+          )}
+
+          {isSelectedProvider && gig.status === "in_progress" && !gig.incomplete_choice_phase && !myCompletion && (
+            showExitForm ? (
+              <div className="space-y-3 rounded-xl border border-red-200 bg-white p-4">
+                <h2 className="font-medium">Exit this gig</h2>
+                <fieldset className="space-y-2">
+                  <legend className="text-sm font-medium">Reason</legend>
+                  {EXIT_REASONS.map((reason) => (
+                    <label key={reason.value} className="flex min-h-11 items-center gap-2 text-sm">
+                      <input type="radio" name="exit-reason" checked={exitReason === reason.value} onChange={() => setExitReason(reason.value)} />
+                      {reason.label}
+                    </label>
+                  ))}
+                </fieldset>
+                {exitReason === "other" && (
+                  <label className="block text-sm">Tell the poster why
+                    <textarea disabled={busy} maxLength={500} rows={2} value={exitComment} onChange={(e) => setExitComment(e.target.value)}
+                      className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm disabled:opacity-60" />
+                  </label>
+                )}
+                <p className="text-xs text-neutral-500">This ends your engagement without completing or marking the work incomplete. The poster is told, and the gig reopens to new offers.</p>
+                <div className="flex gap-2">
+                  <button type="button" disabled={busy || !exitReason || (exitReason === "other" && !exitComment.trim())}
+                    onClick={() => void run(() => supabase.rpc("exit_gig", { p_gig_id: id, p_reason: exitReason as ExitReason, p_comment: exitComment.trim() || null }))}
+                    className="flex-1 rounded-lg bg-red-600 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60">
+                    Confirm exit
+                  </button>
+                  <button type="button" disabled={busy} onClick={() => { setShowExitForm(false); setExitReason(""); setExitComment(""); }}
+                    className="flex-1 rounded-lg border border-neutral-300 bg-white py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-60">
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button type="button" disabled={busy} onClick={() => setShowExitForm(true)}
+                className="flex min-h-11 w-full items-center justify-center rounded-lg border border-red-300 bg-white px-4 py-2.5 font-medium text-red-700 hover:bg-red-50 disabled:opacity-60">
+                EXIT GIG
+              </button>
+            )
           )}
 
           {gig.status === "in_progress" && gig.incomplete_choice_phase && (

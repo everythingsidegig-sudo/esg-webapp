@@ -55,6 +55,16 @@ export const START_WAIT_HOURS = 24;
 export const START_MAX_WAITS = 2;
 const WAIT_MS = START_WAIT_HOURS * 60 * 60 * 1000;
 
+// ESG-CAN-001 v1.0: the helper can withdraw with no reason before the start has gone unanswered
+// long enough to carry the poster's Lemon (withdraw_unanswered, migration 0023/0024) and before the
+// poster has delayed it (withdraw_from_gig already covers that). Mirrors withdraw_before_start's own
+// check (migration 0026) so the button only shows when the call would actually succeed.
+export function canWithdrawBeforeStart(gig: { start_requested_at: string | null; start_delayed_at?: string | null }, now: number): boolean {
+  if (gig.start_delayed_at) return false;
+  if (!gig.start_requested_at) return true;
+  return now < Date.parse(gig.start_requested_at) + WAIT_MS;
+}
+
 // Where an unanswered start request stands for the helper. "answering": the poster still has time.
 // "can-wait": 24 hours of silence passed and a wait is left. "can-withdraw": both waits are used and over.
 export type Silence = { phase: "answering" | "can-wait" | "can-withdraw"; waitsUsed: number; waitsLeft: number; nextAt: number };

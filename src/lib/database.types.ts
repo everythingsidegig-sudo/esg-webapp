@@ -16,6 +16,7 @@ export type ClaimState = "pending" | "selected" | "rejected" | "withdrawn";
 export type CompletionOutcome = "complete" | "incomplete";
 export type IncompleteChoice = "partial_pay" | "no_pay";
 export type FeedbackType = "wom" | "lemon" | "skip";
+export type ExitReason = "unable_to_locate_poster" | "safety_concern" | "other";
 
 export interface Profile {
   id: string;
@@ -187,7 +188,9 @@ export interface Database {
       withdraw_from_gig: { Args: { p_gig_id: string }; Returns: void };
       wait_for_start: { Args: { p_gig_id: string }; Returns: void };
       withdraw_unanswered: { Args: { p_gig_id: string }; Returns: void };
-      remove_helper: { Args: { p_gig_id: string }; Returns: void };
+      withdraw_before_start: { Args: { p_gig_id: string }; Returns: void };
+      exit_gig: { Args: { p_gig_id: string; p_reason: ExitReason; p_comment?: string | null }; Returns: void };
+      remove_helper: { Args: { p_gig_id: string; p_reason: string }; Returns: void };
       propose_price: { Args: { p_gig_id: string; p_amount: number }; Returns: PriceProposal };
       respond_price_proposal: { Args: { p_proposal_id: string; p_accept: boolean }; Returns: void };
       withdraw_price_proposal: { Args: { p_proposal_id: string }; Returns: void };

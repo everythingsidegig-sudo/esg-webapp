@@ -70,6 +70,23 @@ language plpgsql as $$ begin perform pg_temp.us_error(p_user, p_sql, '42501', p_
 create function pg_temp.us_call(p_user text, p_fn text, p_gig text) returns void language sql as $$
   select pg_temp.us_exec(p_user, pg_catalog.format($q$select public.%I(%L)$q$, p_fn, pg_temp.us_id(p_gig)));
 $$;
+-- remove_helper gained a mandatory reason in migration 0026; this file also runs standalone against
+-- 0001-0023 (its own --unanswered-start flag), where the one-argument form is still the only one, so
+-- the call shape is detected at runtime rather than hardcoded.
+create function pg_temp.us_remove_helper_sql(p_gig text) returns text language plpgsql as $$
+begin
+  if exists (select 1 from pg_catalog.pg_proc where pronamespace = 'public'::regnamespace and proname = 'remove_helper' and pronargs = 2) then
+    return pg_catalog.format($q$select public.remove_helper(%L, 'Removed for testing')$q$, pg_temp.us_id(p_gig));
+  else
+    return pg_catalog.format($q$select public.remove_helper(%L)$q$, pg_temp.us_id(p_gig));
+  end if;
+end;
+$$;
+create function pg_temp.us_remove_helper(p_user text, p_gig text) returns void language plpgsql as $$
+begin
+  perform pg_temp.us_exec(p_user, pg_temp.us_remove_helper_sql(p_gig));
+end;
+$$;
 create function pg_temp.us_state(p_gig text) returns text language sql as $$
   select g.status::text || '/' || coalesce((select username from public.profiles where id = g.selected_provider_id), '-') || '/' ||
     (g.start_requested_at is not null)::text || '/' || g.start_wait_count::text || '/' || (g.helper_withdrawn_at is not null)::text || '/' || (g.helper_removed_at is not null)::text
@@ -151,9 +168,9 @@ select pg_temp.us_assert((select count(*) from information_schema.columns where 
 select pg_temp.us_assert(not has_column_privilege('authenticated', 'public.gigs', 'start_wait_count', 'UPDATE')
   and not has_column_privilege('authenticated', 'public.gigs', 'helper_removed_at', 'UPDATE'), 'clients cannot write them directly');
 select pg_temp.us_assert(not has_function_privilege('anon', 'public.wait_for_start(uuid)', 'EXECUTE') and not has_function_privilege('anon', 'public.withdraw_unanswered(uuid)', 'EXECUTE')
-  and not has_function_privilege('anon', 'public.remove_helper(uuid)', 'EXECUTE')
+  and not has_function_privilege('anon', (select oid::regprocedure from pg_catalog.pg_proc where pronamespace = 'public'::regnamespace and proname = 'remove_helper'), 'EXECUTE')
   and has_function_privilege('authenticated', 'public.wait_for_start(uuid)', 'EXECUTE') and has_function_privilege('authenticated', 'public.withdraw_unanswered(uuid)', 'EXECUTE')
-  and has_function_privilege('authenticated', 'public.remove_helper(uuid)', 'EXECUTE'), 'the three functions are executable by authenticated users only');
+  and has_function_privilege('authenticated', (select oid::regprocedure from pg_catalog.pg_proc where pronamespace = 'public'::regnamespace and proname = 'remove_helper'), 'EXECUTE'), 'the three functions are executable by authenticated users only');
 select pg_temp.us_assert((select count(*) from pg_catalog.pg_proc p where p.pronamespace = 'public'::regnamespace
   and p.proname in ('wait_for_start', 'withdraw_unanswered', 'remove_helper') and p.prosecdef and p.proconfig @> array['search_path=""']) = 3, 'all three are SECURITY DEFINER with an empty search_path');
 select pg_temp.us_assert(pg_temp.us_lemons('poster') = 0 and pg_temp.us_lemons('helper') = 0, 'nobody has a lemon to start with');
@@ -213,15 +230,15 @@ select pg_temp.us_assert((select lemon_count from public.profiles where id = pg_
 -- ---------------------------------------------------------------------------
 -- 4. The poster removes the helper before the start.
 -- ---------------------------------------------------------------------------
-select pg_temp.us_denied('anon', pg_catalog.format($$select public.remove_helper(%L)$$, pg_temp.us_id('g_rm1')), 'anon cannot remove a helper');
-select pg_temp.us_denied('stranger', pg_catalog.format($$select public.remove_helper(%L)$$, pg_temp.us_id('g_rm1')), 'a stranger cannot');
-select pg_temp.us_denied('helper', pg_catalog.format($$select public.remove_helper(%L)$$, pg_temp.us_id('g_rm1')), 'the helper cannot remove themselves this way');
-select pg_temp.us_denied('other_helper', pg_catalog.format($$select public.remove_helper(%L)$$, pg_temp.us_id('g_rm1')), 'nor can another helper');
-select pg_temp.us_error('poster', pg_catalog.format($$select public.remove_helper(%L)$$, pg_temp.us_id('g_rm_open')), 'P0001', 'there is no helper to remove on an open gig', 'before the gig starts');
-select pg_temp.us_error('poster', pg_catalog.format($$select public.remove_helper(%L)$$, pg_temp.us_id('g_rm_prog')), 'P0001', 'once the gig has started the helper cannot be removed', 'before the gig starts');
+select pg_temp.us_denied('anon', pg_temp.us_remove_helper_sql('g_rm1'), 'anon cannot remove a helper');
+select pg_temp.us_denied('stranger', pg_temp.us_remove_helper_sql('g_rm1'), 'a stranger cannot');
+select pg_temp.us_denied('helper', pg_temp.us_remove_helper_sql('g_rm1'), 'the helper cannot remove themselves this way');
+select pg_temp.us_denied('other_helper', pg_temp.us_remove_helper_sql('g_rm1'), 'nor can another helper');
+select pg_temp.us_error('poster', pg_temp.us_remove_helper_sql('g_rm_open'), 'P0001', 'there is no helper to remove on an open gig', 'before the gig starts');
+select pg_temp.us_error('poster', pg_temp.us_remove_helper_sql('g_rm_prog'), 'P0001', 'once the gig has started the helper cannot be removed', 'before the gig starts');
 select pg_temp.us_assert(pg_temp.us_state('g_rm1') = 'active/UShelper/false/0/false/false', 'refused attempts changed nothing');
 
-select pg_temp.us_call('poster', 'remove_helper', 'g_rm1');
+select pg_temp.us_remove_helper('poster', 'g_rm1');
 select pg_temp.us_assert(pg_temp.us_state('g_rm1') = 'cancelled/-/false/0/false/true', 'the poster removes the helper: gig closed, helper gone, removal recorded');
 select pg_temp.us_assert(pg_temp.us_claim('g_rm1', 'helper') = 'rejected', 'the claim is rejected (not withdrawn: they did not choose this)');
 select pg_temp.us_assert(pg_temp.us_notes('helper', 'g_rm1', 'helper_removed') = 1 and pg_temp.us_notes('poster', 'g_rm1', 'helper_removed') = 0, 'the helper is told');
@@ -229,14 +246,14 @@ select pg_temp.us_assert(pg_temp.us_lemons('poster') = 1 and pg_temp.us_lemons('
 select pg_temp.us_assert((select count(*) from public.feedback where gig_id = pg_temp.us_id('g_rm1')) = 0, 'and records no feedback');
 select pg_temp.us_assert(pg_temp.us_address('helper', 'g_rm1') = '' and pg_temp.us_address('poster', 'g_rm1') = '1 Private Street', 'the removed helper loses the private address');
 select pg_temp.us_assert(pg_temp.us_public('g_rm1') = '0', 'the gig is not reopened publicly by itself');
-select pg_temp.us_error('poster', pg_catalog.format($$select public.remove_helper(%L)$$, pg_temp.us_id('g_rm1')), 'P0001', 'removing twice is refused', 'before the gig starts');
+select pg_temp.us_error('poster', pg_temp.us_remove_helper_sql('g_rm1'), 'P0001', 'removing twice is refused', 'before the gig starts');
 select pg_temp.us_exec('helper', pg_catalog.format($$select public.create_claim(%L, 50, null)$$, pg_temp.us_id('g_rm1')));
 select pg_temp.us_assert(pg_temp.us_claim('g_rm1', 'helper') = 'rejected' and pg_temp.us_state('g_rm1') = 'cancelled/-/false/0/false/true', 'the removed helper cannot claim it again');
 
 -- While a start request is waiting, and for a private request.
-select pg_temp.us_call('poster', 'remove_helper', 'g_rm2');
+select pg_temp.us_remove_helper('poster', 'g_rm2');
 select pg_temp.us_assert(pg_temp.us_state('g_rm2') = 'cancelled/-/false/0/false/true' and pg_temp.us_lemons('poster') = 1, 'removal also works while a start request waits, at no cost');
-select pg_temp.us_call('poster', 'remove_helper', 'g_rm_priv');
+select pg_temp.us_remove_helper('poster', 'g_rm_priv');
 select pg_temp.us_assert(pg_temp.us_state('g_rm_priv') = 'cancelled/-/false/0/false/true'
   and (select requested_helper_id from public.gigs where id = pg_temp.us_id('g_rm_priv')) = pg_temp.us_id('helper')
   and pg_temp.us_public('g_rm_priv') = '0', 'a private request closes the same way and stays private');
