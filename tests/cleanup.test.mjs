@@ -1638,6 +1638,25 @@ test("Gig hub (owner, helper selected): shows the helper and the gig's messages 
   assert.ok(messages && nodes(messages, (node) => node.type === "chat-panel").length === 1, "existing gig-scoped chat is the Messages section");
 });
 
+test("Gig hub: either party can Block the other, except while in progress/awaiting payment/disputed (ESG-SAFE-001/002 v1.0, Block only)", async () => {
+  const poster = await openGig({ poster_id: user.id, selected_provider_id: "helper-1" });
+  const posterBlock = buttonText(poster.tree, "Block @helper1");
+  assert.ok(posterBlock, "the poster can block the helper");
+  await posterBlock.props.onClick();
+  assert.deepEqual(JSON.parse(JSON.stringify(poster.rpcs)), [["block_user", { p_blocked_id: "helper-1" }]]);
+
+  const helperView = await openGig({ poster_id: "poster-1", selected_provider_id: user.id });
+  const helperBlock = buttonText(helperView.tree, "Block @customer1");
+  assert.ok(helperBlock, "the helper can block the poster");
+  await helperBlock.props.onClick();
+  assert.deepEqual(JSON.parse(JSON.stringify(helperView.rpcs)), [["block_user", { p_blocked_id: "poster-1" }]]);
+
+  for (const status of ["in_progress", "awaiting_payment", "disputed"]) {
+    const { tree } = await openGig({ poster_id: user.id, selected_provider_id: "helper-1", status });
+    assert.equal(nodes(tree, (node) => node.type === "button" && /^Block /.test(textOf(node))).length, 0, `no Block button while ${status}`);
+  }
+});
+
 test("Gig hub (helper): back link goes to I'm Helping and proposal state is explained", async () => {
   const pending = await openGig({}, { myClaim: { id: "mine", gig_id: "gig-1", provider_id: user.id, state: "pending" } });
   assert.ok(nodes(pending.tree, (node) => node.type === "a" && node.props.href === "/my-gigs?tab=helping"));
@@ -3134,7 +3153,7 @@ test("A helper profile page shows the sign-in prompt, and fetches nothing, when 
   const touched = [];
   const client = { from: (table) => { touched.push(table); throw new Error("must not query"); }, rpc: async () => { touched.push("rpc"); throw new Error("must not call"); } };
   const app = await component("src/app/profile/[username]/page.tsx", "PublicProfileView", {
-    client, mocks: { "next/navigation": { useSearchParams: () => new URLSearchParams("from=find-helper&category=Yard%20Work") } },
+    client, mocks: { "next/navigation": { useSearchParams: () => new URLSearchParams("from=find-helper&category=Yard%20Work"), useRouter: () => ({ push() {} }) } },
   });
   app.auth.user = null;
   app.render({ username: "HelperOne" }); await flush();
@@ -3154,7 +3173,7 @@ test("A signed-in visitor still gets the helper profile, with a way back to the 
     rpc: async () => ({ data: [{ gigs_worked_count: 1, wom_count: 3 }], error: null }),
   };
   const app = await component("src/app/profile/[username]/page.tsx", "PublicProfileView", {
-    client, mocks: { "next/navigation": { useSearchParams: () => new URLSearchParams("from=find-helper&category=Cleaning") } },
+    client, mocks: { "next/navigation": { useSearchParams: () => new URLSearchParams("from=find-helper&category=Cleaning"), useRouter: () => ({ push() {} }) } },
   });
   app.render({ username: "HelperOne" }); await flush();
   const tree = app.render({ username: "HelperOne" });
@@ -3326,7 +3345,7 @@ async function openProfile({ viewer = user, profileFields = {}, search = "from=f
     rpc: async () => ({ data: [{ gigs_worked_count: 1, wom_percentage: 100 }], error: null }),
   };
   const app = await component("src/app/profile/[username]/page.tsx", "PublicProfileView", {
-    client, mocks: { "next/navigation": { useSearchParams: () => new URLSearchParams(search) } },
+    client, mocks: { "next/navigation": { useSearchParams: () => new URLSearchParams(search), useRouter: () => ({ push() {} }) } },
   });
   app.auth.user = viewer;
   app.render({ username: "HelperOne" }); await flush();
@@ -3352,6 +3371,40 @@ test("Post a Gig is not shown on your own profile, and a category the helper doe
   assert.equal(nodes(own, (node) => /Post a Gig/.test(textOf(node))).length, 0);
   const other = await openProfile({ search: "from=find-helper&category=Gardening" });
   assert.equal(nodes(other, (node) => node.type === "a" && textOf(node) === "Post a Gig")[0].props.href, "/post?helper=HelperOne");
+});
+
+test("Profile: Block is offered on another member's profile (not your own), confirms, calls block_user and leaves the page; a refusal stays put and shows why (ESG-SAFE-001/002 v1.0, Block only)", async () => {
+  const profile = { id: "helper-1", username: "HelperOne", photo_url: null, skills: [], wom_count: 0, profile_tags: [] };
+  async function open(profileData, blockResult) {
+    const rpcs = [], pushed = [];
+    const client = {
+      from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: profileData, error: null }) }) }) }),
+      rpc: async (name, args) => { rpcs.push([name, args]); return name === "block_user" ? blockResult : { data: [{ gigs_worked_count: 0, wom_percentage: null }], error: null }; },
+    };
+    const app = await component("src/app/profile/[username]/page.tsx", "PublicProfileView", {
+      client, globals: { window: { confirm: () => true } },
+      mocks: { "next/navigation": { useSearchParams: () => new URLSearchParams(), useRouter: () => ({ push: (url) => pushed.push(url) }) } },
+    });
+    app.render({ username: "HelperOne" }); await flush();
+    return { app, tree: app.render({ username: "HelperOne" }), rpcs, pushed };
+  }
+
+  const own = await open({ ...profile, id: user.id }, { data: null, error: null });
+  assert.equal(nodes(own.tree, (node) => /Block /.test(textOf(node))).length, 0, "never offered on your own profile");
+
+  const ok = await open(profile, { data: null, error: null });
+  const block = buttonText(ok.tree, "Block @HelperOne");
+  assert.ok(block, "offered on another member's profile");
+  block.props.onClick(); await flush();
+  assert.deepEqual(JSON.parse(JSON.stringify(ok.rpcs.at(-1))), ["block_user", { p_blocked_id: "helper-1" }]);
+  assert.deepEqual(ok.pushed, ["/"], "a successful block leaves the (now inaccessible) profile");
+
+  const refused = await open(profile, { data: null, error: { code: "P0001", message: "You can't block while a gig between you is in progress. Resolve or exit it first." } });
+  buttonText(refused.tree, "Block @HelperOne").props.onClick(); await flush();
+  const tree = refused.app.render({ username: "HelperOne" });
+  assert.deepEqual(refused.pushed, [], "a refused block does not navigate away");
+  assert.match(textOf(tree), /You can't block while a gig between you is in progress\. Resolve or exit it first\./);
+  assert.ok(buttonText(tree, "Block @HelperOne"), "Block is still offered, so the visitor can try again later");
 });
 
 // ---- the existing form, addressed to one helper ----
@@ -4651,7 +4704,10 @@ test("Helper: while the poster still has time there is nothing to do but withdra
   assert.deepEqual(rpcs, [["withdraw_before_start", { p_gig_id: "gig-1" }]], "no reason required, unlike Exit Gig or Remove helper");
   const second = await openRequest({ asUser: "helper-1", gig: quietGig({ start_requested_at: hoursAgo(60), start_wait_count: 2, start_wait_until: hoursAhead(12) }), claims: selectedClaim });
   assert.match(textOf(second.tree), /waited 2 times.*can withdraw in 1[12] h/);
-  assert.equal(nodes(second.tree, (node) => node.type === "button").length, 0, "not before the second wait is over; withdraw_before_start is blocked past the first 24h so it can never dodge the eventual lemon");
+  const secondCard = nodes(second.tree, (node) => node.props["aria-label"] === "Start request")[0];
+  assert.equal(nodes(secondCard, (node) => node.type === "button").length, 0, "not before the second wait is over; withdraw_before_start is blocked past the first 24h so it can never dodge the eventual lemon");
+  assert.equal(nodes(second.tree, (node) => node.type === "button").length, 1, "the only button anywhere on the page now is Block, unrelated to the wait/withdraw state");
+  assert.ok(buttonText(second.tree, "Block @customer1"), "Block is unaffected by the silence timer");
 });
 
 test("Helper: can withdraw right after being selected, before ever requesting a start (ESG-CAN-001 v1.0)", async () => {

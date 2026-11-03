@@ -153,6 +153,14 @@ export interface PriceProposal {
   responded_at: string | null;
 }
 
+// Only the blocker can read their own rows (RLS); the blocked party is never told who blocked them.
+export interface Block {
+  id: string;
+  blocker_id: string;
+  blocked_id: string;
+  created_at: string;
+}
+
 export interface Notification {
   id: string;
   recipient_id: string;
@@ -177,6 +185,7 @@ export interface Database {
       chat_messages: { Row: ChatMessage; Insert: Partial<ChatMessage>; Update: Partial<ChatMessage> };
       notifications: { Row: Notification; Insert: Partial<Notification>; Update: Partial<Notification> };
       price_proposals: { Row: PriceProposal; Insert: Partial<PriceProposal>; Update: Partial<PriceProposal> };
+      blocks: { Row: Block; Insert: Partial<Block>; Update: Partial<Block> };
     };
     Functions: {
       ensure_profile: { Args: Record<string, never>; Returns: Profile };
@@ -191,6 +200,7 @@ export interface Database {
       withdraw_before_start: { Args: { p_gig_id: string }; Returns: void };
       exit_gig: { Args: { p_gig_id: string; p_reason: ExitReason; p_comment?: string | null }; Returns: void };
       remove_helper: { Args: { p_gig_id: string; p_reason: string }; Returns: void };
+      block_user: { Args: { p_blocked_id: string }; Returns: void };
       propose_price: { Args: { p_gig_id: string; p_amount: number }; Returns: PriceProposal };
       respond_price_proposal: { Args: { p_proposal_id: string; p_accept: boolean }; Returns: void };
       withdraw_price_proposal: { Args: { p_proposal_id: string }; Returns: void };

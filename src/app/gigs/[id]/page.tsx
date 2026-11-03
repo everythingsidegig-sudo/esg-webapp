@@ -426,6 +426,19 @@ function GigDetails({ id }: { id: string }) {
               {isPoster ? "Message helper" : "Message poster"}
             </a>
           )}
+          {/* ESG-SAFE-001/002: Block only. Disallowed while in progress / awaiting payment / disputed
+              -- resolve or exit first (EXIT GIG already covers a safety concern mid-gig). */}
+          {gig.status !== "in_progress" && gig.status !== "awaiting_payment" && gig.status !== "disputed" && (() => {
+            const otherId = isPoster ? gig.selected_provider_id! : gig.poster_id;
+            const otherLabel = people[otherId] ? `@${people[otherId]}` : isPoster ? "this helper" : "the poster";
+            return (
+              <button type="button" disabled={busy}
+                onClick={() => { if (window.confirm(`Block ${otherLabel}? You will no longer see each other, any open claim or chat between you ends now, and you can't interact through ESG again.`)) void run(() => supabase.rpc("block_user", { p_blocked_id: otherId })); }}
+                className="text-sm font-medium text-neutral-400 hover:text-red-600 disabled:opacity-60">
+                Block {otherLabel}
+              </button>
+            );
+          })()}
           {gig.status === "active" && !gig.start_requested_at && isSelectedProvider && (
             <button
               disabled={busy}

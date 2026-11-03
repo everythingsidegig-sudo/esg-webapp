@@ -2,11 +2,11 @@
 
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import HelperSignInPrompt from "@/components/HelperSignInPrompt";
 import TagChip from "@/components/TagChip";
 import { useAuth } from "@/lib/auth-context";
-import { findHelperHref, helperProfileHref } from "@/lib/journey";
+import { findHelperHref, helperProfileHref, rpcActionError } from "@/lib/journey";
 import { postRequestHref, requestableCategories } from "@/lib/helper-request";
 import { SERVICE_TYPES } from "@/lib/services";
 import { createClient } from "@/lib/supabase/client";
@@ -15,6 +15,7 @@ import type { PublicProfile, PublicProfileWithTags } from "@/lib/database.types"
 
 function PublicProfileView({ username }: { username: string }) {
   const supabase = createClient();
+  const router = useRouter();
   const { user, loading: authLoading } = useAuth();
   // Search context carried from Find a Helper (and through sign-in): where "Back" goes.
   const params = useSearchParams();
@@ -25,6 +26,20 @@ function PublicProfileView({ username }: { username: string }) {
   // Lemon count (the other half of this ratio) is private and never leaves
   // get_public_stats() -- only the pre-computed percentage does. ESG-FDBK-001.
   const [womPercentage, setWomPercentage] = useState<number | null>(null);
+  // ESG-SAFE-001/002: Block only (Report and Call 911 are out of scope).
+  const [blocking, setBlocking] = useState(false);
+  const [blockError, setBlockError] = useState<string | null>(null);
+
+  async function block() {
+    if (!profile || blocking) return;
+    if (!window.confirm(`Block @${profile.username}? You will no longer see each other, any open claim or chat between you ends now, and you can't interact through ESG again.`)) return;
+    setBlocking(true);
+    setBlockError(null);
+    const { error } = await supabase.rpc("block_user", { p_blocked_id: profile.id });
+    setBlocking(false);
+    if (error) { setBlockError(rpcActionError(error)); return; }
+    router.push("/");
+  }
 
   useEffect(() => {
     // Defense in depth: src/proxy.ts already keeps signed-out requests away from this
@@ -80,6 +95,13 @@ function PublicProfileView({ username }: { username: string }) {
           </Link>
         )}
       </div>
+      {user && profile.id !== user.id && (
+        <button type="button" disabled={blocking} onClick={() => void block()}
+          className="text-sm font-medium text-neutral-400 hover:text-red-600 disabled:opacity-60">
+          Block @{profile.username}
+        </button>
+      )}
+      {blockError && <p role="alert" className="text-sm text-red-600">{blockError}</p>}
 
       <div className="grid grid-cols-2 gap-3 text-center">
         <div className="rounded-lg border border-neutral-200 bg-white p-3">
