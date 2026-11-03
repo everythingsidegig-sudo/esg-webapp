@@ -3,6 +3,17 @@ import { generalAreaLabel } from "./geocoding";
 
 export const LOCATION_KEY = "esg:general-area";
 const GEOCODE_CACHE_PREFIX = "esg:general-area-label:";
+// Once a visitor has been sent through /location (whether or not they finished it), later visits to
+// Home/Browse/Find a Helper stop redirecting them there again -- a one-time nudge, not a gate.
+const LOCATION_PROMPTED_KEY = "esg:location-prompted";
+
+export function hasPromptedForLocation(): boolean {
+  try { return localStorage.getItem(LOCATION_PROMPTED_KEY) === "1"; } catch { return false; }
+}
+
+export function markLocationPrompted() {
+  try { localStorage.setItem(LOCATION_PROMPTED_KEY, "1"); } catch {}
+}
 
 function cacheKey(lat: number, lng: number) {
   return `${GEOCODE_CACHE_PREFIX}${lat.toFixed(2)},${lng.toFixed(2)}`;
@@ -24,6 +35,7 @@ export function cacheGeneralArea(lat: number, lng: number, label: string) {
 // ESG-specific location data survives on this device once the visitor is gone.
 export function clearGeneralAreaState() {
   try { localStorage.removeItem(AUTH_AREA_KEY); } catch {}
+  try { localStorage.removeItem(LOCATION_PROMPTED_KEY); } catch {}
   try {
     localStorage.removeItem(LOCATION_KEY);
     for (let i = localStorage.length - 1; i >= 0; i--) {

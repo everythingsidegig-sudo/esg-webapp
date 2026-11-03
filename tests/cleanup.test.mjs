@@ -72,7 +72,7 @@ async function component(path, name, overrides = {}) {
     "@/lib/services": { SERVICE_TYPES: ["Cleaning", "Other"], SPECIALIZATION_PROMPTS: { Cleaning: "What kind of cleaning?", Handyman: "What kind of handyman work?", Other: "What kind of help?" } },
     // The whole real module: pages import new helpers from it as they are added.
     "@/lib/journey": journeyLib,
-    "@/lib/location": { loadJourneyLocation: () => ({ text: "", lat: null, lng: null }), haversineKm, clearGeneralAreaState: () => {}, rememberAreaForAuth: () => false },
+    "@/lib/location": { loadJourneyLocation: () => ({ text: "", lat: null, lng: null }), haversineKm, clearGeneralAreaState: () => {}, rememberAreaForAuth: () => false, hasPromptedForLocation: () => true, markLocationPrompted: () => {} },
     "@/lib/tags": {
       loadTagCatalog: async () => ({}),
       gigTagNames: (gig) => (gig.gig_tags ?? []).map((link) => link.tag.name),
@@ -217,6 +217,32 @@ test("Profile: selecting a skill immediately reveals the specializations section
   const allText = nodes(tree, (node) => typeof node.props?.children === "string").map((node) => node.props.children).join(" ");
   assert.doesNotMatch(allText, /\btags?\b/i, "no 'tag' wording is shown to the user");
   assert.doesNotMatch(allText, /profile_tags/i);
+});
+
+test("Profile: 'Your area' location section shows and works even with no skills selected (was previously hidden behind having a skill), and saving also updates this browser's area for Browse/Find a Helper", async () => {
+  const calls = [];
+  const written = [];
+  const client = {
+    from: () => ({ select: () => ({ eq: async () => ({ data: [], error: null }) }) }),
+    rpc: async (name, args) => { calls.push([name, args]); return { error: null }; },
+  };
+  const app = await component("src/app/profile/page.tsx", "ProfileEditor", {
+    client,
+    storage: { setItem: (key, value) => written.push([key, JSON.parse(value)]) },
+    mocks: { "@/lib/location": { LOCATION_KEY: "esg:general-area", reverseGeocodeGeneralArea: async () => null } },
+  });
+  const profileFields = { ...profile, skills: [], public_location_text: null, public_lat: null, public_lng: null };
+  app.render({ profile: profileFields }); await flush();
+  let tree = app.render({ profile: profileFields });
+  assert.ok(nodes(tree, (node) => node.props.children === "Your area (optional)").length === 1, "the location section renders with zero skills selected");
+  const input = nodes(tree, (node) => node.props.id === "helper-location")[0];
+  assert.ok(input, "already expanded: nothing saved yet, so there's no collapsed summary to click through first");
+  input.props.onChange({ target: { value: "Lund, Sweden" } });
+  tree = app.render({ profile: profileFields });
+  button(tree, "Save location").props.onClick();
+  await flush();
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [["set_helper_location", { p_location_text: "Lund, Sweden", p_lat: null, p_lng: null }]]);
+  assert.deepEqual(written, [["esg:general-area", { text: "Lund, Sweden", lat: null, lng: null }]], "also written through to the general area Browse/Find a Helper/`/location` read");
 });
 
 test("Profile: each newly selected skill opens its own options sheet, and every pick lands in the one specializations section", async () => {
@@ -1076,6 +1102,34 @@ test("Browse chips select one existing category and All Services restores result
   assert.equal(chips(tree).filter((node) => node.props.selected).length, 1);
   chips(tree)[0].props.onClick(); tree = app.render();
   assert.equal(results(tree).length, 2);
+});
+
+test("Browse: arriving directly with no area set and no prior prompt redirects once to /location; an already-prompted or already-located visitor is left alone", async () => {
+  const gigs = [{ id: "g1", service_type: "Cleaning", title: "Clean", amount: 10 }];
+  const client = { from: () => ({ select: () => ({ eq: () => ({ order: async () => ({ data: gigs, error: null }) }) }) }) };
+  const marked = [];
+  const destinations = [];
+  const fresh = await component("src/app/browse/page.tsx", "BrowseInner", {
+    client,
+    mocks: {
+      "@/lib/location": { loadJourneyLocation: () => ({ text: "", lat: null, lng: null }), haversineKm: () => 0, hasPromptedForLocation: () => false, markLocationPrompted: () => marked.push("marked") },
+      "next/navigation": { useRouter: () => ({ replace: (url) => destinations.push(url) }) },
+    },
+  });
+  fresh.render(); await flush();
+  assert.deepEqual(destinations, ["/location?next=/browse"]);
+  assert.deepEqual(marked, ["marked"]);
+
+  const alreadyPrompted = [];
+  const seen = await component("src/app/browse/page.tsx", "BrowseInner", {
+    client,
+    mocks: {
+      "@/lib/location": { loadJourneyLocation: () => ({ text: "", lat: null, lng: null }), haversineKm: () => 0, hasPromptedForLocation: () => true, markLocationPrompted: () => {} },
+      "next/navigation": { useRouter: () => ({ replace: (url) => alreadyPrompted.push(url) }) },
+    },
+  });
+  seen.render(); await flush();
+  assert.deepEqual(alreadyPrompted, [], "already prompted once before, Browse just works unfiltered as always");
 });
 
 test("Browse tag filter appears after choosing a category and narrows results", async () => {
@@ -2147,6 +2201,52 @@ test("landing page: I Need Help and Help & Make Money are public links for every
   }
 });
 
+test("Home: with no area set yet, either link routes through /location once first, then goes straight through from then on", async () => {
+  const marked = [];
+  const destinations = [];
+  let prompted = false;
+  const app = await component("src/app/page.tsx", "HomeInner", {
+    mocks: {
+      "@/lib/location": {
+        loadJourneyLocation: () => ({ text: "", lat: null, lng: null }),
+        hasPromptedForLocation: () => prompted,
+        markLocationPrompted: () => { prompted = true; marked.push("marked"); },
+      },
+      "next/navigation": { useSearchParams: () => new URLSearchParams(), useRouter: () => ({ push: (url) => destinations.push(url) }) },
+    },
+  });
+  let tree = app.render();
+  let prevented = false;
+  const needHelpLink = nodes(tree, (node) => node.type === "a" && node.props.href === "/need-help")[0];
+  needHelpLink.props.onClick({ preventDefault: () => { prevented = true; } });
+  assert.equal(prevented, true, "the normal link navigation is stopped");
+  assert.deepEqual(destinations, ["/location?next=%2Fneed-help"]);
+  assert.deepEqual(marked, ["marked"]);
+
+  // Second click, same session: already prompted once, so it goes straight through.
+  tree = app.render();
+  const browseLink = nodes(tree, (node) => node.type === "a" && node.props.href === "/browse")[0];
+  let prevented2 = false;
+  browseLink.props.onClick({ preventDefault: () => { prevented2 = true; } });
+  assert.equal(prevented2, false, "no longer intercepted once the one-time nudge has already fired");
+  assert.deepEqual(destinations, ["/location?next=%2Fneed-help"], "no second detour through /location");
+});
+
+test("Home: with an area already set, neither link is intercepted at all", async () => {
+  const destinations = [];
+  const app = await component("src/app/page.tsx", "HomeInner", {
+    mocks: {
+      "@/lib/location": { loadJourneyLocation: () => ({ text: "Lund, Sweden", lat: null, lng: null }), hasPromptedForLocation: () => false, markLocationPrompted: () => {} },
+      "next/navigation": { useSearchParams: () => new URLSearchParams(), useRouter: () => ({ push: (url) => destinations.push(url) }) },
+    },
+  });
+  const tree = app.render();
+  let prevented = false;
+  nodes(tree, (node) => node.type === "a" && node.props.href === "/browse")[0].props.onClick({ preventDefault: () => { prevented = true; } });
+  assert.equal(prevented, false);
+  assert.deepEqual(destinations, []);
+});
+
 test("Browse is public but opening a gig requires authentication, preserving the gig as next", async () => {
   const browseSource = await readFile(new URL("../src/app/browse/page.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(browseSource, /AuthGuard|useAuth/, "browsing the gig list needs no session");
@@ -2219,18 +2319,108 @@ test("Sign In shows 'New user? Register' and Register opens the existing signup 
   assert.equal(register.props.href, "/auth/sign-up?next=%2Fneed-help", "Register reuses the existing signup flow and carries the selected journey through");
 });
 
-test("logged-out protected journey redirects to Sign In with a safe next", async () => {
-  const destinations = [];
+test("logged-out protected journey redirects to Sign In with a safe next, remembering the chosen area first", async () => {
+  const destinations = [], kept = [];
   const app = await component("src/components/AuthGuard.tsx", "AuthGuardInner", {
     mocks: { "next/navigation": {
-      usePathname: () => "/location",
+      usePathname: () => "/my-gigs",
       useSearchParams: () => new URLSearchParams(),
       useRouter: () => ({ replace: (url) => destinations.push(url) }),
-    } },
+    }, "@/lib/location": { rememberAreaForAuth: () => { kept.push("kept"); return true; } } },
   });
   app.auth.user = null; app.auth.profile = null;
-  app.render({ children: { type: "location" } });
-  assert.deepEqual(destinations, ["/auth/sign-in?next=%2Flocation"]);
+  app.render({ children: { type: "my-gigs" } });
+  assert.deepEqual(destinations, ["/auth/sign-in?next=%2Fmy-gigs"]);
+  assert.deepEqual(kept, ["kept"], "any auth-gated redirect preserves the visitor's chosen area, not just the one helper-profile-view path");
+});
+
+test("/location no longer requires sign-in: a signed-out visitor reaches the real page directly, with no bounce to Sign In first", async () => {
+  const destinations = [];
+  const app = await component("src/app/location/page.tsx", "LocationGate", {
+    mocks: {
+      "@/lib/location": { LOCATION_KEY: "esg:general-area", loadJourneyLocation: () => ({ text: "", lat: null, lng: null }) },
+      "next/navigation": { useSearchParams: () => new URLSearchParams(), usePathname: () => "/location", useRouter: () => ({ replace: (url) => destinations.push(url) }) },
+    },
+  });
+  app.auth.user = null; app.auth.profile = null;
+  const tree = app.render();
+  assert.deepEqual(destinations, [], "no redirect to Sign In for a signed-out visitor");
+  assert.equal(tree.type.name, "LocationEntryInner", "the real area-picker page is reached, not a loading or redirect state");
+});
+
+test("/location still routes a signed-in, not-yet-onboarded account through onboarding first, preserving next", async () => {
+  const destinations = [];
+  const app = await component("src/app/location/page.tsx", "LocationGate", {
+    mocks: {
+      "@/lib/location": { LOCATION_KEY: "esg:general-area", loadJourneyLocation: () => ({ text: "", lat: null, lng: null }) },
+      "next/navigation": { useSearchParams: () => new URLSearchParams(), usePathname: () => "/location", useRouter: () => ({ replace: (url) => destinations.push(url) }) },
+    },
+  });
+  app.auth.profile = { ...profile, onboarding_completed_at: null };
+  app.render();
+  assert.deepEqual(destinations, ["/onboarding?next=%2Flocation"]);
+});
+
+test("/location with ?next=... skips 'What would you like to do?' and goes straight there, for an area already known or one just chosen", async () => {
+  const alreadyKnown = [];
+  const known = await component("src/app/location/page.tsx", "LocationEntryInner", {
+    mocks: {
+      "@/lib/location": { LOCATION_KEY: "esg:general-area", loadJourneyLocation: () => ({ text: "Lund, Sweden", lat: 55.7, lng: 13.19 }) },
+      "next/navigation": { useRouter: () => ({ replace: (url) => alreadyKnown.push(url) }) },
+    },
+  });
+  known.render({ next: "/browse" });
+  await flush();
+  assert.deepEqual(alreadyKnown, ["/browse"], "already knowing the area, with somewhere specific to go, skips the chooser screen entirely");
+
+  const destinations = [];
+  const fresh = await component("src/app/location/page.tsx", "LocationEntryInner", {
+    storage: { setItem: () => {} },
+    mocks: {
+      "@/lib/location": { LOCATION_KEY: "esg:general-area", loadJourneyLocation: () => ({ text: "", lat: null, lng: null }) },
+      "next/navigation": { useRouter: () => ({ replace: (url) => destinations.push(url) }) },
+    },
+  });
+  let tree = fresh.render({ next: "/need-help" });
+  nodes(tree, (node) => node.type === "input")[0].props.onChange({ target: { value: "Malmö, Sweden" } });
+  tree = fresh.render({ next: "/need-help" });
+  button(tree, "Continue").props.onClick();
+  assert.deepEqual(destinations, ["/need-help"], "picking an area with ?next= set also skips straight to that destination");
+});
+
+test("/location saves a signed-in visitor's chosen area to their account too, the same RPC Profile's own location section uses; signed-out, nothing is sent", async () => {
+  const calls = [];
+  const signedIn = await component("src/app/location/page.tsx", "LocationEntryInner", {
+    client: { rpc: async (name, args) => { calls.push([name, args]); return { error: null }; } },
+    storage: { setItem: () => {} },
+    mocks: {
+      "@/lib/location": { LOCATION_KEY: "esg:general-area", loadJourneyLocation: () => ({ text: "", lat: null, lng: null }) },
+      "next/navigation": { useRouter: () => ({ push() {} }) },
+    },
+  });
+  let tree = signedIn.render();
+  nodes(tree, (node) => node.type === "input")[0].props.onChange({ target: { value: "Lund, Sweden" } });
+  tree = signedIn.render();
+  button(tree, "Continue").props.onClick();
+  await flush();
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [["set_helper_location", { p_location_text: "Lund, Sweden", p_lat: null, p_lng: null }]]);
+
+  const signedOutCalls = [];
+  const signedOut = await component("src/app/location/page.tsx", "LocationEntryInner", {
+    client: { rpc: async (name, args) => { signedOutCalls.push([name, args]); return { error: null }; } },
+    storage: { setItem: () => {} },
+    mocks: {
+      "@/lib/location": { LOCATION_KEY: "esg:general-area", loadJourneyLocation: () => ({ text: "", lat: null, lng: null }) },
+      "next/navigation": { useRouter: () => ({ push() {} }) },
+    },
+  });
+  signedOut.auth.user = null;
+  let outTree = signedOut.render();
+  nodes(outTree, (node) => node.type === "input")[0].props.onChange({ target: { value: "Lund, Sweden" } });
+  outTree = signedOut.render();
+  button(outTree, "Continue").props.onClick();
+  await flush();
+  assert.deepEqual(signedOutCalls, [], "signed out, there is no account to save the area to");
 });
 
 test("authenticated Sign In uses validated next and never renders the form", async () => {
@@ -2825,7 +3015,7 @@ test("Find a Helper shows the distance whenever both positions are known, only a
   const afterRadius = setDistance(app, tree, 5);
   assert.deepEqual(helperCards(afterRadius).map((card) => card.props.profile.username), ["NearHelper"], "a radius filters");
   // No position at all: a radius cannot apply, and the visitor is told how to add one.
-  const noPosition = await openFindHelper({ profiles, mocks: { "@/lib/location": { loadJourneyLocation: () => ({ text: "", lat: null, lng: null }), haversineKm } } });
+  const noPosition = await openFindHelper({ profiles, mocks: { "@/lib/location": { loadJourneyLocation: () => ({ text: "", lat: null, lng: null }), haversineKm, hasPromptedForLocation: () => true } } });
   const hinted = setDistance(noPosition.app, noPosition.tree, 5);
   assert.match(textOf(nodes(hinted, (node) => node.props.role === "status")[0]), /Add a ZIP code or use your location/);
   assert.equal(helperCards(hinted).length, 2, "nothing is hidden by a radius that cannot be measured");
@@ -2842,6 +3032,38 @@ test("Find a Helper reads the saved area only after hydration, so the server HTM
   assert.equal(picker(app.render()).props.area.text, "", "first render: nothing from browser storage (the server cannot see it)");
   await flush();
   assert.deepEqual(JSON.parse(JSON.stringify(picker(app.render()).props.area)), { text: "Stockholm, Sweden", lat: 59.33, lng: 18.07 }, "then the saved area appears");
+});
+
+test("Find a Helper: arriving directly with no area set and no prior prompt redirects once to /location (keeping ?category=), an already-prompted visitor is left alone", async () => {
+  const marked = [];
+  const destinations = [];
+  const fresh = await component("src/app/find-helper/page.tsx", "FindHelper", {
+    client: helperClient([], []),
+    globals: { window: { location: { search: "?category=Cleaning" } } },
+    mocks: {
+      "@/lib/tags": { loadTagCatalog: async () => ({}), ...helperTagsMock },
+      "@/lib/location": { loadJourneyLocation: () => ({ text: "", lat: null, lng: null }), haversineKm, hasPromptedForLocation: () => false, markLocationPrompted: () => marked.push("marked") },
+      "next/navigation": { useRouter: () => ({ replace: (url) => destinations.push(url) }) },
+    },
+  });
+  fresh.auth.user = null;
+  fresh.render(); await flush();
+  assert.deepEqual(destinations, [`/location?next=${encodeURIComponent("/find-helper?category=Cleaning")}`]);
+  assert.deepEqual(marked, ["marked"]);
+
+  const alreadyPrompted = [];
+  const seen = await component("src/app/find-helper/page.tsx", "FindHelper", {
+    client: helperClient([], []),
+    globals: { window: { location: { search: "" } } },
+    mocks: {
+      "@/lib/tags": { loadTagCatalog: async () => ({}), ...helperTagsMock },
+      "@/lib/location": { loadJourneyLocation: () => ({ text: "", lat: null, lng: null }), haversineKm, hasPromptedForLocation: () => true, markLocationPrompted: () => {} },
+      "next/navigation": { useRouter: () => ({ replace: (url) => alreadyPrompted.push(url) }) },
+    },
+  });
+  seen.auth.user = null;
+  seen.render(); await flush();
+  assert.deepEqual(alreadyPrompted, [], "already prompted once before, Find a Helper just works unfiltered as always");
 });
 
 test("Find a Helper restores a search from ?category=, ignores unknown values, and keeps the category in the address", async () => {

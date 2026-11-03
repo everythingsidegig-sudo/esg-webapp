@@ -1,18 +1,21 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { postcodeCandidates } from "@/lib/zip-location";
 import { resolveAreaQuery } from "@/lib/area-lookup";
 import type { AreaMatch } from "@/lib/area-search";
-import AuthGuard from "@/components/AuthGuard";
 import MapPicker, { type MapPoint } from "@/components/MapPicker";
-import { approximateCoordinates } from "@/lib/journey";
+import { approximateCoordinates, safeNext, setupDestination } from "@/lib/journey";
 import { LOCATION_KEY, loadJourneyLocation, reverseGeocodeGeneralArea } from "@/lib/location";
+import { useAuth } from "@/lib/auth-context";
+import { createClient } from "@/lib/supabase/client";
 
-function LocationEntryInner() {
+function LocationEntryInner({ next }: { next: string | null }) {
   const router = useRouter();
+  const supabase = createClient();
+  const { user, profile, refreshProfile } = useAuth();
   const locationRequest = useRef(0);
   // Text the page wrote itself (a current-location label) is already resolved; searching for it
   // again would only offer choices for a place the visitor has already pinned.
@@ -20,8 +23,15 @@ function LocationEntryInner() {
 
   // A location already saved this session (or just restored after an email-link sign-in) means
   // the visitor already did this step; land them straight on "What would you like to do?"
-  // instead of asking them to pick an area again.
-  const [initialLocation] = useState(loadJourneyLocation);
+  // instead of asking them to pick an area again. A signed-in helper who already saved an account
+  // location sees that here too, rather than being asked again on a browser with nothing local.
+  const [initialLocation] = useState(() => {
+    const saved = loadJourneyLocation();
+    if (saved.text) return saved;
+    return profile?.public_location_text
+      ? { text: profile.public_location_text, lat: profile.public_lat, lng: profile.public_lng }
+      : saved;
+  });
 
   const [locationText, setLocationText] = useState(initialLocation.text);
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(
@@ -132,6 +142,19 @@ function LocationEntryInner() {
     );
   }
 
+  // Signed in: this is now the one place "my area" is set, so it is saved to the account too
+  // (the same set_helper_location RPC Profile's own "Helper location" section uses), not just this
+  // browser. Fire-and-forget -- a sync failure must never block the journey the visitor is on.
+  function syncAccountLocation(text: string, point: { lat: number | null; lng: number | null } | null) {
+    if (!user) return;
+    void (async () => {
+      try {
+        await supabase.rpc("set_helper_location", { p_location_text: text, p_lat: point?.lat ?? null, p_lng: point?.lng ?? null });
+        await refreshProfile();
+      } catch { /* the chosen area is already saved locally and the journey continues regardless */ }
+    })();
+  }
+
   function continueJourney() {
     if (locating || lookingUpZip) return;
     if (postcodeCandidates(locationText).length > 0 && !coords) {
@@ -142,10 +165,19 @@ function LocationEntryInner() {
       setError("Enter a general area of 1–200 characters or use your current location.");
       return;
     }
-    try { localStorage.setItem(LOCATION_KEY, JSON.stringify({ text: zipArea ?? locationText.trim(), ...coords })); }
+    const text = zipArea ?? locationText.trim();
+    try { localStorage.setItem(LOCATION_KEY, JSON.stringify({ text, ...coords })); }
     catch { setError("Enable site storage in your browser to continue."); return; }
+    syncAccountLocation(text, coords);
+    if (next) { router.replace(safeNext(next)); return; }
     setConfirmed(true);
   }
+
+  // Arrived already knowing the area (saved locally, restored after sign-in, or read from the
+  // account) with somewhere specific to go next: skip "What would you like to do?" entirely.
+  useEffect(() => {
+    if (confirmed && next) router.replace(safeNext(next));
+  }, [confirmed, next, router]);
 
   function browseGigs() {
     // continueJourney() already saved this area to localStorage; Browse reads it
@@ -250,11 +282,33 @@ function LocationEntryInner() {
   );
 }
 
+// Location itself needs no account -- it's asked before sign-in is ever required (ESG defect: a
+// signed-out visitor used to be bounced straight to Sign In before seeing this page at all). A
+// signed-in account that hasn't finished onboarding still gets routed there first, same as before.
+function LocationGate() {
+  const { user, loading, profile, profileLoading } = useAuth();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const next = searchParams.get("next");
+
+  useEffect(() => {
+    if (!loading && user && !profileLoading && profile && !profile.onboarding_completed_at) {
+      router.replace(setupDestination(`${pathname}${searchParams.size ? `?${searchParams.toString()}` : ""}`));
+    }
+  }, [loading, user, profileLoading, profile, pathname, searchParams, router]);
+
+  if (loading) return <div className="p-8 text-center text-neutral-500">Loading…</div>;
+  if (user && (!profile || !profile.onboarding_completed_at)) return <p>Loading your profile…</p>;
+
+  return <LocationEntryInner next={next} />;
+}
+
 export default function LocationEntry() {
   return (
-    <AuthGuard>
-      <LocationEntryInner />
-    </AuthGuard>
+    <Suspense fallback={<div className="p-8 text-center text-neutral-500">Loading…</div>}>
+      <LocationGate />
+    </Suspense>
   );
 }
 

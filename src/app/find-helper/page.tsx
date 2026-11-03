@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import AreaPicker, { type Area } from "@/components/AreaPicker";
 import HelperSignInPrompt from "@/components/HelperSignInPrompt";
 import OptionSheet from "@/components/OptionSheet";
@@ -13,7 +14,7 @@ import { createClient } from "@/lib/supabase/client";
 import type { PublicProfile, PublicProfileWithTags, Tag } from "@/lib/database.types";
 import { SERVICE_TYPES, SPECIALIZATION_PROMPTS } from "@/lib/services";
 import { loadTagCatalog, profileTagsForCategory, withProfileTags } from "@/lib/tags";
-import { haversineKm, loadJourneyLocation } from "@/lib/location";
+import { hasPromptedForLocation, haversineKm, loadJourneyLocation, markLocationPrompted } from "@/lib/location";
 import RadiusSlider from "@/components/RadiusSlider";
 
 const DEFAULT_RADIUS_KM = 10;
@@ -82,6 +83,7 @@ function withDistance(list: PublicProfileWithTags[], radiusKm: number | null, se
 
 export default function FindHelper() {
   const supabase = createClient();
+  const router = useRouter();
   const [category, setCategory] = useState<string | null>(null);
   const [tagCatalog, setTagCatalog] = useState<Record<string, Tag[]>>({});
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
@@ -132,14 +134,23 @@ export default function FindHelper() {
   // the browser, which the server render cannot see, so they are read after hydration.
   useEffect(() => {
     const saved = loadJourneyLocation();
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (saved.text) setSearcherLocation(saved);
+    if (saved.text) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSearcherLocation(saved);
+    } else if (!hasPromptedForLocation() && typeof window !== "undefined") {
+      // Arrived here directly (not via Home), with no area set yet: the same one-time nudge Home
+      // gives, so this isn't the one way into the app that silently skips asking altogether.
+      markLocationPrompted();
+      router.replace(`/location?next=${encodeURIComponent(`/find-helper${window.location.search}`)}`);
+      return;
+    }
     if (typeof window === "undefined") return;
     const wanted = new URLSearchParams(window.location.search).get("category");
     if (wanted && (SERVICE_TYPES as readonly string[]).includes(wanted)) {
       chooseCategory(wanted);
     }
     // Once, on arrival; chooseCategory only calls setters.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const categoryTags = category ? (tagCatalog[category] ?? []) : [];

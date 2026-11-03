@@ -4,16 +4,19 @@ import { Suspense, useEffect } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { setupDestination } from "@/lib/journey";
+import { rememberAreaForAuth } from "@/lib/location";
 
 function AuthGuardInner({ children }: { children: React.ReactNode }) {
   const { user, loading, profile, profileLoading, profileError, refreshProfile } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const requiresOnboarding = pathname === "/post" || pathname === "/location";
+  // /location now has its own lighter, sign-in-optional gate (src/app/location/page.tsx).
+  const requiresOnboarding = pathname === "/post";
 
   useEffect(() => {
     if (!loading && !user) {
+      rememberAreaForAuth();
       const next = encodeURIComponent(`${pathname}${searchParams.size ? `?${searchParams.toString()}` : ""}`);
       router.replace(`/auth/sign-in?next=${next}`);
     } else if (!loading && user && !profileLoading && profile && !profile.onboarding_completed_at && requiresOnboarding) {

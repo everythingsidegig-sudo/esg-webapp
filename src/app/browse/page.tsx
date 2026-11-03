@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import SelectionChip from "@/components/SelectionChip";
 import TagChip from "@/components/TagChip";
 import AreaPicker, { type Area } from "@/components/AreaPicker";
@@ -10,7 +11,7 @@ import { formatMoney } from "@/lib/money";
 import type { GigWithTags, Tag } from "@/lib/database.types";
 import { SERVICE_TYPES as CATEGORIES } from "@/lib/services";
 import { loadTagCatalog, gigTagNames } from "@/lib/tags";
-import { haversineKm, loadJourneyLocation } from "@/lib/location";
+import { hasPromptedForLocation, haversineKm, loadJourneyLocation, markLocationPrompted } from "@/lib/location";
 import RadiusSlider from "@/components/RadiusSlider";
 
 const SERVICE_TYPES = [
@@ -20,6 +21,7 @@ const SERVICE_TYPES = [
 
 function BrowseInner() {
   const supabase = createClient();
+  const router = useRouter();
   // The area saved on /location (or wherever it was last set) carries over here, the
   // same way Find a Helper picks it up; editable right on this page too via AreaPicker.
   // localStorage isn't visible to the server render, so this is read after hydration
@@ -37,8 +39,18 @@ function BrowseInner() {
 
   useEffect(() => {
     const saved = loadJourneyLocation();
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (saved.text) setArea(saved);
+    if (saved.text) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setArea(saved);
+      return;
+    }
+    // Arrived here directly (not via Home), with no area set yet: the same one-time nudge Home
+    // gives, so this isn't the one way into the app that silently skips asking altogether.
+    if (!hasPromptedForLocation()) {
+      markLocationPrompted();
+      router.replace("/location?next=/browse");
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
