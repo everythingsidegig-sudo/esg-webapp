@@ -14,6 +14,11 @@ export function notificationHref(n: Pick<Notification, "gig_id" | "type">) {
   if (n.type === "gig_request") return `/gigs/${n.gig_id}#request`;
   // A price proposal or its answer lands in the chat, where the Accept / Decline buttons are.
   if (n.type.startsWith("price_")) return `/gigs/${n.gig_id}#messages`;
+  // Find Help Profile Swiping v1.0: a direct request has no UI on /gigs/[id] (that page has
+  // never had a role for "pending direct-request recipient", unlike the old gig_request's
+  // #request panel) -- the Interested/Decline/Accept actions live in My Gigs instead.
+  if (n.type === "direct_request") return "/my-gigs?tab=helping";
+  if (n.type === "direct_request_interested" || n.type === "direct_request_declined") return "/my-gigs?tab=posted";
   return `/gigs/${n.gig_id}`;
 }
 

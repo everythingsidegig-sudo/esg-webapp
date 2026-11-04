@@ -7,10 +7,11 @@ import type { ClaimState, GigStatus } from "./database.types";
 type GigLike = { status: GigStatus; selected_provider_id: string | null; requested_helper_id?: string | null };
 
 // ---------------------------------------------------------------- I Need Help
-export type PosterSection = "open" | "accepted" | "in_progress" | "disputed" | "completed" | "draft" | "cancelled";
+export type PosterSection = "open" | "saved_non_public" | "accepted" | "in_progress" | "disputed" | "completed" | "draft" | "cancelled";
 
 export const POSTER_SECTIONS: { key: PosterSection; label: string }[] = [
   { key: "open", label: "Open" },
+  { key: "saved_non_public", label: "Saved (Private)" },
   { key: "accepted", label: "Accepted" },
   { key: "in_progress", label: "In progress" },
   { key: "disputed", label: "Needs attention" },
@@ -22,6 +23,7 @@ export const POSTER_SECTIONS: { key: PosterSection; label: string }[] = [
 export function posterSection(gig: GigLike): PosterSection {
   switch (gig.status) {
     case "draft": return "draft";
+    case "saved_non_public": return "saved_non_public";
     case "active": return gig.selected_provider_id ? "accepted" : "open";
     case "in_progress":
     case "awaiting_payment": return "in_progress";

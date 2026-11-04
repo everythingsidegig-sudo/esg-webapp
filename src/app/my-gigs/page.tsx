@@ -13,10 +13,15 @@ import {
   HELPER_SECTIONS, POSTER_SECTIONS, helperBadge, helperSection, posterSection, proposalCountLabel, shortDate,
 } from "@/lib/my-gigs";
 import { formatMoney } from "@/lib/money";
-import type { ClaimState, GigWithTags } from "@/lib/database.types";
+import { rpcActionError } from "@/lib/journey";
+import type { ClaimState, DirectRequest, DirectRequestState, Gig, GigWithTags } from "@/lib/database.types";
 
 type PosterRow = { gig: GigWithTags; proposals: number; helper: string | null; requestedTo: string | null };
 type HelperRow = { gig: GigWithTags; claimState: ClaimState | null; offer: number | null; customer: string | null };
+// A sent direct request, as the poster inspects it: who it went to and whether they can accept it yet.
+type SentRequestRow = { request: DirectRequest; providerName: string | null };
+// A received direct request, as the provider sees it: the gig it's attached to and who sent it.
+type ReceivedRequestRow = { request: DirectRequest; gig: Gig; posterName: string | null };
 
 const TONES = {
   pending: "bg-yellow-100 text-yellow-800",
@@ -47,7 +52,13 @@ function tagChips(gig: GigWithTags) {
   return names.length > 0 && <div className="mt-2 flex flex-wrap gap-1">{names.map((name) => <TagChip key={name}>{name}</TagChip>)}</div>;
 }
 
-function posterCard({ gig, proposals, helper, requestedTo }: PosterRow) {
+const REQUEST_STATE_LABEL: Record<DirectRequestState, string> = {
+  pending: "Pending", interested: "Interested", declined: "Declined", accepted: "Accepted", closed: "Closed",
+};
+
+function posterCard({ gig, proposals, helper, requestedTo }: PosterRow, savedNonPublic: {
+  sentRequests: SentRequestRow[]; busy: string | null; onCancel: (gigId: string) => void; onAccept: (requestId: string) => void;
+}) {
   const section = posterSection(gig);
   return (
     <div key={gig.id} className="rounded-xl border border-neutral-200 bg-white shadow-sm">
@@ -65,6 +76,32 @@ function posterCard({ gig, proposals, helper, requestedTo }: PosterRow) {
         {gig.requested_helper_id && !gig.selected_provider_id && !gig.helper_withdrawn_at && !gig.helper_removed_at && <p className="mt-2 text-sm text-emerald-800">🔒 Private request{requestedTo ? ` to @${requestedTo}` : ""}</p>}
         {tagChips(gig)}
       </Link>
+      {section === "saved_non_public" && (
+        <div className="space-y-2 border-t border-neutral-100 px-4 py-3">
+          <p className="text-sm text-neutral-600">🔒 Saved privately · not visible to the public</p>
+          {savedNonPublic.sentRequests.length === 0 ? (
+            <p className="text-sm text-neutral-500">No requests sent yet.</p>
+          ) : (
+            <ul className="space-y-1.5">
+              {savedNonPublic.sentRequests.map(({ request, providerName }) => (
+                <li key={request.id} className="flex items-center justify-between gap-2 text-sm">
+                  <span>@{providerName ?? "a helper"} — {REQUEST_STATE_LABEL[request.state]}</span>
+                  {(request.state === "pending" || request.state === "interested") && (
+                    <button type="button" disabled={savedNonPublic.busy === request.id}
+                      onClick={() => savedNonPublic.onAccept(request.id)}
+                      className="shrink-0 rounded-lg bg-emerald-600 px-3 py-1 text-xs font-medium text-white disabled:opacity-60">Accept</button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="flex gap-3 pt-1">
+            <Link href={`/post/find-helpers?gig=${gig.id}`} className="touch-link text-sm font-medium text-emerald-700">Resume Finding Helpers</Link>
+            <button type="button" disabled={savedNonPublic.busy === gig.id} onClick={() => savedNonPublic.onCancel(gig.id)}
+              className="text-sm font-medium text-red-700 disabled:opacity-60">Cancel</button>
+          </div>
+        </div>
+      )}
       <div className="flex items-center justify-between gap-3 border-t border-neutral-100 px-4">
         {section === "open"
           ? proposals > 0
@@ -73,6 +110,32 @@ function posterCard({ gig, proposals, helper, requestedTo }: PosterRow) {
           : <span />}
         <Link href={`/gigs/${gig.id}`} className="touch-link text-sm font-medium text-emerald-700">View gig</Link>
       </div>
+    </div>
+  );
+}
+
+function receivedRequestCard({ request, gig, posterName }: ReceivedRequestRow, busy: string | null, onRespond: (requestId: string, interested: boolean) => void) {
+  return (
+    <div key={request.id} className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate font-medium">{gig.title}</div>
+          <div className="mt-0.5 text-sm text-neutral-500">{gigMeta(gig)}</div>
+        </div>
+        <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${TONES[request.state === "pending" ? "pending" : request.state === "declined" ? "bad" : "neutral"]}`}>
+          {REQUEST_STATE_LABEL[request.state]}
+        </span>
+      </div>
+      {posterName && <p className="mt-2 text-sm text-neutral-600">Sent by @{posterName}</p>}
+      <p className="mt-1 text-sm text-neutral-600">Offered: {formatMoney(gig.amount)} · {gig.price_type === "negotiable" ? "Negotiable" : "Fixed price"}</p>
+      {request.state === "pending" && (
+        <div className="mt-3 flex gap-2">
+          <button type="button" disabled={busy === request.id} onClick={() => onRespond(request.id, false)}
+            className="flex-1 rounded-lg border border-neutral-300 bg-white py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-60">Decline</button>
+          <button type="button" disabled={busy === request.id} onClick={() => onRespond(request.id, true)}
+            className="flex-1 rounded-lg bg-emerald-600 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60">Interested</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -117,6 +180,12 @@ function MyGigsInner() {
   const created = params.get("created");
   const [postedReload, setPostedReload] = useState(0);
   const [helpingReload, setHelpingReload] = useState(0);
+  // Find Help Profile Swiping v1.0: direct requests are a separate table from claims, so they
+  // never show up in the posted/helping queries above -- fetched and rendered independently.
+  const [sentRequests, setSentRequests] = useState<Map<string, SentRequestRow[]>>(new Map());
+  const [receivedRequests, setReceivedRequests] = useState<ReceivedRequestRow[]>([]);
+  const [requestBusy, setRequestBusy] = useState<string | null>(null);
+  const [requestError, setRequestError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -136,6 +205,21 @@ function MyGigsInner() {
         for (const claim of (claimsResult.data ?? []) as { gig_id: string }[]) counts.set(claim.gig_id, (counts.get(claim.gig_id) ?? 0) + 1);
         if (alive) setPosted(gigs.map((gig) => ({ gig, proposals: counts.get(gig.id) ?? 0, helper: gig.selected_provider_id ? names.get(gig.selected_provider_id) ?? null : null,
           requestedTo: gig.requested_helper_id ? names.get(gig.requested_helper_id) ?? null : null })));
+
+        const savedNonPublicIds = gigs.filter((gig) => gig.status === "saved_non_public").map((gig) => gig.id);
+        if (savedNonPublicIds.length === 0) { if (alive) setSentRequests(new Map()); return; }
+        const { data: requestRows, error: requestError } = await supabase
+          .from("direct_requests").select("*").in("gig_id", savedNonPublicIds).order("created_at", { ascending: false });
+        if (requestError) throw requestError;
+        const requests = (requestRows ?? []) as DirectRequest[];
+        const providerNames = await usernames(supabase, unique(requests.map((row) => row.provider_id)));
+        const byGig = new Map<string, SentRequestRow[]>();
+        for (const request of requests) {
+          const list = byGig.get(request.gig_id) ?? [];
+          list.push({ request, providerName: providerNames.get(request.provider_id) ?? null });
+          byGig.set(request.gig_id, list);
+        }
+        if (alive) setSentRequests(byGig);
       } catch { if (alive) setPostedError("Couldn't load your gigs. Check your connection and retry."); }
       finally { if (alive) setPostedLoading(false); }
     }
@@ -173,6 +257,54 @@ function MyGigsInner() {
     return () => { alive = false; };
   }, [user, supabase, helpingReload]);
 
+  // Direct requests sent to this helper: a separate table from claims (see SentRequestRow/
+  // ReceivedRequestRow above), so they never show up in the gigs query just above and are
+  // fetched on their own.
+  useEffect(() => {
+    if (!user) return;
+    let alive = true;
+    supabase
+      .from("direct_requests").select("*, gig:gigs(*)").eq("provider_id", user.id).order("created_at", { ascending: false })
+      .then(async ({ data, error }) => {
+        if (error || !alive) return;
+        const rows = (data ?? []) as (DirectRequest & { gig: Gig | null })[];
+        const withGig = rows.filter((row): row is DirectRequest & { gig: Gig } => row.gig != null);
+        const names = await usernames(supabase, unique(withGig.map((row) => row.gig.poster_id)));
+        if (alive) setReceivedRequests(withGig.map((row) => ({ request: row, gig: row.gig, posterName: names.get(row.gig.poster_id) ?? null })));
+      });
+    return () => { alive = false; };
+  }, [user, supabase, helpingReload]);
+
+  async function cancelSavedGig(gigId: string) {
+    if (requestBusy) return;
+    setRequestBusy(gigId);
+    setRequestError(null);
+    const { error } = await supabase.rpc("cancel_gig", { p_gig_id: gigId });
+    setRequestBusy(null);
+    if (error) { setRequestError(rpcActionError(error)); return; }
+    setPostedReload((value) => value + 1);
+  }
+
+  async function acceptRequest(requestId: string) {
+    if (requestBusy) return;
+    setRequestBusy(requestId);
+    setRequestError(null);
+    const { error } = await supabase.rpc("accept_direct_request", { p_request_id: requestId });
+    setRequestBusy(null);
+    if (error) { setRequestError(rpcActionError(error)); return; }
+    setPostedReload((value) => value + 1);
+  }
+
+  async function respondRequest(requestId: string, interested: boolean) {
+    if (requestBusy) return;
+    setRequestBusy(requestId);
+    setRequestError(null);
+    const { error } = await supabase.rpc("respond_direct_request", { p_request_id: requestId, p_interested: interested });
+    setRequestBusy(null);
+    if (error) { setRequestError(rpcActionError(error)); return; }
+    setHelpingReload((value) => value + 1);
+  }
+
   const loading = tab === "posted" ? postedLoading : helpingLoading;
   const error = tab === "posted" ? postedError : helpingError;
   function retry() {
@@ -192,6 +324,7 @@ function MyGigsInner() {
         <button role="tab" aria-selected={tab === "helping"} onClick={() => setTab("helping")} className={tabClass(tab === "helping")}>I&apos;m Helping</button>
       </div>
       {error && <p role="alert" className="text-sm text-red-600">{error} <button onClick={retry} className="font-medium underline">Retry</button></p>}
+      {requestError && <p role="alert" className="text-sm text-red-600">{requestError}</p>}
       <div role="tabpanel" className="space-y-6">
         {loading ? <p className="text-neutral-500">Loading gigs…</p> : error ? null : tab === "posted" ? (
           posted.length === 0
@@ -201,20 +334,28 @@ function MyGigsInner() {
               if (rows.length === 0) return null;
               return <section key={key} aria-label={label} className="space-y-2">
                 <h2 className="text-sm font-semibold text-neutral-500">{label} ({rows.length})</h2>
-                {rows.map(posterCard)}
+                {rows.map((row) => posterCard(row, { sentRequests: sentRequests.get(row.gig.id) ?? [], busy: requestBusy, onCancel: (gigId) => void cancelSavedGig(gigId), onAccept: (requestId) => void acceptRequest(requestId) }))}
               </section>;
             })
         ) : (
-          helping.length === 0
+          helping.length === 0 && receivedRequests.length === 0
             ? <p className="text-neutral-500">You haven&apos;t sent any offers or received any requests yet. <Link href="/browse" className="touch-link font-medium text-emerald-700">Explore gigs</Link></p>
-            : HELPER_SECTIONS.map(({ key, label }) => {
-              const rows = helping.filter((row) => helperSection(row.gig, row.claimState, user!.id) === key);
-              if (rows.length === 0) return null;
-              return <section key={key} aria-label={label} className="space-y-2">
-                <h2 className="text-sm font-semibold text-neutral-500">{label} ({rows.length})</h2>
-                {rows.map((row) => helperCard(row, user!.id))}
-              </section>;
-            })
+            : <>
+              {receivedRequests.length > 0 && (
+                <section aria-label="Direct Requests" className="space-y-2">
+                  <h2 className="text-sm font-semibold text-neutral-500">Direct Requests ({receivedRequests.length})</h2>
+                  {receivedRequests.map((row) => receivedRequestCard(row, requestBusy, (requestId, interested) => void respondRequest(requestId, interested)))}
+                </section>
+              )}
+              {HELPER_SECTIONS.map(({ key, label }) => {
+                const rows = helping.filter((row) => helperSection(row.gig, row.claimState, user!.id) === key);
+                if (rows.length === 0) return null;
+                return <section key={key} aria-label={label} className="space-y-2">
+                  <h2 className="text-sm font-semibold text-neutral-500">{label} ({rows.length})</h2>
+                  {rows.map((row) => helperCard(row, user!.id))}
+                </section>;
+              })}
+            </>
         )}
       </div>
     </div>

@@ -45,3 +45,27 @@ export function markGigDecided(id: string, store?: KeyValueStore) {
 export function unmarkGigDecided(id: string, store?: KeyValueStore) {
   try { (store ?? sessionStorage).setItem(DECIDED_KEY, JSON.stringify(loadDecidedGigIds(store).filter((existing) => existing !== id))); } catch {}
 }
+
+// Find Help Profile Swiping v1.0, section 7.2: a provider skipped while swiping on ONE saved
+// gig's deck "does not re-show in the same session unless discovery is reset" -- scoped per
+// gig (not global like discovery-decided above) so skipping a provider for gig A never hides
+// them from gig B's own deck in the same session. A provider already sent an active request on
+// the server (section 9's "avoid re-contacting") is excluded by the page's own query instead --
+// this is only the local, undo-free skip gesture, which has no server effect to reverse.
+export function skippedProviderIdsKey(gigId: string) {
+  return `esg:direct-discovery-skipped:${gigId}`;
+}
+
+export function loadSkippedProviderIds(gigId: string, store?: KeyValueStore): string[] {
+  try {
+    const value = JSON.parse((store ?? sessionStorage).getItem(skippedProviderIdsKey(gigId)) ?? "[]");
+    return Array.isArray(value) ? value.filter((id) => typeof id === "string") : [];
+  } catch { return []; }
+}
+
+export function markProviderSkipped(gigId: string, providerId: string, store?: KeyValueStore) {
+  try {
+    const current = loadSkippedProviderIds(gigId, store);
+    if (!current.includes(providerId)) (store ?? sessionStorage).setItem(skippedProviderIdsKey(gigId), JSON.stringify([...current, providerId]));
+  } catch { /* worst case the provider can be swiped on again this session */ }
+}

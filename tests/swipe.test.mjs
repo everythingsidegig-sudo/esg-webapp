@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { SWIPE_COMMIT_PX, resolveSwipe, loadDecidedGigIds, markGigDecided, unmarkGigDecided } from "../src/lib/swipe.ts";
+import {
+  SWIPE_COMMIT_PX, resolveSwipe, loadDecidedGigIds, markGigDecided, unmarkGigDecided,
+  loadSkippedProviderIds, markProviderSkipped, skippedProviderIdsKey,
+} from "../src/lib/swipe.ts";
 
 // ---- resolveSwipe: pure gesture math (ESG Gig Swipe Discovery v1.0) ----
 test("a tap (near-zero movement) never resolves as a swipe", () => {
@@ -52,4 +55,25 @@ test("a tampered or missing store never throws, and just reports nothing decided
   assert.deepEqual(loadDecidedGigIds(broken), []);
   assert.doesNotThrow(() => markGigDecided("g1", broken));
   assert.doesNotThrow(() => unmarkGigDecided("g1", broken));
+});
+
+// ---- per-gig skipped-provider list (Find Help Profile Swiping v1.0, section 7.2) ----
+test("a skip is scoped to its own gig: skipping a provider for one gig's deck never hides them from another gig's deck", () => {
+  const store = fakeStorage();
+  markProviderSkipped("gig-a", "p1", store);
+  assert.deepEqual(loadSkippedProviderIds("gig-a", store), ["p1"]);
+  assert.deepEqual(loadSkippedProviderIds("gig-b", store), [], "a different gig's deck starts clean");
+});
+test("skipping the same provider twice on one gig only records it once", () => {
+  const store = fakeStorage();
+  markProviderSkipped("gig-a", "p1", store);
+  markProviderSkipped("gig-a", "p1", store);
+  markProviderSkipped("gig-a", "p2", store);
+  assert.deepEqual(loadSkippedProviderIds("gig-a", store), ["p1", "p2"]);
+});
+test("a tampered or missing store never throws for the skipped-provider list either", () => {
+  assert.deepEqual(loadSkippedProviderIds("gig-a", fakeStorage({ [skippedProviderIdsKey("gig-a")]: "not json" })), []);
+  const broken = { getItem: () => { throw new Error("storage unavailable"); }, setItem: () => { throw new Error("storage unavailable"); } };
+  assert.deepEqual(loadSkippedProviderIds("gig-a", broken), []);
+  assert.doesNotThrow(() => markProviderSkipped("gig-a", "p1", broken));
 });
