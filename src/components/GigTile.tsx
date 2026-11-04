@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import TagChip from "@/components/TagChip";
 import { formatMoney } from "@/lib/money";
 import { priceLabel } from "@/lib/helper-request";
@@ -10,7 +10,9 @@ import type { GigWithTags } from "@/lib/database.types";
 
 // ESG Gig Swipe Discovery v1.0: a list tile. Swipe right or Accept opens the shared
 // confirm step (never submits instantly); swipe left or Reject is a silent, local,
-// session-only skip. "View" opens the full-detail overlay without affecting either.
+// session-only skip. "View" (or tapping the tile itself) opens the full-detail overlay
+// without affecting either. Reject/View/Accept read left-to-right, matching the
+// left-swipe/right-swipe directions either side of View.
 export default function GigTile({
   gig,
   onView,
@@ -25,13 +27,20 @@ export default function GigTile({
   // Not a shared hook (deliberately): pointer handling is simple enough to duplicate between
   // this tile and FullGigView, and both need their own useState bound to their own render.
   const [drag, setDrag] = useState<{ x: number; y: number; startX: number; startY: number } | null>(null);
+  // A plain tap must still open View (the tile itself is clickable, not just its View
+  // button); a committed or in-progress drag must not also open it once released. A ref
+  // survives across the drag (unlike state cleared by settle()) without forcing a render.
+  const draggedPastDeadzone = useRef(false);
   function onPointerDown(e: React.PointerEvent) {
     (e.target as Element).setPointerCapture?.(e.pointerId);
+    draggedPastDeadzone.current = false;
     setDrag({ x: 0, y: 0, startX: e.clientX, startY: e.clientY });
   }
   function onPointerMove(e: React.PointerEvent) {
     if (!drag) return;
-    setDrag({ ...drag, x: e.clientX - drag.startX, y: e.clientY - drag.startY });
+    const next = { ...drag, x: e.clientX - drag.startX, y: e.clientY - drag.startY };
+    if (Math.abs(next.x) > 8 || Math.abs(next.y) > 8) draggedPastDeadzone.current = true;
+    setDrag(next);
   }
   function settle() {
     if (!drag) return;
@@ -40,18 +49,21 @@ export default function GigTile({
     if (decision === "accept") onRequestAccept();
     else if (decision === "reject") onReject();
   }
+  function tapToView() {
+    if (!draggedPastDeadzone.current) onView();
+  }
   const dragX = drag?.x ?? 0;
   const feedback = dragX > 24 ? "accept" : dragX < -24 ? "reject" : null;
 
   return (
     <div
-      onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={settle} onPointerCancel={() => setDrag(null)}
+      onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={settle} onPointerCancel={() => setDrag(null)} onClick={tapToView}
       style={{ touchAction: "pan-y", transform: drag ? `translateX(${dragX}px) rotate(${dragX / 30}deg)` : undefined }}
-      className="relative rounded-xl border border-neutral-200 bg-white p-4 shadow-sm"
+      className="relative cursor-pointer rounded-xl border border-neutral-200 bg-white p-4 shadow-sm"
     >
       {feedback && (
-        <div className={`pointer-events-none absolute top-3 rounded-full border-2 px-3 py-1 text-sm font-bold uppercase tracking-wide ${
-          feedback === "accept" ? "left-3 border-emerald-500 text-emerald-600" : "right-3 border-red-500 text-red-600"
+        <div className={`pointer-events-none absolute top-1/2 -translate-y-1/2 rounded-full border-2 bg-white px-4 py-1.5 text-base font-bold uppercase tracking-wide shadow-md ${
+          feedback === "accept" ? "right-4 border-emerald-500 text-emerald-600" : "left-4 border-red-500 text-red-600"
         }`}>
           {feedback === "accept" ? "Accept" : "Reject"}
         </div>
@@ -74,9 +86,9 @@ export default function GigTile({
         </div>
       )}
       <div className="mt-3 flex gap-2">
-        <button type="button" onClick={onView} className="flex-1 rounded-lg border border-neutral-300 bg-white py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50">View</button>
-        <button type="button" onClick={onRequestAccept} className="flex-1 rounded-lg bg-emerald-600 py-2 text-sm font-medium text-white hover:bg-emerald-700">Accept</button>
-        <button type="button" onClick={onReject} className="flex-1 rounded-lg border border-neutral-300 bg-white py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50">Reject</button>
+        <button type="button" onClick={(e) => { e?.stopPropagation(); onReject(); }} className="flex-1 rounded-lg border border-neutral-300 bg-white py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50">Reject</button>
+        <button type="button" onClick={(e) => { e?.stopPropagation(); onView(); }} className="flex-1 rounded-lg border border-neutral-300 bg-white py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50">View</button>
+        <button type="button" onClick={(e) => { e?.stopPropagation(); onRequestAccept(); }} className="flex-1 rounded-lg bg-emerald-600 py-2 text-sm font-medium text-white hover:bg-emerald-700">Accept</button>
       </div>
     </div>
   );
