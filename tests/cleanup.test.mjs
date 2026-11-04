@@ -1195,6 +1195,25 @@ test("GigTile: shows the gig's summary, and View/Accept/Reject call their own ca
   assert.deepEqual(calls, ["view", "accept", "reject"]);
 });
 
+test("GigTile: buttons read Reject | View | Accept left-to-right, matching the left-swipe/right-swipe directions either side of View", async () => {
+  const app = await component("src/components/GigTile.tsx", "GigTile", {});
+  const tree = app.render({ gig: swipeGig(), onView: () => {}, onRequestAccept: () => {}, onReject: () => {} });
+  const labels = nodes(tree, (node) => node.type === "button").map((node) => node.props.children);
+  assert.deepEqual(labels, ["Reject", "View", "Accept"]);
+});
+
+test("GigTile: tapping the tile itself (not just the View button) opens the full view, and each button stops the tap from also doing that", async () => {
+  const calls = [];
+  const app = await component("src/components/GigTile.tsx", "GigTile", {});
+  const tree = app.render({ gig: swipeGig(), onView: () => calls.push("view"), onRequestAccept: () => calls.push("accept"), onReject: () => calls.push("reject") });
+  tree.props.onClick();
+  assert.deepEqual(calls, ["view"], "a plain tap on the tile opens View, the same as the View button");
+  let stopped = false;
+  button(tree, "Accept").props.onClick({ stopPropagation: () => { stopped = true; } });
+  assert.equal(stopped, true, "a button click stops the tap from bubbling up to the tile's own onClick");
+  assert.deepEqual(calls, ["view", "accept"]);
+});
+
 test("GigTile: a right drag past the threshold calls onRequestAccept, left calls onReject, and a small drag or plain tap calls neither", async () => {
   const app = await component("src/components/GigTile.tsx", "GigTile", {});
   const calls = [];
@@ -1206,6 +1225,16 @@ test("GigTile: a right drag past the threshold calls onRequestAccept, left calls
   assert.deepEqual(calls, ["accept"]);
   drag(render, -90, 0);
   assert.deepEqual(calls, ["accept", "reject"]);
+});
+
+test("GigTile: a committed swipe never also opens View, even though a real browser still fires a click after the pointer sequence", async () => {
+  const calls = [];
+  const app = await component("src/components/GigTile.tsx", "GigTile", {});
+  const render = () => app.render({ gig: swipeGig(), onView: () => calls.push("view"), onRequestAccept: () => calls.push("accept"), onReject: () => calls.push("reject") });
+  drag(render, 90, 0);
+  assert.deepEqual(calls, ["accept"]);
+  render().props.onClick();
+  assert.deepEqual(calls, ["accept"], "the click that follows the drag does not also open View");
 });
 
 test("AcceptConfirm: fixed price just confirms the listed amount; negotiable defaults to it but can be changed, with the same offer validation as the gig page", async () => {
@@ -1376,9 +1405,20 @@ function skillsContains(profiles, filters, column, value) {
   return { data: profiles.filter((p) => wanted.every((skill) => p.skills.includes(skill))), error: null };
 }
 function helperClient(profiles, filters = []) {
-  return { from: () => ({ select: () => ({ contains: (column, value) => ({
-    then: (resolve, reject) => Promise.resolve(skillsContains(profiles, filters, column, value)).then(resolve, reject),
-  }) }) }) };
+  return { from: () => ({ select: () => ({ contains: (column, value) => {
+    // Tracked separately from `filters` (the skills=cs.[...] log some tests assert on
+    // exactly): excluding the signed-in visitor's own profile is a second, independent
+    // filter, not part of that containment-shape assertion.
+    let excludeId = null;
+    const node = {
+      neq: (neqColumn, neqValue) => { if (neqColumn === "id") excludeId = neqValue; return node; },
+      then: (resolve, reject) => Promise.resolve(skillsContains(profiles, filters, column, value)).then((result) => {
+        if (excludeId != null && !result.error) return { ...result, data: result.data.filter((p) => p.id !== excludeId) };
+        return result;
+      }).then(resolve, reject),
+    };
+    return node;
+  } }) }) };
 }
 const helperTagsMock = { withProfileTags: async (_supabase, rows) => rows, profileTagsForCategory: (profile, category) => (profile.profile_tags ?? []).map((link) => link.tag).filter((tag) => tag.service_type === category) };
 // Specializations are chosen in the same bottom sheet as on the profile page: "+ Add", then tick a row.
@@ -1407,6 +1447,36 @@ test("Find a Helper requires a category before showing tags or results", async (
   assert.equal(nodes(tree, (node) => node.type === "selection-chip" && node.props.children === "Deep Cleaning").length, 0, "no tag filter before a category is chosen");
   assert.equal(helperUsernames(tree).length, 0, "no results before a category is chosen");
   assert.equal(nodes(tree, (node) => node.props.children === "Choose a category to see nearby helpers.").length, 1);
+});
+
+test("Find a Helper never shows the signed-in visitor their own profile, even when it matches the category", async () => {
+  const profiles = [
+    { id: user.id, username: "Tester123", photo_url: null, skills: ["Cleaning"], wom_count: 0, profile_tags: [] },
+    { id: "a", username: "HelperA", photo_url: null, skills: ["Cleaning"], wom_count: 3, profile_tags: [] },
+  ];
+  const app = await component("src/app/find-helper/page.tsx", "FindHelper", {
+    client: helperClient(profiles),
+    mocks: { "@/lib/tags": { loadTagCatalog: async () => ({}), ...helperTagsMock } },
+  });
+  let tree = app.render();
+  nodes(tree, (node) => node.type === "selection-chip" && node.props.children === "Cleaning")[0].props.onClick();
+  tree = app.render(); await flush();
+  tree = app.render();
+  assert.deepEqual(helperUsernames(tree), ["HelperA"], "the signed-in visitor's own profile never appears in their own search");
+});
+
+test("Find a Helper (signed out) still shows every matching profile -- there is no own-profile exclusion without an account", async () => {
+  const profiles = [{ id: "a", username: "HelperA", photo_url: null, skills: ["Cleaning"], wom_count: 3, profile_tags: [] }];
+  const app = await component("src/app/find-helper/page.tsx", "FindHelper", {
+    client: helperClient(profiles),
+    mocks: { "@/lib/tags": { loadTagCatalog: async () => ({}), ...helperTagsMock } },
+  });
+  app.auth.user = null;
+  let tree = app.render();
+  nodes(tree, (node) => node.type === "selection-chip" && node.props.children === "Cleaning")[0].props.onClick();
+  tree = app.render(); await flush();
+  tree = app.render();
+  assert.deepEqual(helperUsernames(tree), ["HelperA"]);
 });
 
 test("Find a Helper matches on category alone when no tag filter is selected, including legacy helpers with no tags", async () => {
@@ -3076,9 +3146,17 @@ async function yardWorkHelperPage(profiles, tagLinks = [], filters = []) {
   const queries = [];
   const client = { from: (table) => ({ select: (columns) => {
     queries.push({ table, columns });
-    if (table === "public_profiles") return { contains: (column, value) => ({
-      then: (resolve, reject) => Promise.resolve(skillsContains(profiles, filters, column, value)).then(resolve, reject),
-    }) };
+    if (table === "public_profiles") return { contains: (column, value) => {
+      let excludeId = null;
+      const node = {
+        neq: (neqColumn, neqValue) => { if (neqColumn === "id") excludeId = neqValue; return node; },
+        then: (resolve, reject) => Promise.resolve(skillsContains(profiles, filters, column, value)).then((result) => {
+          if (excludeId != null && !result.error) return { ...result, data: result.data.filter((p) => p.id !== excludeId) };
+          return result;
+        }).then(resolve, reject),
+      };
+      return node;
+    } };
     return { in: async (_column, ids) => ({ data: tagLinks.filter((link) => ids.includes(link.profile_id)), error: null }) };
   } }) };
   const app = await component("src/app/find-helper/page.tsx", "FindHelper", {

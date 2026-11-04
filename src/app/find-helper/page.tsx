@@ -106,12 +106,15 @@ export default function FindHelper() {
   useEffect(() => {
     if (!category) return;
     let active = true;
-    supabase
+    let query = supabase
       .from("public_profiles")
       .select("*")
       // skills is JSONB: a JS array would be sent as the PostgreSQL array literal cs.{Yard Work}
       // (22P02 / HTTP 400), so pass the JSON text to get cs.["Yard Work"].
-      .contains("skills", JSON.stringify([category]))
+      .contains("skills", JSON.stringify([category]));
+    // Never show a signed-in helper their own profile in their own search.
+    if (user) query = query.neq("id", user.id);
+    query
       .then(async ({ data, error }) => {
         if (error) throw error;
         return withProfileTags(supabase, (data as PublicProfile[] | null) ?? []);
@@ -127,7 +130,7 @@ export default function FindHelper() {
         setLoading(false);
       });
     return () => { active = false; };
-  }, [supabase, category]);
+  }, [supabase, category, user]);
 
   // Arriving with ?category=... (back from a profile, or after signing in) restores that search,
   // and the area saved earlier in this visit (or kept across sign-in) is picked up. Both live in

@@ -87,8 +87,8 @@ export default function FullGigView({
         className="relative max-h-[90vh] w-full max-w-lg space-y-4 overflow-y-auto rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-2xl"
       >
         {feedback && (
-          <div className={`pointer-events-none absolute top-4 rounded-full px-3 py-1 text-sm font-bold uppercase tracking-wide ${
-            feedback === "accept" ? "left-4 border-2 border-emerald-500 text-emerald-600" : "right-4 border-2 border-red-500 text-red-600"
+          <div className={`pointer-events-none absolute top-1/2 z-10 -translate-y-1/2 rounded-full border-2 bg-white px-4 py-1.5 text-base font-bold uppercase tracking-wide shadow-md ${
+            feedback === "accept" ? "right-4 border-emerald-500 text-emerald-600" : "left-4 border-red-500 text-red-600"
           }`}>
             {feedback === "accept" ? "Accept" : "Reject"}
           </div>
@@ -151,8 +151,8 @@ export default function FullGigView({
         </section>
 
         <div className="flex gap-2 pt-1">
-          <button type="button" disabled={disabled} onClick={onAccept} className="flex-1 rounded-lg bg-emerald-600 py-2.5 font-medium text-white disabled:opacity-60">Accept</button>
           <button type="button" disabled={disabled} onClick={onReject} className="flex-1 rounded-lg border border-neutral-300 bg-white py-2.5 font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-60">Reject</button>
+          <button type="button" disabled={disabled} onClick={onAccept} className="flex-1 rounded-lg bg-emerald-600 py-2.5 font-medium text-white disabled:opacity-60">Accept</button>
         </div>
       </div>
     </div>
