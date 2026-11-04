@@ -51,8 +51,13 @@ export default function MapPicker({ lat, lng, onPick, radiusKm, interactive = tr
         }).addTo(map);
         tiles.on("tileerror", () => setTilesFailed(true));
         tiles.on("tileload", () => setTilesFailed(false));
-        // An emoji pin: no marker image files to resolve through the bundler.
-        const icon = L.divIcon({ className: "", html: '<div style="font-size:32px;line-height:32px;transform:translate(-50%,-100%)" aria-hidden="true">📍</div>', iconSize: [0, 0] });
+        // An emoji pin: no marker image files to resolve through the bundler. The icon's own
+        // container is 0x0 (iconSize below) so Leaflet anchors it exactly at the coordinate;
+        // this inner div must be `inline-block` so ITS width is sized to the glyph's own
+        // content instead of inheriting "auto" from that 0-width container -- a plain block
+        // div resolves to 0 width there, which makes the `-50%` of `translate(-50%,-100%)`
+        // compute to 0 and leaves the pin's tip rendered ~16px right of the real point.
+        const icon = L.divIcon({ className: "", html: '<div style="display:inline-block;font-size:32px;line-height:32px;transform:translate(-50%,-100%)" aria-hidden="true">📍</div>', iconSize: [0, 0] });
         const marker = L.marker([lat, lng], { draggable: interactive, icon, title: interactive ? "Drag to adjust the pin" : "Location pin", alt: "Location pin" }).addTo(map);
         if (interactive) {
           const settle = (point: { lat: number; lng: number }) => {
