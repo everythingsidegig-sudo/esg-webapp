@@ -87,8 +87,10 @@ export default function FullGigView({
         className="relative max-h-[90vh] w-full max-w-lg space-y-4 overflow-y-auto rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-2xl"
       >
         {feedback && (
-          <div className={`pointer-events-none absolute top-1/2 z-10 -translate-y-1/2 rounded-full border-2 bg-white px-4 py-1.5 text-base font-bold uppercase tracking-wide shadow-md ${
-            feedback === "accept" ? "right-4 border-emerald-500 text-emerald-600" : "left-4 border-red-500 text-red-600"
+          // Centered on the card itself (not pinned to an edge): it travels with the card as
+          // it's dragged, so it stays squarely in view throughout the swipe.
+          <div className={`pointer-events-none absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 bg-white px-4 py-1.5 text-base font-bold uppercase tracking-wide shadow-md ${
+            feedback === "accept" ? "border-emerald-500 text-emerald-600" : "border-red-500 text-red-600"
           }`}>
             {feedback === "accept" ? "Accept" : "Reject"}
           </div>

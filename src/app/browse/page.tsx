@@ -50,6 +50,7 @@ function BrowseInner() {
   const [confirmBusy, setConfirmBusy] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [toastIsError, setToastIsError] = useState(false);
   const [lastRejected, setLastRejected] = useState<string | null>(null);
 
   useEffect(() => {
@@ -125,9 +126,18 @@ function BrowseInner() {
       });
   }, [gigs, decided, service, selectedTagNames, radiusKm, lat, lng]);
 
+  // A fixed price has nothing left to confirm or enter, so swiping right (or tapping Accept)
+  // submits it immediately -- a confirm tap on top of the swipe would just be a second
+  // touchpoint for no decision. Negotiable still opens the offer step, since an amount
+  // genuinely needs to be entered there; that one is input, not a confirmation.
   function requestAccept(gig: GigWithTags) {
     if (!user) {
       router.push(`/auth/sign-in?next=${encodeURIComponent(safeNext(`/browse?resume=${gig.id}`))}`);
+      return;
+    }
+    if (confirmBusy) return;
+    if (gig.price_type === "fixed") {
+      void submitAccept(gig, gig.amount, null);
       return;
     }
     setConfirmError(null);
@@ -148,19 +158,34 @@ function BrowseInner() {
     setLastRejected(null);
   }
 
-  async function confirmAccept(amount: number, message: string | null) {
-    if (!confirming) return;
+  // Shared by both Accept paths: the instant fixed-price submit (no confirm step was ever
+  // open, so a failure surfaces as a toast) and the negotiable confirm step's own Confirm
+  // button (open, so a failure stays inline on the form instead -- "keep the offer entry,
+  // show precise error, prevent submit" per spec, rather than losing the typed amount).
+  async function submitAccept(gig: GigWithTags, amount: number, message: string | null) {
     setConfirmBusy(true);
     setConfirmError(null);
-    const { error: claimError } = await supabase.rpc("create_claim", { p_gig_id: confirming.id, p_offer_amount: amount, p_message: message });
+    const { error: claimError } = await supabase.rpc("create_claim", { p_gig_id: gig.id, p_offer_amount: amount, p_message: message });
     setConfirmBusy(false);
-    if (claimError) { setConfirmError(rpcActionError(claimError)); return; }
-    markGigDecided(confirming.id);
-    setDecidedIds((current) => [...current, confirming.id]);
+    if (claimError) {
+      const friendly = rpcActionError(claimError);
+      if (confirming) { setConfirmError(friendly); return; }
+      setToastIsError(true);
+      setToast(friendly);
+      return;
+    }
+    markGigDecided(gig.id);
+    setDecidedIds((current) => [...current, gig.id]);
     setViewingGig(null);
     setConfirming(null);
     setLastRejected(null);
-    setToast(`Claim sent for "${confirming.title}". The poster has been notified.`);
+    setToastIsError(false);
+    setToast(`Claim sent for "${gig.title}". The poster has been notified.`);
+  }
+
+  function confirmAccept(amount: number, message: string | null) {
+    if (!confirming) return;
+    void submitAccept(confirming, amount, message);
   }
 
   useEffect(() => {
@@ -234,7 +259,7 @@ function BrowseInner() {
       )}
 
       {toast && (
-        <div role="status" className="fixed inset-x-4 bottom-4 z-50 mx-auto max-w-md rounded-lg bg-neutral-900 px-4 py-3 text-center text-sm font-medium text-white shadow-lg">
+        <div role="status" className={`fixed inset-x-4 bottom-4 z-50 mx-auto max-w-md rounded-lg px-4 py-3 text-center text-sm font-medium text-white shadow-lg ${toastIsError ? "bg-red-600" : "bg-neutral-900"}`}>
           {toast}
         </div>
       )}

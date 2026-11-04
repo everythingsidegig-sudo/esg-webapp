@@ -2,6 +2,7 @@ import type { GigStatus } from "@/lib/database.types";
 
 const STYLES: Record<GigStatus, { label: string; className: string }> = {
   draft: { label: "Drafted", className: "bg-neutral-200 text-neutral-700" },
+  saved_non_public: { label: "Saved (Private)", className: "bg-purple-100 text-purple-800" },
   active: { label: "Active", className: "bg-yellow-100 text-yellow-800" },
   in_progress: { label: "In Progress", className: "bg-green-100 text-green-800" },
   awaiting_payment: { label: "Awaiting Payment", className: "bg-green-100 text-green-800" },

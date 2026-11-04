@@ -93,8 +93,8 @@ test("mobile app shell: full-screen viewport, installable manifest, safe-area pa
 test("My Gigs sections are derived only from existing statuses and claim states", () => {
   const gig = (status, selected_provider_id = null) => ({ status, selected_provider_id });
   assert.deepEqual(
-    ["draft", "active", "in_progress", "awaiting_payment", "completed", "incomplete", "disputed", "cancelled"].map((status) => posterSection(gig(status))),
-    ["draft", "open", "in_progress", "in_progress", "completed", "completed", "disputed", "cancelled"]);
+    ["draft", "saved_non_public", "active", "in_progress", "awaiting_payment", "completed", "incomplete", "disputed", "cancelled"].map((status) => posterSection(gig(status))),
+    ["draft", "saved_non_public", "open", "in_progress", "in_progress", "completed", "completed", "disputed", "cancelled"]);
   assert.equal(posterSection(gig("active", "h")), "accepted", "a selected helper on an active gig is 'accepted'");
   const me = "me";
   assert.equal(helperSection(gig("active"), "pending", me), "proposals");

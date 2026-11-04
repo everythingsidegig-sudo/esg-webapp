@@ -3,6 +3,9 @@
 
 export type GigStatus =
   | "draft"
+  // Saved via "Save & Find Helpers Nearby" (Find Help Profile Swiping v1.0): validated like a
+  // full submission, but not publicly listed -- only reachable by direct request.
+  | "saved_non_public"
   | "active"
   | "in_progress"
   | "awaiting_payment"
@@ -13,6 +16,7 @@ export type GigStatus =
 
 export type PriceType = "fixed" | "negotiable";
 export type ClaimState = "pending" | "selected" | "rejected" | "withdrawn";
+export type DirectRequestState = "pending" | "interested" | "declined" | "accepted" | "closed";
 export type CompletionOutcome = "complete" | "incomplete";
 export type IncompleteChoice = "partial_pay" | "no_pay";
 export type FeedbackType = "wom" | "lemon" | "skip";
@@ -121,6 +125,18 @@ export interface Claim {
   created_at: string;
 }
 
+// A gig sent via "Save & Find Helpers Nearby"'s swipe deck. One row per (gig, provider); a
+// provider can be re-sent after declining, so this is not a permanent one-row-ever pairing
+// like claims -- only pending/interested rows are kept unique per (gig_id, provider_id).
+export interface DirectRequest {
+  id: string;
+  gig_id: string;
+  poster_id: string;
+  provider_id: string;
+  state: DirectRequestState;
+  created_at: string;
+}
+
 // Readable only by the poster and the accepted helper (enforced by RLS).
 export interface GigPrivateLocation {
   gig_id: string;
@@ -186,11 +202,15 @@ export interface Database {
       notifications: { Row: Notification; Insert: Partial<Notification>; Update: Partial<Notification> };
       price_proposals: { Row: PriceProposal; Insert: Partial<PriceProposal>; Update: Partial<PriceProposal> };
       blocks: { Row: Block; Insert: Partial<Block>; Update: Partial<Block> };
+      direct_requests: { Row: DirectRequest; Insert: Partial<DirectRequest>; Update: Partial<DirectRequest> };
     };
     Functions: {
       ensure_profile: { Args: Record<string, never>; Returns: Profile };
       save_onboarding: { Args: { p_username: string; p_photo_url: string | null; p_location_text: string; p_lat: number | null; p_lng: number | null; p_skills: string[]; p_services: string[] }; Returns: Profile };
-      create_gig: { Args: { p_request_id: string; p_service_type: string; p_title: string; p_description: string; p_amount: number; p_price_type: string; p_scheduled_at: string | null; p_location_text: string; p_lat: number | null; p_lng: number | null; p_photo_url?: string | null; p_publish?: boolean; p_tag_ids?: string[]; p_private_address?: string | null; p_requested_helper_id?: string | null }; Returns: Gig };
+      create_gig: { Args: { p_request_id: string; p_service_type: string; p_title: string; p_description: string; p_amount: number; p_price_type: string; p_scheduled_at: string | null; p_location_text: string; p_lat: number | null; p_lng: number | null; p_photo_url?: string | null; p_publish?: boolean; p_tag_ids?: string[]; p_private_address?: string | null; p_requested_helper_id?: string | null; p_find_helpers?: boolean }; Returns: Gig };
+      send_direct_request: { Args: { p_gig_id: string; p_provider_id: string }; Returns: DirectRequest };
+      respond_direct_request: { Args: { p_request_id: string; p_interested: boolean }; Returns: void };
+      accept_direct_request: { Args: { p_request_id: string }; Returns: void };
       create_claim: { Args: { p_gig_id: string; p_offer_amount?: number | null; p_message?: string | null }; Returns: Claim };
       withdraw_claim: { Args: { p_gig_id: string }; Returns: void };
       delay_start: { Args: { p_gig_id: string }; Returns: void };

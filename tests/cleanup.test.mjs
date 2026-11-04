@@ -77,7 +77,8 @@ async function component(path, name, overrides = {}) {
     // resolveSwipe is pure (no storage) so the real function is exercised; the session-list
     // functions touch sessionStorage directly (not routed through this harness's storage
     // mock), so they default to no-ops here -- a test that cares overrides them explicitly.
-    "@/lib/swipe": { resolveSwipe: swipeLib.resolveSwipe, loadDecidedGigIds: () => [], markGigDecided: () => {}, unmarkGigDecided: () => {} },
+    "@/lib/swipe": { resolveSwipe: swipeLib.resolveSwipe, loadDecidedGigIds: () => [], markGigDecided: () => {}, unmarkGigDecided: () => {},
+      loadSkippedProviderIds: () => [], markProviderSkipped: () => {} },
     "@/lib/tags": {
       loadTagCatalog: async () => ({}),
       gigTagNames: (gig) => (gig.gig_tags ?? []).map((link) => link.tag.name),
@@ -112,6 +113,8 @@ async function component(path, name, overrides = {}) {
     "@/components/AcceptConfirm": { default: "accept-confirm" },
     "@/components/FullGigView": { default: "full-gig-view" },
     "@/components/GigTile": { default: "gig-tile" },
+    "@/components/ProviderCard": { default: "provider-card" },
+    "@/components/FullProviderView": { default: "full-provider-view" },
     ...overrides.mocks,
   };
   const loadedModule = { exports: {} };
@@ -1327,8 +1330,8 @@ test("Browse: Accept while signed out goes to Sign In with this exact gig rememb
   assert.deepEqual(destinations, [`/auth/sign-in?next=${encodeURIComponent("/browse?resume=g1")}`]);
 });
 
-test("Browse: Accept while signed in opens the confirm step; confirming submits the claim, shows a toast, and removes the gig", async () => {
-  const gigs = [swipeGig({ id: "g1", title: "Rake the yard", amount: 50 })];
+test("Browse: Accept on a negotiable gig while signed in opens the confirm step (an offer amount is genuine input); confirming submits the claim, shows a toast, and removes the gig", async () => {
+  const gigs = [swipeGig({ id: "g1", title: "Rake the yard", price_type: "negotiable", amount: 50 })];
   const calls = [];
   const client = {
     from: () => ({ select: () => ({ eq: () => ({ order: async () => ({ data: gigs, error: null }) }) }) }),
@@ -1340,7 +1343,7 @@ test("Browse: Accept while signed in opens the confirm step; confirming submits 
   nodes(tree, (node) => node.type === "gig-tile")[0].props.onRequestAccept();
   tree = app.render();
   const confirm = nodes(tree, (node) => node.type === "accept-confirm")[0];
-  assert.ok(confirm, "the confirm step opens for a signed-in visitor, rather than submitting instantly");
+  assert.ok(confirm, "a negotiable gig still opens the offer-entry step, rather than submitting instantly");
   assert.equal(confirm.props.gig.id, "g1");
   confirm.props.onConfirm(50, null);
   await flush();
@@ -1351,8 +1354,8 @@ test("Browse: Accept while signed in opens the confirm step; confirming submits 
   assert.match(textOf(nodes(tree, (node) => node.props.role === "status")[0]), /Claim sent.*Rake the yard/);
 });
 
-test("Browse: a claim failure keeps the confirm step open with the server's message, and the gig stays in the feed", async () => {
-  const gigs = [swipeGig({ id: "g1" })];
+test("Browse: a claim failure on a negotiable gig keeps the confirm step open with the server's message, and the gig stays in the feed", async () => {
+  const gigs = [swipeGig({ id: "g1", price_type: "negotiable" })];
   const client = {
     from: () => ({ select: () => ({ eq: () => ({ order: async () => ({ data: gigs, error: null }) }) }) }),
     rpc: async () => ({ error: { code: "P0001", message: "Gig is not open for claims" } }),
@@ -1367,6 +1370,44 @@ test("Browse: a claim failure keeps the confirm step open with the server's mess
   tree = app.render();
   const confirm = nodes(tree, (node) => node.type === "accept-confirm")[0];
   assert.equal(confirm.props.error, "Gig is not open for claims");
+  assert.equal(nodes(tree, (node) => node.type === "gig-tile").length, 1, "an unsuccessful claim never removes the gig");
+});
+
+test("Browse: Accept on a fixed-price gig while signed in submits the claim immediately -- no confirm step, since there's nothing left to confirm or enter", async () => {
+  const gigs = [swipeGig({ id: "g1", title: "Rake the yard", price_type: "fixed", amount: 50 })];
+  const calls = [];
+  const client = {
+    from: () => ({ select: () => ({ eq: () => ({ order: async () => ({ data: gigs, error: null }) }) }) }),
+    rpc: async (name, args) => { calls.push([name, args]); return { error: null }; },
+  };
+  const app = await component("src/app/browse/page.tsx", "BrowseInner", { client, mocks: { "@/components/AcceptConfirm": { default: "accept-confirm" } } });
+  app.render(); await flush();
+  let tree = app.render();
+  nodes(tree, (node) => node.type === "gig-tile")[0].props.onRequestAccept();
+  assert.equal(nodes(app.render(), (node) => node.type === "accept-confirm").length, 0, "no confirm step ever appears for a fixed-price accept");
+  await flush();
+  tree = app.render();
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [["create_claim", { p_gig_id: "g1", p_offer_amount: 50, p_message: null }]]);
+  assert.equal(nodes(tree, (node) => node.type === "gig-tile").length, 0, "the gig is removed from the discovery feed");
+  assert.match(textOf(nodes(tree, (node) => node.props.role === "status")[0]), /Claim sent.*Rake the yard/);
+});
+
+test("Browse: a claim failure on an instant fixed-price accept surfaces as an error toast, and the gig stays in the feed", async () => {
+  const gigs = [swipeGig({ id: "g1", price_type: "fixed" })];
+  const client = {
+    from: () => ({ select: () => ({ eq: () => ({ order: async () => ({ data: gigs, error: null }) }) }) }),
+    rpc: async () => ({ error: { code: "P0001", message: "Gig is not open for claims" } }),
+  };
+  const app = await component("src/app/browse/page.tsx", "BrowseInner", { client, mocks: { "@/components/AcceptConfirm": { default: "accept-confirm" } } });
+  app.render(); await flush();
+  let tree = app.render();
+  nodes(tree, (node) => node.type === "gig-tile")[0].props.onRequestAccept();
+  await flush();
+  tree = app.render();
+  assert.equal(nodes(tree, (node) => node.type === "accept-confirm").length, 0, "there was never a confirm form to show the error inline on");
+  const status = nodes(tree, (node) => node.props.role === "status")[0];
+  assert.match(textOf(status), /Gig is not open for claims/, "the server's message surfaces as a toast instead");
+  assert.match(status.props.className, /bg-red-600/, "an instant-submit failure is styled as an error toast");
   assert.equal(nodes(tree, (node) => node.type === "gig-tile").length, 1, "an unsuccessful claim never removes the gig");
 });
 
@@ -1707,8 +1748,8 @@ function fakeDb(resolve) {
 }
 
 const myGig = (id, fields = {}) => ({ id, title: id, poster_id: user.id, selected_provider_id: null, status: "active", amount: 50, location_text: "Kävlinge", scheduled_at: "2026-10-30T12:00:00Z", gig_tags: [], ...fields });
-function myGigsDb({ fail, calls = [], empty = false } = {}) {
-  const data = empty ? { posted: [], helping: [], myClaims: [], pending: [], profiles: [] } : {
+function myGigsDb({ fail, calls = [], empty = false, sentRequests = [], receivedRequests = [] } = {}) {
+  const data = empty ? { posted: [], helping: [], myClaims: [], pending: [], profiles: [], sentRequests: [], receivedRequests: [] } : {
     posted: [myGig("g-open"), myGig("g-acc", { selected_provider_id: "h1", agreed_amount: 45 }), myGig("g-prog", { status: "in_progress", selected_provider_id: "h1" }),
       myGig("g-done", { status: "completed", selected_provider_id: "h1" }), myGig("g-draft", { status: "draft" }), myGig("g-cancel", { status: "cancelled" })],
     helping: [myGig("h-pending", { poster_id: "c1" }), myGig("h-acc", { poster_id: "c1", selected_provider_id: user.id, agreed_amount: 40 }),
@@ -1717,6 +1758,7 @@ function myGigsDb({ fail, calls = [], empty = false } = {}) {
     myClaims: [{ gig_id: "h-pending", state: "pending", offer_amount: 40 }, { gig_id: "h-acc", state: "selected", offer_amount: 40 }, { gig_id: "h-lost", state: "rejected" }, { gig_id: "h-cancelled", state: "rejected" }],
     pending: [{ gig_id: "g-open" }, { gig_id: "g-open" }],
     profiles: [{ id: "h1", username: "helper1" }, { id: "c1", username: "customer1" }],
+    sentRequests, receivedRequests,
   };
   return fakeDb((query) => {
     let label, rows;
@@ -1725,8 +1767,15 @@ function myGigsDb({ fail, calls = [], empty = false } = {}) {
     else if (query.table === "claims" && query.eq.provider_id) { label = "claims-helping"; rows = data.myClaims; }
     else if (query.table === "claims") { label = "claims-pending"; rows = data.pending; }
     else if (query.table === "public_profiles") { label = "profiles"; rows = data.profiles.filter((profile) => query.in.id.includes(profile.id)); }
+    else if (query.table === "direct_requests" && query.in.gig_id) { label = "direct-requests-sent"; rows = data.sentRequests.filter((row) => query.in.gig_id.includes(row.gig_id)); }
+    else if (query.table === "direct_requests") { label = "direct-requests-received"; rows = data.receivedRequests; }
     calls.push(label);
-    return label === fail ? { data: null, error: new Error("failed") } : { data: rows, error: null };
+    if (label === fail) return { data: null, error: new Error("failed") };
+    // Every branch above sets `rows`; an unmatched query (a table/shape this fake doesn't
+    // model) is a test-setup bug, not a "no rows" result -- fail loudly instead of the
+    // `undefined === undefined` coincidence silently looking like success.
+    if (rows === undefined) throw new Error(`myGigsDb: unhandled query for table "${query.table}"`);
+    return { data: rows, error: null };
   });
 }
 async function openMyGigs(options = {}, mocks = {}) {
@@ -5441,4 +5490,330 @@ test("Gig page: the poster sees the offers that are kept, and removing the helpe
   assert.equal(nodes(started.tree, (node) => node.props["aria-label"] === "Other offers").length, 0, "once started there is no fallback to offer");
   const helperView = await openRequest({ asUser: "helper-1", gig: quietGig(), claims: selectedClaim });
   assert.equal(nodes(helperView.tree, (node) => node.props["aria-label"] === "Other offers").length, 0, "the helper never sees the others");
+});
+
+// ---- Find Help, Gig Saving & Provider Profile Swiping v1.0 ----
+const providerProfile = (fields = {}) => ({ id: "provider-1", username: "HelperOne", photo_url: null, skills: ["Cleaning"],
+  wom_count: 2, public_lat: null, public_lng: null, profile_tags: [], ...fields });
+const findHelpersGig = (fields = {}) => ({ id: "gig-1", poster_id: "poster-1", service_type: "Cleaning", title: "Assemble IKEA bed",
+  amount: 50, price_type: "fixed", status: "saved_non_public", lat: null, lng: null, scheduled_at: null, location_text: "Kävlinge", photo_url: null, ...fields });
+
+test("ProviderCard: shows the provider's summary, and Skip/View Full Profile/Send Gig call their own callbacks without any drag", async () => {
+  const calls = [];
+  const app = await component("src/components/ProviderCard.tsx", "ProviderCard", {});
+  const tree = app.render({
+    profile: providerProfile(), category: "Cleaning", distanceKm: 3.2, stats: { gigsWorkedCount: 5, womPercentage: 80 },
+    onView: () => calls.push("view"), onSendGig: () => calls.push("send"), onSkip: () => calls.push("skip"),
+  });
+  assert.match(textOf(tree), /HelperOne/);
+  assert.match(textOf(tree), /3\.2 km away/);
+  assert.match(textOf(tree), /80% WOM/);
+  assert.match(textOf(tree), /5 gigs completed/);
+  button(tree, "Skip (✕)").props.onClick();
+  button(tree, "View Full Profile").props.onClick();
+  button(tree, "Send Gig").props.onClick();
+  assert.deepEqual(calls, ["skip", "view", "send"]);
+});
+
+test("ProviderCard: buttons read Skip | View Full Profile | Send Gig left-to-right, matching the left-swipe/right-swipe directions either side", async () => {
+  const app = await component("src/components/ProviderCard.tsx", "ProviderCard", {});
+  const tree = app.render({ profile: providerProfile(), category: "Cleaning", stats: null, onView: () => {}, onSendGig: () => {}, onSkip: () => {} });
+  const labels = nodes(tree, (node) => node.type === "button").map((node) => node.props.children);
+  assert.deepEqual(labels, ["Skip (✕)", "View Full Profile", "Send Gig"]);
+});
+
+test("ProviderCard: missing distance/stats render as Not available, never fabricated", async () => {
+  const app = await component("src/components/ProviderCard.tsx", "ProviderCard", {});
+  const tree = app.render({ profile: providerProfile(), category: "Cleaning", stats: null, onView: () => {}, onSendGig: () => {}, onSkip: () => {} });
+  assert.match(textOf(tree), /Distance: Not available/);
+  assert.match(textOf(tree), /Not available WOM/);
+  assert.match(textOf(tree), /Not available gigs completed/);
+  assert.match(textOf(tree), /ID Verified: Not available/);
+  assert.match(textOf(tree), /Typical rate: Not available/);
+});
+
+test("ProviderCard: tapping the tile itself opens View, and each button stops the tap from also doing that", async () => {
+  const calls = [];
+  const app = await component("src/components/ProviderCard.tsx", "ProviderCard", {});
+  const tree = app.render({ profile: providerProfile(), category: "Cleaning", stats: null, onView: () => calls.push("view"), onSendGig: () => calls.push("send"), onSkip: () => calls.push("skip") });
+  tree.props.onClick();
+  assert.deepEqual(calls, ["view"], "a plain tap on the tile opens View, the same as the View Full Profile button");
+  let stopped = false;
+  button(tree, "Send Gig").props.onClick({ stopPropagation: () => { stopped = true; } });
+  assert.equal(stopped, true, "a button click stops the tap from bubbling up to the tile's own onClick");
+  assert.deepEqual(calls, ["view", "send"]);
+});
+
+test("ProviderCard: a right drag past the threshold calls onSendGig, left calls onSkip, and a small drag or plain tap commits neither", async () => {
+  const app = await component("src/components/ProviderCard.tsx", "ProviderCard", {});
+  const calls = [];
+  const render = () => app.render({ profile: providerProfile(), category: "Cleaning", stats: null, onView: () => {}, onSendGig: () => calls.push("send"), onSkip: () => calls.push("skip") });
+  drag(render, 0, 0);
+  drag(render, 30, 0);
+  assert.deepEqual(calls, [], "a tap and a small drag commit nothing");
+  drag(render, 90, 0);
+  assert.deepEqual(calls, ["send"]);
+  drag(render, -90, 0);
+  assert.deepEqual(calls, ["send", "skip"]);
+});
+
+test("FullProviderView: shows trust info with fallbacks, and Skip/Send Gig call their own callbacks", async () => {
+  const calls = [];
+  const app = await component("src/components/FullProviderView.tsx", "FullProviderView", {});
+  const tree = app.render({
+    profile: providerProfile({ profile_tags: [{ tag: { id: "t1", name: "Deep Cleaning", service_type: "Cleaning" } }] }),
+    category: "Cleaning", distanceKm: undefined, stats: null,
+    onClose: () => calls.push("close"), onSendGig: () => calls.push("send"), onSkip: () => calls.push("skip"),
+  });
+  assert.match(textOf(tree), /HelperOne/);
+  assert.match(textOf(tree), /Distance: Not available/);
+  assert.match(textOf(tree), /Not available WOM/);
+  assert.match(textOf(tree), /ID Verified: Not available/);
+  assert.match(textOf(tree), /Typical rate: Not available/);
+  assert.match(textOf(tree), /Deep Cleaning/);
+  button(tree, "Back").props.onClick();
+  button(tree, "Skip").props.onClick();
+  button(tree, "Send Gig").props.onClick();
+  assert.deepEqual(calls, ["close", "skip", "send"]);
+});
+
+test("FullProviderView: opening it never sends anything by itself -- only the explicit actions do", async () => {
+  const calls = [];
+  const app = await component("src/components/FullProviderView.tsx", "FullProviderView", {});
+  app.render({ profile: providerProfile(), category: "Cleaning", stats: null, onClose: () => {}, onSendGig: () => calls.push("send"), onSkip: () => calls.push("skip") });
+  assert.deepEqual(calls, [], "merely rendering the overlay calls neither callback");
+});
+
+function findHelpersClient({ gig = findHelpersGig(), profiles = [], activeRequests = [], stats = {}, rpcCalls = [], rpcError = null } = {}) {
+  return {
+    from(table) {
+      if (table === "gigs") return { select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: gig, error: null }) }) }) };
+      if (table === "public_profiles") return { select: () => ({ contains: () => ({ neq: async () => ({ data: profiles, error: null }) }) }) };
+      if (table === "direct_requests") return { select: () => ({ eq: () => ({ in: async () => ({ data: activeRequests.map((id) => ({ provider_id: id })), error: null }) }) }) };
+      throw new Error(`findHelpersClient: unhandled table "${table}"`);
+    },
+    rpc: async (name, args) => {
+      rpcCalls.push([name, args]);
+      if (name === "get_public_stats") return { data: [{ gigs_worked_count: stats[args.p_profile_id]?.gigsWorkedCount ?? 0, wom_percentage: stats[args.p_profile_id]?.womPercentage ?? null }] };
+      if (rpcError) return { error: rpcError };
+      return { error: null };
+    },
+  };
+}
+
+test("Find Helpers Nearby: fetches the saved gig and shows its summary, radius, and the first matching provider", async () => {
+  const app = await component("src/app/post/find-helpers/page.tsx", "FindHelpersInner", {
+    client: findHelpersClient({ profiles: [providerProfile()] }),
+    mocks: { "next/navigation": { useSearchParams: () => new URLSearchParams({ gig: "gig-1" }) } },
+  });
+  app.render(); await flush();
+  app.render(); await flush();
+  const tree = app.render();
+  assert.match(textOf(tree), /Assemble IKEA bed/);
+  assert.match(textOf(tree), /Cleaning/);
+  assert.match(textOf(tree), /50 CAD/);
+  assert.match(textOf(tree), /10 km radius/);
+  const card = nodes(tree, (node) => node.type === "provider-card")[0];
+  assert.ok(card, "the first matching provider is shown");
+  assert.equal(card.props.profile.username, "HelperOne");
+  assert.match(textOf(tree), /Profile 1 of 1/);
+});
+
+test("Find Helpers Nearby: a provider with an existing active request is excluded from the deck entirely (avoids re-contacting)", async () => {
+  const app = await component("src/app/post/find-helpers/page.tsx", "FindHelpersInner", {
+    client: findHelpersClient({ profiles: [providerProfile(), providerProfile({ id: "provider-2", username: "HelperTwo" })], activeRequests: ["provider-1"] }),
+    mocks: { "next/navigation": { useSearchParams: () => new URLSearchParams({ gig: "gig-1" }) } },
+  });
+  app.render(); await flush();
+  app.render(); await flush();
+  const tree = app.render();
+  const card = nodes(tree, (node) => node.type === "provider-card")[0];
+  assert.equal(card.props.profile.username, "HelperTwo", "the already-requested provider never appears, even as a later card");
+  assert.match(textOf(tree), /Profile 1 of 1/, "the excluded provider does not count toward the total either");
+});
+
+test("Find Helpers Nearby: Send Gig calls send_direct_request, shows a toast, and advances to the next profile", async () => {
+  const rpcCalls = [];
+  const app = await component("src/app/post/find-helpers/page.tsx", "FindHelpersInner", {
+    client: findHelpersClient({ profiles: [providerProfile(), providerProfile({ id: "provider-2", username: "HelperTwo" })], rpcCalls }),
+    mocks: { "next/navigation": { useSearchParams: () => new URLSearchParams({ gig: "gig-1" }) } },
+  });
+  app.render(); await flush();
+  app.render(); await flush();
+  let tree = app.render();
+  nodes(tree, (node) => node.type === "provider-card")[0].props.onSendGig();
+  await flush();
+  tree = app.render();
+  assert.deepEqual(JSON.parse(JSON.stringify(rpcCalls.filter(([name]) => name === "send_direct_request"))), [["send_direct_request", { p_gig_id: "gig-1", p_provider_id: "provider-1" }]]);
+  assert.match(textOf(nodes(tree, (node) => node.props.role === "status")[0]), /Gig sent to @HelperOne/);
+  const card = nodes(tree, (node) => node.type === "provider-card")[0];
+  assert.equal(card.props.profile.username, "HelperTwo", "the deck advances to the next provider");
+});
+
+test("Find Helpers Nearby: a failed send surfaces an error toast and does not advance the deck", async () => {
+  const app = await component("src/app/post/find-helpers/page.tsx", "FindHelpersInner", {
+    client: findHelpersClient({ profiles: [providerProfile()], rpcError: { code: "P0001", message: "That provider isn't available for requests." } }),
+    mocks: { "next/navigation": { useSearchParams: () => new URLSearchParams({ gig: "gig-1" }) } },
+  });
+  app.render(); await flush();
+  app.render(); await flush();
+  let tree = app.render();
+  nodes(tree, (node) => node.type === "provider-card")[0].props.onSendGig();
+  await flush();
+  tree = app.render();
+  const status = nodes(tree, (node) => node.props.role === "status")[0];
+  assert.match(textOf(status), /isn't available for requests/);
+  assert.match(status.props.className, /bg-red-600/);
+  assert.ok(nodes(tree, (node) => node.type === "provider-card")[0], "the gig stays open for the same provider after a failed send");
+});
+
+test("Find Helpers Nearby: Skip advances the deck locally with no RPC call", async () => {
+  const rpcCalls = [];
+  const app = await component("src/app/post/find-helpers/page.tsx", "FindHelpersInner", {
+    client: findHelpersClient({ profiles: [providerProfile(), providerProfile({ id: "provider-2", username: "HelperTwo" })], rpcCalls }),
+    mocks: { "next/navigation": { useSearchParams: () => new URLSearchParams({ gig: "gig-1" }) } },
+  });
+  app.render(); await flush();
+  app.render(); await flush();
+  let tree = app.render();
+  nodes(tree, (node) => node.type === "provider-card")[0].props.onSkip();
+  tree = app.render();
+  assert.deepEqual(rpcCalls.filter(([name]) => name !== "get_public_stats"), [], "skip never sends or responds to a request");
+  const card = nodes(tree, (node) => node.type === "provider-card")[0];
+  assert.equal(card.props.profile.username, "HelperTwo");
+});
+
+test("Find Helpers Nearby: an invalid or missing gig shows an error instead of a blank deck", async () => {
+  const app = await component("src/app/post/find-helpers/page.tsx", "FindHelpersInner", {
+    client: findHelpersClient(),
+    mocks: { "next/navigation": { useSearchParams: () => new URLSearchParams() } },
+  });
+  app.render(); await flush();
+  const tree = app.render();
+  assert.match(textOf(tree), /No gig was specified/);
+});
+
+test("Post a Gig: 'Save & Find Helpers Nearby' sends p_find_helpers and routes to the new find-helpers deck on success", async () => {
+  const calls = [];
+  const destinations = [];
+  const stored = new Map();
+  const app = await component("src/app/post/page.tsx", "PostGigForm", {
+    client: { rpc: async (name, payload) => { calls.push({ name, payload }); return { data: { id: "new-gig", status: "saved_non_public" }, error: null }; } },
+    storage: { getItem: (key) => stored.get(key) ?? null, setItem: (key, value) => stored.set(key, value), removeItem: (key) => stored.delete(key) },
+    mocks: {
+      "next/navigation": { useSearchParams: () => new URLSearchParams(), useRouter: () => ({ replace: (url) => destinations.push(url) }) },
+      "@/lib/location": { loadJourneyLocation: () => ({ text: "Kävlinge", lat: 55.79, lng: 13.12 }) },
+    },
+  });
+  let tree = app.render();
+  for (const [predicate, value] of [
+    [(node) => node.type === "input" && node.props.maxLength === 120, "Assemble IKEA bed"],
+    [(node) => node.type === "textarea", "Need help today"],
+    [(node) => node.props.type === "number", "50"],
+    [(node) => node.props.type === "datetime-local", new Date(Date.now() + 86400000).toISOString().slice(0, 16)],
+  ]) nodes(tree, predicate)[0].props.onChange({ target: { value } });
+  tree = app.render();
+  button(tree, "Save & Find Helpers Nearby").props.onClick();
+  await flush();
+  assert.equal(calls[0].name, "create_gig");
+  assert.equal(calls[0].payload.p_find_helpers, true);
+  assert.equal(calls[0].payload.p_publish, false);
+  assert.deepEqual(destinations, ["/post/find-helpers?gig=new-gig"]);
+});
+
+test("Post a Gig: 'Save & Find Helpers Nearby' is not offered for a private request to one named helper", async () => {
+  const { app } = await openRequestForm();
+  const tree = app.render();
+  assert.equal(nodes(tree, (node) => node.type === "button" && node.props.children === "Save & Find Helpers Nearby").length, 0,
+    "a private single-helper request already has its own addressed flow");
+});
+
+test("My Gigs: a saved non-public gig shows its sent requests (only a pending/interested one offers Accept), and Resume Finding Helpers / Cancel wire to the right RPCs", async () => {
+  const calls = [];
+  const gig = myGig("g-saved", { status: "saved_non_public", title: "Assemble IKEA bed" });
+  const sentRequests = [
+    { id: "dr-1", gig_id: "g-saved", poster_id: user.id, provider_id: "h1", state: "pending", created_at: "2026-01-01T00:00:00Z" },
+    { id: "dr-2", gig_id: "g-saved", poster_id: user.id, provider_id: "h2", state: "declined", created_at: "2026-01-02T00:00:00Z" },
+  ];
+  const db = fakeDb((query) => {
+    if (query.table === "gigs" && query.eq.poster_id) return { data: [gig], error: null };
+    if (query.table === "gigs" && query.or) return { data: [], error: null };
+    if (query.table === "claims") return { data: [], error: null };
+    if (query.table === "public_profiles") return { data: [{ id: "h1", username: "helper1" }, { id: "h2", username: "helper2" }].filter((p) => query.in.id.includes(p.id)), error: null };
+    if (query.table === "direct_requests" && query.in.gig_id) return { data: sentRequests, error: null };
+    if (query.table === "direct_requests") return { data: [], error: null };
+    throw new Error(`unhandled query for table "${query.table}"`);
+  });
+  db.rpc = async (name, args) => { calls.push([name, args]); return { error: null }; };
+  const app = await component("src/app/my-gigs/page.tsx", "MyGigsInner", { client: db });
+  app.render(); await flush();
+  app.render(); await flush();
+  const tree = app.render();
+  const section = sectionNamed(tree, "Saved (Private)");
+  assert.ok(section, "a saved_non_public gig gets its own My Gigs section");
+  assert.match(textOf(section), /@helper1 — Pending/);
+  assert.match(textOf(section), /@helper2 — Declined/);
+  assert.equal(nodes(section, (node) => node.type === "a" && node.props.href === "/post/find-helpers?gig=g-saved").length, 1, "Resume Finding Helpers links back to the deck for this exact gig");
+
+  button(section, "Accept").props.onClick();
+  await flush();
+  assert.deepEqual(JSON.parse(JSON.stringify(calls.filter(([name]) => name === "accept_direct_request"))), [["accept_direct_request", { p_request_id: "dr-1" }]]);
+  assert.equal(nodes(section, (node) => node.type === "button" && node.props.children === "Accept").length, 1, "only the pending request offers Accept, not the declined one");
+
+  button(section, "Cancel").props.onClick();
+  await flush();
+  assert.deepEqual(JSON.parse(JSON.stringify(calls.filter(([name]) => name === "cancel_gig"))), [["cancel_gig", { p_gig_id: "g-saved" }]]);
+});
+
+test("My Gigs: a received direct request shows under Direct Requests, and Interested/Decline call respond_direct_request", async () => {
+  const calls = [];
+  const gig = myGig("g-recv", { poster_id: "poster-9", title: "Move a couch", status: "saved_non_public" });
+  const receivedRequests = [{ id: "dr-9", gig_id: "g-recv", poster_id: "poster-9", provider_id: user.id, state: "pending", created_at: "2026-01-01T00:00:00Z", gig }];
+  const db = fakeDb((query) => {
+    if (query.table === "gigs" && query.eq.poster_id) return { data: [], error: null };
+    if (query.table === "gigs" && query.or) return { data: [], error: null };
+    if (query.table === "claims") return { data: [], error: null };
+    if (query.table === "direct_requests" && query.eq.provider_id) return { data: receivedRequests, error: null };
+    if (query.table === "public_profiles") return { data: [{ id: "poster-9", username: "poster9" }].filter((p) => query.in.id.includes(p.id)), error: null };
+    throw new Error(`unhandled query for table "${query.table}"`);
+  });
+  db.rpc = async (name, args) => { calls.push([name, args]); return { error: null }; };
+  const app = await component("src/app/my-gigs/page.tsx", "MyGigsInner", {
+    client: db, mocks: { "next/navigation": { useSearchParams: () => new URLSearchParams({ tab: "helping" }) } },
+  });
+  app.render(); await flush();
+  app.render(); await flush();
+  const tree = app.render();
+  const section = sectionNamed(tree, "Direct Requests");
+  assert.ok(section, "a received direct request gets its own section, separate from the claims-based ones");
+  assert.match(textOf(section), /Move a couch/);
+  assert.match(textOf(section), /Sent by @poster9/);
+
+  button(section, "Interested").props.onClick();
+  await flush();
+  assert.deepEqual(JSON.parse(JSON.stringify(calls.filter(([name]) => name === "respond_direct_request"))), [["respond_direct_request", { p_request_id: "dr-9", p_interested: true }]]);
+});
+
+test("My Gigs: a received direct request's Decline button calls respond_direct_request with p_interested: false", async () => {
+  const calls = [];
+  const gig = myGig("g-recv", { poster_id: "poster-9", title: "Move a couch", status: "saved_non_public" });
+  const receivedRequests = [{ id: "dr-9", gig_id: "g-recv", poster_id: "poster-9", provider_id: user.id, state: "pending", created_at: "2026-01-01T00:00:00Z", gig }];
+  const db = fakeDb((query) => {
+    if (query.table === "gigs") return { data: [], error: null };
+    if (query.table === "claims") return { data: [], error: null };
+    if (query.table === "direct_requests" && query.eq.provider_id) return { data: receivedRequests, error: null };
+    if (query.table === "public_profiles") return { data: [{ id: "poster-9", username: "poster9" }].filter((p) => query.in.id.includes(p.id)), error: null };
+    throw new Error(`unhandled query for table "${query.table}"`);
+  });
+  db.rpc = async (name, args) => { calls.push([name, args]); return { error: null }; };
+  const app = await component("src/app/my-gigs/page.tsx", "MyGigsInner", {
+    client: db, mocks: { "next/navigation": { useSearchParams: () => new URLSearchParams({ tab: "helping" }) } },
+  });
+  app.render(); await flush();
+  app.render(); await flush();
+  const tree = app.render();
+  const section = sectionNamed(tree, "Direct Requests");
+  button(section, "Decline").props.onClick();
+  await flush();
+  assert.deepEqual(JSON.parse(JSON.stringify(calls.filter(([name]) => name === "respond_direct_request"))), [["respond_direct_request", { p_request_id: "dr-9", p_interested: false }]]);
 });
