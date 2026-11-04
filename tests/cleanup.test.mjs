@@ -14,6 +14,7 @@ import * as profileSaveLib from "../src/lib/profile-save.ts";
 import * as negotiationLib from "../src/lib/negotiation.ts";
 import * as repostLib from "../src/lib/repost.ts";
 import * as startFlowLib from "../src/lib/start-flow.ts";
+import * as swipeLib from "../src/lib/swipe.ts";
 import { safeNext } from "../src/lib/journey.ts";
 
 // location.ts has extension-less relative imports (./journey, ./geocoding) that
@@ -73,6 +74,10 @@ async function component(path, name, overrides = {}) {
     // The whole real module: pages import new helpers from it as they are added.
     "@/lib/journey": journeyLib,
     "@/lib/location": { loadJourneyLocation: () => ({ text: "", lat: null, lng: null }), haversineKm, clearGeneralAreaState: () => {}, rememberAreaForAuth: () => false, hasPromptedForLocation: () => true, markLocationPrompted: () => {} },
+    // resolveSwipe is pure (no storage) so the real function is exercised; the session-list
+    // functions touch sessionStorage directly (not routed through this harness's storage
+    // mock), so they default to no-ops here -- a test that cares overrides them explicitly.
+    "@/lib/swipe": { resolveSwipe: swipeLib.resolveSwipe, loadDecidedGigIds: () => [], markGigDecided: () => {}, unmarkGigDecided: () => {} },
     "@/lib/tags": {
       loadTagCatalog: async () => ({}),
       gigTagNames: (gig) => (gig.gig_tags ?? []).map((link) => link.tag.name),
@@ -104,6 +109,9 @@ async function component(path, name, overrides = {}) {
     "@/components/MessagesLink": { default: "messages-link" },
     "@/components/StatusBadge": { default: "badge" },
     "@/components/TagChip": { default: "tag-chip" },
+    "@/components/AcceptConfirm": { default: "accept-confirm" },
+    "@/components/FullGigView": { default: "full-gig-view" },
+    "@/components/GigTile": { default: "gig-tile" },
     ...overrides.mocks,
   };
   const loadedModule = { exports: {} };
@@ -1091,14 +1099,14 @@ test("Public profile shows the pre-computed WOM% (never the raw lemon_count, whi
 test("Browse chips select one existing category and All Services restores results", async () => {
   const gigs = ["Cleaning", "Other"].map((service_type) => ({ id: service_type, service_type, title: service_type, amount: 10 }));
   const client = { from: () => ({ select: () => ({ eq: () => ({ order: async () => ({ data: gigs, error: null }) }) }) }) };
-  const app = await component("src/app/browse/page.tsx", "BrowseInner", { client });
+  const app = await component("src/app/browse/page.tsx", "BrowseInner", { client, mocks: { "@/components/GigTile": { default: "gig-tile" } } });
   app.render(); await flush();
   const chips = (tree) => nodes(tree, (node) => node.type === "selection-chip");
-  const results = (tree) => nodes(tree, (node) => node.type === "a").map((node) => node.props.href);
+  const results = (tree) => nodes(tree, (node) => node.type === "gig-tile").map((node) => node.props.gig.id);
   let tree = app.render();
   assert.equal(results(tree).length, 2);
   chips(tree)[1].props.onClick(); tree = app.render();
-  assert.deepEqual(results(tree), ["/gigs/Cleaning"]);
+  assert.deepEqual(results(tree), ["Cleaning"]);
   assert.equal(chips(tree).filter((node) => node.props.selected).length, 1);
   chips(tree)[0].props.onClick(); tree = app.render();
   assert.equal(results(tree).length, 2);
@@ -1113,7 +1121,7 @@ test("Browse: arriving directly with no area set and no prior prompt redirects o
     client,
     mocks: {
       "@/lib/location": { loadJourneyLocation: () => ({ text: "", lat: null, lng: null }), haversineKm: () => 0, hasPromptedForLocation: () => false, markLocationPrompted: () => marked.push("marked") },
-      "next/navigation": { useRouter: () => ({ replace: (url) => destinations.push(url) }) },
+      "next/navigation": { useSearchParams: () => new URLSearchParams(), useRouter: () => ({ replace: (url) => destinations.push(url) }) },
     },
   });
   fresh.render(); await flush();
@@ -1125,7 +1133,7 @@ test("Browse: arriving directly with no area set and no prior prompt redirects o
     client,
     mocks: {
       "@/lib/location": { loadJourneyLocation: () => ({ text: "", lat: null, lng: null }), haversineKm: () => 0, hasPromptedForLocation: () => true, markLocationPrompted: () => {} },
-      "next/navigation": { useRouter: () => ({ replace: (url) => alreadyPrompted.push(url) }) },
+      "next/navigation": { useSearchParams: () => new URLSearchParams(), useRouter: () => ({ replace: (url) => alreadyPrompted.push(url) }) },
     },
   });
   seen.render(); await flush();
@@ -1143,12 +1151,12 @@ test("Browse tag filter appears after choosing a category and narrows results", 
     mocks: { "@/lib/tags": {
       loadTagCatalog: async () => ({ Cleaning: [{ id: "t-deep", name: "Deep Cleaning", service_type: "Cleaning" }, { id: "t-kitchen", name: "Kitchen", service_type: "Cleaning" }] }),
       gigTagNames: (g) => (g.gig_tags ?? []).map((l) => l.tag.name),
-    } },
+    }, "@/components/GigTile": { default: "gig-tile" } },
   });
   app.render(); await flush();
   let tree = app.render();
   const chip = (label) => nodes(tree, (node) => node.type === "selection-chip" && node.props.children === label)[0];
-  const results = () => nodes(tree, (node) => node.type === "a").map((node) => node.props.href);
+  const results = () => nodes(tree, (node) => node.type === "gig-tile").map((node) => node.props.gig.id);
   assert.equal(nodes(tree, (node) => node.type === "selection-chip" && node.props.children === "Deep Cleaning").length, 0, "no tag filter before a category is chosen");
   assert.equal(results().length, 2);
   chip("Cleaning").props.onClick();
@@ -1157,7 +1165,202 @@ test("Browse tag filter appears after choosing a category and narrows results", 
   assert.equal(results().length, 2, "selecting a category alone does not yet narrow by tag");
   chip("Deep Cleaning").props.onClick();
   tree = app.render();
-  assert.deepEqual(results(), ["/gigs/g1"], "selecting a tag narrows to matching gigs");
+  assert.deepEqual(results(), ["g1"], "selecting a tag narrows to matching gigs");
+});
+
+// ---- Gig Swipe Discovery v1.0 ----
+const swipeGig = (fields = {}) => ({ id: "gig-1", poster_id: "poster-1", service_type: "Cleaning", title: "Rake the yard",
+  description: "Leaves everywhere", amount: 50, price_type: "fixed", scheduled_at: null, location_text: "Kävlinge", lat: null, lng: null, photo_url: null, gig_tags: [], ...fields });
+
+// A drag is down at an origin, then move to an offset, then release -- each a separate real
+// event with a re-render in between, same as the browser actually delivering them: the
+// handler closure from one render still has the PRE-event state, so calling two events
+// against the same unrendered node would read a stale `drag` and silently no-op the second.
+function drag(render, dx, dy = 0) {
+  render().props.onPointerDown({ clientX: 0, clientY: 0, pointerId: 1, target: {} });
+  render().props.onPointerMove({ clientX: dx, clientY: dy });
+  render().props.onPointerUp();
+}
+
+test("GigTile: shows the gig's summary, and View/Accept/Reject call their own callbacks without any drag", async () => {
+  const calls = [];
+  const app = await component("src/components/GigTile.tsx", "GigTile", {});
+  let tree = app.render({ gig: swipeGig({ price_type: "negotiable" }), onView: () => calls.push("view"), onRequestAccept: () => calls.push("accept"), onReject: () => calls.push("reject") });
+  assert.match(textOf(tree), /Rake the yard/);
+  assert.match(textOf(tree), /50 CAD/);
+  assert.match(textOf(tree), /Negotiable/);
+  button(tree, "View").props.onClick();
+  button(tree, "Accept").props.onClick();
+  button(tree, "Reject").props.onClick();
+  assert.deepEqual(calls, ["view", "accept", "reject"]);
+});
+
+test("GigTile: a right drag past the threshold calls onRequestAccept, left calls onReject, and a small drag or plain tap calls neither", async () => {
+  const app = await component("src/components/GigTile.tsx", "GigTile", {});
+  const calls = [];
+  const render = () => app.render({ gig: swipeGig(), onView: () => {}, onRequestAccept: () => calls.push("accept"), onReject: () => calls.push("reject") });
+  drag(render, 0, 0);
+  drag(render, 30, 0);
+  assert.deepEqual(calls, [], "a tap and a small drag commit nothing");
+  drag(render, 90, 0);
+  assert.deepEqual(calls, ["accept"]);
+  drag(render, -90, 0);
+  assert.deepEqual(calls, ["accept", "reject"]);
+});
+
+test("AcceptConfirm: fixed price just confirms the listed amount; negotiable defaults to it but can be changed, with the same offer validation as the gig page", async () => {
+  const app = await component("src/components/AcceptConfirm.tsx", "AcceptConfirm", {});
+  const fixedCalls = [];
+  let tree = app.render({ gig: swipeGig({ price_type: "fixed", amount: 75 }), busy: false, error: null, onConfirm: (amount, message) => fixedCalls.push([amount, message]), onCancel: () => {} });
+  assert.match(textOf(tree), /75 CAD/);
+  assert.equal(nodes(tree, (node) => node.type === "input").length, 0, "no offer field for a fixed-price gig");
+  button(tree, "Confirm").props.onClick();
+  assert.deepEqual(fixedCalls, [[75, null]]);
+
+  const negCalls = [];
+  const app2 = await component("src/components/AcceptConfirm.tsx", "AcceptConfirm", {});
+  tree = app2.render({ gig: swipeGig({ price_type: "negotiable", amount: 50 }), busy: false, error: null, onConfirm: (amount, message) => negCalls.push([amount, message]), onCancel: () => {} });
+  const input = nodes(tree, (node) => node.type === "input")[0];
+  assert.equal(input.props.value, "50", "defaults to the listed amount");
+  assert.equal(button(tree, "Confirm").props.disabled, false);
+  input.props.onChange({ target: { value: "0" } });
+  tree = app2.render({ gig: swipeGig({ price_type: "negotiable", amount: 50 }), busy: false, error: null, onConfirm: (amount, message) => negCalls.push([amount, message]), onCancel: () => {} });
+  assert.equal(button(tree, "Confirm").props.disabled, true, "an invalid offer disables Confirm, same rule as the gig page's own offer form");
+});
+
+test("AcceptConfirm: Cancel calls onCancel, and a server error is shown without losing the form", async () => {
+  const app = await component("src/components/AcceptConfirm.tsx", "AcceptConfirm", {});
+  let cancelled = false;
+  const tree = app.render({ gig: swipeGig(), busy: false, error: "Gig is not open for claims", onConfirm: () => {}, onCancel: () => { cancelled = true; } });
+  assert.match(textOf(nodes(tree, (node) => node.props.role === "alert")[0]), /Gig is not open for claims/);
+  button(tree, "Cancel").props.onClick();
+  assert.equal(cancelled, true);
+});
+
+test("FullGigView: loads and shows poster WOM/gigs-posted, falls back to Not available, and Accept/Reject/Back call the right callbacks", async () => {
+  const client = {
+    from: (table) => table === "gigs"
+      ? { select: () => ({ eq: () => ({ then: (ok) => Promise.resolve({ count: 3, error: null }).then(ok) }) }) }
+      : { select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { id: "poster-1", username: "customer1", photo_url: null, skills: [], wom_count: 2 }, error: null }) }) }) },
+    rpc: async () => ({ data: [{ wom_percentage: 80 }], error: null }),
+  };
+  const app = await component("src/components/FullGigView.tsx", "FullGigView", { client });
+  const calls = [];
+  app.render({ gig: swipeGig(), onClose: () => calls.push("close"), onAccept: () => calls.push("accept"), onReject: () => calls.push("reject") });
+  await flush();
+  const tree = app.render({ gig: swipeGig(), onClose: () => calls.push("close"), onAccept: () => calls.push("accept"), onReject: () => calls.push("reject") });
+  assert.match(textOf(tree), /@customer1/);
+  assert.match(textOf(tree), /WOM 80%/);
+  assert.match(textOf(tree), /Gigs Posted 3/);
+  button(tree, "Accept").props.onClick();
+  button(tree, "Reject").props.onClick();
+  button(tree, "Back").props.onClick();
+  assert.deepEqual(calls, ["accept", "reject", "close"]);
+
+  const noPoster = { from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: null }), then: (ok) => Promise.resolve({ count: null, error: null }).then(ok) }) }) }), rpc: async () => ({ data: [], error: null }) };
+  const app2 = await component("src/components/FullGigView.tsx", "FullGigView", { client: noPoster });
+  app2.render({ gig: swipeGig(), onClose: () => {}, onAccept: () => {}, onReject: () => {} });
+  await flush();
+  const tree2 = app2.render({ gig: swipeGig(), onClose: () => {}, onAccept: () => {}, onReject: () => {} });
+  assert.match(textOf(tree2), /Not available/);
+});
+
+test("Browse: Reject hides the gig and offers Undo; Undo brings it straight back", async () => {
+  const gigs = [swipeGig({ id: "g1", title: "First" }), swipeGig({ id: "g2", title: "Second" })];
+  const client = { from: () => ({ select: () => ({ eq: () => ({ order: async () => ({ data: gigs, error: null }) }) }) }) };
+  const app = await component("src/app/browse/page.tsx", "BrowseInner", { client });
+  app.render(); await flush();
+  let tree = app.render();
+  const tiles = () => nodes(tree, (node) => node.type === "gig-tile");
+  assert.equal(tiles().length, 2);
+  tiles()[0].props.onReject();
+  tree = app.render();
+  assert.equal(tiles().length, 1, "the rejected gig disappears immediately");
+  assert.equal(tiles()[0].props.gig.id, "g2");
+  const undo = nodes(tree, (node) => node.type === "button" && node.props.children === "Undo")[0];
+  assert.ok(undo, "an Undo control is offered");
+  undo.props.onClick();
+  tree = app.render();
+  assert.equal(tiles().length, 2, "undo restores it to the list");
+});
+
+test("Browse: Accept while signed out goes to Sign In with this exact gig remembered as next=/browse?resume=<id>", async () => {
+  const gigs = [swipeGig({ id: "g1" })];
+  const client = { from: () => ({ select: () => ({ eq: () => ({ order: async () => ({ data: gigs, error: null }) }) }) }) };
+  const destinations = [];
+  const app = await component("src/app/browse/page.tsx", "BrowseInner", {
+    client, mocks: { "next/navigation": { useSearchParams: () => new URLSearchParams(), useRouter: () => ({ push: (url) => destinations.push(url), replace: () => {} }) } },
+  });
+  app.auth.user = null;
+  app.render(); await flush();
+  const tree = app.render();
+  nodes(tree, (node) => node.type === "gig-tile")[0].props.onRequestAccept();
+  assert.deepEqual(destinations, [`/auth/sign-in?next=${encodeURIComponent("/browse?resume=g1")}`]);
+});
+
+test("Browse: Accept while signed in opens the confirm step; confirming submits the claim, shows a toast, and removes the gig", async () => {
+  const gigs = [swipeGig({ id: "g1", title: "Rake the yard", amount: 50 })];
+  const calls = [];
+  const client = {
+    from: () => ({ select: () => ({ eq: () => ({ order: async () => ({ data: gigs, error: null }) }) }) }),
+    rpc: async (name, args) => { calls.push([name, args]); return { error: null }; },
+  };
+  const app = await component("src/app/browse/page.tsx", "BrowseInner", { client, mocks: { "@/components/AcceptConfirm": { default: "accept-confirm" } } });
+  app.render(); await flush();
+  let tree = app.render();
+  nodes(tree, (node) => node.type === "gig-tile")[0].props.onRequestAccept();
+  tree = app.render();
+  const confirm = nodes(tree, (node) => node.type === "accept-confirm")[0];
+  assert.ok(confirm, "the confirm step opens for a signed-in visitor, rather than submitting instantly");
+  assert.equal(confirm.props.gig.id, "g1");
+  confirm.props.onConfirm(50, null);
+  await flush();
+  tree = app.render();
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [["create_claim", { p_gig_id: "g1", p_offer_amount: 50, p_message: null }]]);
+  assert.equal(nodes(tree, (node) => node.type === "accept-confirm").length, 0, "the confirm step closes on success");
+  assert.equal(nodes(tree, (node) => node.type === "gig-tile").length, 0, "the gig is removed from the discovery feed");
+  assert.match(textOf(nodes(tree, (node) => node.props.role === "status")[0]), /Claim sent.*Rake the yard/);
+});
+
+test("Browse: a claim failure keeps the confirm step open with the server's message, and the gig stays in the feed", async () => {
+  const gigs = [swipeGig({ id: "g1" })];
+  const client = {
+    from: () => ({ select: () => ({ eq: () => ({ order: async () => ({ data: gigs, error: null }) }) }) }),
+    rpc: async () => ({ error: { code: "P0001", message: "Gig is not open for claims" } }),
+  };
+  const app = await component("src/app/browse/page.tsx", "BrowseInner", { client, mocks: { "@/components/AcceptConfirm": { default: "accept-confirm" } } });
+  app.render(); await flush();
+  let tree = app.render();
+  nodes(tree, (node) => node.type === "gig-tile")[0].props.onRequestAccept();
+  tree = app.render();
+  nodes(tree, (node) => node.type === "accept-confirm")[0].props.onConfirm(50, null);
+  await flush();
+  tree = app.render();
+  const confirm = nodes(tree, (node) => node.type === "accept-confirm")[0];
+  assert.equal(confirm.props.error, "Gig is not open for claims");
+  assert.equal(nodes(tree, (node) => node.type === "gig-tile").length, 1, "an unsuccessful claim never removes the gig");
+});
+
+test("Browse: ?resume=<id> reopens that gig's confirm step once the list has loaded, then clears the url", async () => {
+  const gigs = [swipeGig({ id: "g1" }), swipeGig({ id: "g2" })];
+  const client = { from: () => ({ select: () => ({ eq: () => ({ order: async () => ({ data: gigs, error: null }) }) }) }) };
+  const destinations = [];
+  const app = await component("src/app/browse/page.tsx", "BrowseInner", {
+    client,
+    mocks: {
+      "next/navigation": { useSearchParams: () => new URLSearchParams({ resume: "g2" }), useRouter: () => ({ replace: (url) => destinations.push(url), push: () => {} }) },
+      "@/components/AcceptConfirm": { default: "accept-confirm" },
+    },
+  });
+  app.render(); await flush();
+  // Two more renders: one to pick up the now-loaded gigs (which is what lets the resume
+  // effect's own dependencies change and queue it), one more to see what that effect set.
+  app.render();
+  const tree = app.render();
+  const confirm = nodes(tree, (node) => node.type === "accept-confirm")[0];
+  assert.ok(confirm, "the resumed gig's confirm step opens automatically");
+  assert.equal(confirm.props.gig.id, "g2");
+  assert.ok(destinations.includes("/browse"), "the resume param is cleared from the url");
 });
 
 // public_profiles.skills is JSONB. Mirrors how postgrest-js serializes .contains() and how
@@ -2249,7 +2452,17 @@ test("Home: with an area already set, neither link is intercepted at all", async
 
 test("Browse is public but opening a gig requires authentication, preserving the gig as next", async () => {
   const browseSource = await readFile(new URL("../src/app/browse/page.tsx", import.meta.url), "utf8");
-  assert.doesNotMatch(browseSource, /AuthGuard|useAuth/, "browsing the gig list needs no session");
+  assert.doesNotMatch(browseSource, /AuthGuard/, "the whole page is never gated behind a session");
+  // Browse does use useAuth now (Gig Swipe Discovery v1.0: Accept checks sign-in state inline,
+  // the page itself stays public) -- confirmed behaviorally instead of by source text below.
+  const gigs = [{ id: "g1", service_type: "Cleaning", title: "Clean", amount: 10, price_type: "fixed" }];
+  const client = { from: () => ({ select: () => ({ eq: () => ({ order: async () => ({ data: gigs, error: null }) }) }) }) };
+  const anon = await component("src/app/browse/page.tsx", "BrowseInner", { client, mocks: { "@/components/GigTile": { default: "gig-tile" } } });
+  anon.auth.user = null; anon.auth.profile = null;
+  anon.render(); await flush();
+  const anonTree = anon.render();
+  assert.equal(nodes(anonTree, (node) => node.type === "gig-tile").length, 1, "a signed-out visitor sees the gig list, no redirect and no sign-in wall");
+
   const gigSource = await readFile(new URL("../src/app/gigs/[id]/page.tsx", import.meta.url), "utf8");
   assert.match(gigSource, /<AuthGuard><GigDetails id=\{id\} \/><\/AuthGuard>/, "gig details are wrapped in AuthGuard");
 
