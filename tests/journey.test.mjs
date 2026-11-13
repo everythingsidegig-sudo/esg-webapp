@@ -234,3 +234,17 @@ test("deleting an account closes its open gigs, and otherwise leaves delete_own_
   assert.doesNotMatch(added, /selected_provider_id is not null/, "gigs with a helper selected are not touched (they block deletion instead)");
   assert.equal(before.split("\n").filter((line) => !after.split("\n").includes(line)).length, 0, "nothing from the old body was removed");
 });
+
+// Migration 0036 restates add_proof_photo() from migration 0035 to add the poster notification.
+test("adding a proof photo notifies the poster once per batch, and otherwise add_proof_photo() is unchanged", async () => {
+  const body = (sql) => sql.match(/function public\.add_proof_photo[\s\S]+?\n\$\$;/)[0].split("\n").slice(1);
+  const before = body(await readFile(new URL("../supabase/migrations/20240101000035_proof_photos.sql", import.meta.url), "utf8"));
+  const afterSql = await readFile(new URL("../supabase/migrations/20240101000036_proof_photo_notification.sql", import.meta.url), "utf8");
+  const after = body(afterSql);
+  assert.equal(before.filter((line) => !after.includes(line)).length, 0, "nothing from the 0035 body was removed");
+  const added = after.filter((line) => !before.includes(line)).join("\n");
+  assert.match(added, /perform public\.notify\(v_gig\.poster_id, p_gig_id, 'proof_photos'/);
+  assert.match(added, /not v_existed/, "a retry of a photo that is already saved does not notify again");
+  assert.match(added, /type = 'proof_photos' and not read/, "no second update while one is still unread");
+  assert.match(afterSql, /create or replace function public\.add_proof_photo\(p_gig_id uuid, p_path text\)/);
+});

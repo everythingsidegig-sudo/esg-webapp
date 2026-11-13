@@ -4951,6 +4951,7 @@ test("A price notification opens the chat where the proposal waits; other notifi
   assert.equal(bell.notificationHref({ gig_id: "g1", type: "gig_request" }), "/gigs/g1#request");
   assert.equal(bell.notificationHref({ gig_id: "g1", type: "claim_received" }), "/gigs/g1#proposals");
   assert.equal(bell.notificationHref({ gig_id: "g1", type: "selected" }), "/gigs/g1");
+  assert.equal(bell.notificationHref({ gig_id: "g1", type: "proof_photos" }), "/gigs/g1", "photos added opens the gig, where the photos are");
 });
 
 test("Chat negotiation: on a server without migration 0021 the price controls stay hidden and the chat still works", async () => {
