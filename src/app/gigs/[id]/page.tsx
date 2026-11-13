@@ -9,7 +9,7 @@ import { createClient } from "@/lib/supabase/client";
 import { rpcActionError } from "@/lib/journey";
 import { formatMoney, offerError } from "@/lib/money";
 import { priceLabel, requestStage } from "@/lib/helper-request";
-import { canRepost, repostHref, repostPrivateHref } from "@/lib/repost";
+import { canReopenPublicly, canRepost, repostHref, repostPrivateHref } from "@/lib/repost";
 import { START_MAX_WAITS, canWithdrawBeforeStart, delayAvailable, helperRemoved, helperWithdrew, removeAvailable, silence, startView, timeUntil, waitAvailable } from "@/lib/start-flow";
 import StatusBadge from "@/components/StatusBadge";
 import ChatPanel from "@/components/ChatPanel";
@@ -789,9 +789,21 @@ function GigDetails({ id }: { id: string }) {
               : "Start a new gig with the same details. This one stays in your history as it is."}
           </p>
           {gig.requested_helper_id && <p className="text-sm text-neutral-500">This was a private request. Reposting it as a new gig makes it visible to every helper.</p>}
-          <Link href={repostHref(gig.id)} className="flex min-h-11 w-full items-center justify-center rounded-lg bg-emerald-600 px-4 py-2.5 text-center font-medium text-white hover:bg-emerald-700">
-            {helperWithdrew(gig) || helperRemoved(gig) ? "Post it publicly as a new gig" : "Repost as a new gig"}
-          </Link>
+          {canReopenPublicly(gig, user?.id, now) ? (
+            <>
+              {/* The helper left and the date is still ahead: publish this same gig, no form in between. */}
+              <button type="button" disabled={busy}
+                onClick={() => { if (window.confirm("Post this gig publicly again? Anyone nearby will be able to see it and send offers. Your earlier conversation is cleared.")) void run(() => supabase.rpc("reopen_gig_publicly", { p_gig_id: id })); }}
+                className="flex min-h-11 w-full items-center justify-center rounded-lg bg-emerald-600 px-4 py-2.5 text-center font-medium text-white hover:bg-emerald-700 disabled:opacity-60">
+                Post it publicly again
+              </button>
+              <Link href={repostHref(gig.id)} className="touch-link block text-center text-sm font-medium text-emerald-700">Change the details first</Link>
+            </>
+          ) : (
+            <Link href={repostHref(gig.id)} className="flex min-h-11 w-full items-center justify-center rounded-lg bg-emerald-600 px-4 py-2.5 text-center font-medium text-white hover:bg-emerald-700">
+              {helperWithdrew(gig) || helperRemoved(gig) ? "Post it publicly as a new gig" : "Repost as a new gig"}
+            </Link>
+          )}
           {gig.requested_helper_id && requestedName && !helperWithdrew(gig) && !helperRemoved(gig) && (
             <Link href={repostPrivateHref(gig.id, requestedName, gig.service_type)} className="flex min-h-11 w-full items-center justify-center rounded-lg border border-emerald-600 px-4 py-2.5 text-center font-medium text-emerald-700 hover:bg-emerald-50">
               Send to @{requestedName} again

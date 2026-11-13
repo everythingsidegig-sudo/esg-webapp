@@ -5238,6 +5238,41 @@ test("Nobody else gets the start decisions: not a stranger, not the poster as he
   assert.equal(buttonText(posterView.tree, "Withdraw"), undefined, "the poster cannot withdraw the helper");
 });
 
+test("After the helper leaves with the date still ahead: Post it publicly again reopens the same gig directly, after one confirmation", async () => {
+  const future = new Date(Date.now() + 3 * 86400000).toISOString();
+  const left = { status: "cancelled", selected_provider_id: null, agreed_amount: null, scheduled_at: future, helper_removed_at: "2026-10-03T10:00:00Z", requested_helper_id: null };
+  const ok = await openRequest({ asUser: "poster-1", gig: left });
+  const section = nodes(ok.tree, (node) => node.props["aria-label"] === "Repost this gig")[0];
+  assert.match(textOf(section), /You removed your helper/);
+  await buttonText(section, "Post it publicly again").props.onClick();
+  assert.deepEqual(ok.rpcs, [["reopen_gig_publicly", { p_gig_id: "gig-1" }]], "the same gig is reopened, not re-created through the form");
+  assert.equal(ok.confirms.length, 1, "one confirmation, then it is published");
+  assert.equal(nodes(section, (node) => node.type === "a").map((node) => node.props.href)[0], "/post?repost=gig-1", "changing details still goes through the form");
+
+  const declined = await openRequest({ asUser: "poster-1", gig: left, confirm: false });
+  await buttonText(nodes(declined.tree, (node) => node.props["aria-label"] === "Repost this gig")[0], "Post it publicly again").props.onClick();
+  assert.deepEqual(declined.rpcs, [], "cancelling the dialog publishes nothing");
+
+  // A date that has passed has to be re-entered, so that case keeps the form.
+  const past = await openRequest({ asUser: "poster-1", gig: { ...left, scheduled_at: "2020-01-01T10:00:00Z" } });
+  assert.equal(buttonText(past.tree, "Post it publicly again"), undefined);
+  assert.equal(textOf(nodes(nodes(past.tree, (node) => node.props["aria-label"] === "Repost this gig")[0], (node) => node.type === "a")[0]), "Post it publicly as a new gig");
+});
+
+test("canReopenPublicly: only the poster, only a cancelled gig whose helper left, only with a future date", () => {
+  const { canReopenPublicly } = repostLib;
+  const now = Date.parse("2026-11-01T00:00:00Z");
+  const gig = (fields) => ({ poster_id: "p", status: "cancelled", scheduled_at: "2026-11-05T00:00:00Z", selected_provider_id: null, helper_removed_at: "2026-10-30T00:00:00Z", helper_withdrawn_at: null, ...fields });
+  assert.equal(canReopenPublicly(gig(), "p", now), true);
+  assert.equal(canReopenPublicly(gig({ helper_removed_at: null, helper_withdrawn_at: "2026-10-30T00:00:00Z" }), "p", now), true, "a withdrawal counts too");
+  assert.equal(canReopenPublicly(gig(), "someone-else", now), false);
+  assert.equal(canReopenPublicly(gig(), null, now), false);
+  assert.equal(canReopenPublicly(gig({ helper_removed_at: null }), "p", now), false, "a plain cancelled gig is reposted, not reopened");
+  assert.equal(canReopenPublicly(gig({ status: "completed" }), "p", now), false);
+  assert.equal(canReopenPublicly(gig({ scheduled_at: "2026-10-01T00:00:00Z" }), "p", now), false, "past date");
+  assert.equal(canReopenPublicly(gig({ scheduled_at: null }), "p", now), false, "no date");
+});
+
 test("After the helper withdraws: the poster is offered to post it publicly again, the helper sees they withdrew", async () => {
   const withdrawn = { status: "cancelled", selected_provider_id: null, agreed_amount: null, start_requested_at: null, start_delayed_at: null, helper_withdrawn_at: "2026-10-03T10:00:00Z", requested_helper_id: null };
   const poster = await openRequest({ asUser: "poster-1", gig: withdrawn });
