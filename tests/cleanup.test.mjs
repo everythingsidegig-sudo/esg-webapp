@@ -2016,6 +2016,15 @@ test("Gig hub (owner, draft): Find helpers nearby moves the draft to the helper 
   assert.deepEqual(JSON.parse(JSON.stringify(rpcs[0])), ["find_helpers_for_gig", { p_gig_id: "gig-1" }]);
 });
 
+test("Gig hub: price negotiation in the chat is only open for a negotiable gig, never a fixed-price one", async () => {
+  const chatProps = async (fields, asUser) => nodes((await openGig({ poster_id: "poster-1", selected_provider_id: "helper-1", ...fields }, {}, asUser)).tree, (node) => node.type === "chat-panel")[0].props;
+  for (const asUser of ["poster-1", "helper-1"]) {
+    assert.equal((await chatProps({ price_type: "fixed" }, asUser)).negotiation.open, false, `fixed price, as ${asUser}`);
+    assert.equal((await chatProps({ price_type: "negotiable" }, asUser)).negotiation.open, true, `negotiable, as ${asUser}`);
+  }
+  assert.equal((await chatProps({ price_type: "negotiable", start_requested_at: "2026-10-01T10:00:00Z" }, "poster-1")).negotiation.open, false, "still closes once the helper asks to start");
+});
+
 test("Gig hub (owner, helper selected): shows the helper and the gig's messages section", async () => {
   const { tree } = await openGig({ poster_id: user.id, selected_provider_id: "helper-1" });
   assert.match(textOf(nodes(tree, (node) => node.type === "p" && /You posted this gig/.test(textOf(node)))[0]), /Helper: @helper1/);
@@ -4905,11 +4914,11 @@ test("Chat negotiation: the propose control is hidden when the price cannot chan
 
 test("Gig page: the chat is told when the price can be negotiated (helper chosen, start not yet requested) and who the other person is", async () => {
   const chat = (tree) => nodes(tree, (node) => node.type === "chat-panel")[0];
-  const selected = await openGig({ poster_id: user.id, selected_provider_id: "helper-1", agreed_amount: 55, amount: 50 });
+  const selected = await openGig({ poster_id: user.id, selected_provider_id: "helper-1", agreed_amount: 55, amount: 50, price_type: "negotiable" });
   assert.deepEqual({ ...chat(selected.tree).props.negotiation }, { open: true, agreedAmount: 55 }, "negotiate from the agreed price, not the original budget");
   assert.equal(chat(selected.tree).props.otherName, "@helper1");
   assert.equal(typeof chat(selected.tree).props.onPriceChanged, "function", "the page reloads the gig when a price is accepted");
-  const asHelper = await openGig({ selected_provider_id: user.id, agreed_amount: 50 });
+  const asHelper = await openGig({ selected_provider_id: user.id, agreed_amount: 50, price_type: "negotiable" });
   assert.equal(chat(asHelper.tree).props.otherName, "@customer1");
   assert.equal(chat(asHelper.tree).props.negotiation.open, true);
   const started = await openGig({ poster_id: user.id, selected_provider_id: "helper-1", start_requested_at: "2026-10-02T10:00:00Z" });

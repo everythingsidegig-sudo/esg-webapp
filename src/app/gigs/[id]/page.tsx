@@ -712,7 +712,8 @@ function GigDetails({ id }: { id: string }) {
               <h2 className="font-medium">Messages</h2>
               <ChatPanel gigId={id} currentUserId={user!.id} readOnly={gig.status !== "in_progress" && gig.status !== "active"}
                 // The price can be negotiated in the chat until the helper asks to start (rules: migration 0021).
-                negotiation={{ open: gig.status === "active" && !!gig.selected_provider_id && !gig.start_requested_at, agreedAmount: Number(gig.agreed_amount ?? gig.amount) }}
+                // Only a negotiable gig has a price to haggle over: a fixed price is take it or leave it.
+                negotiation={{ open: negotiable && gig.status === "active" && !!gig.selected_provider_id && !gig.start_requested_at, agreedAmount: Number(gig.agreed_amount ?? gig.amount) }}
                 otherName={(() => { const other = isPoster ? gig.selected_provider_id : gig.poster_id; return other && people[other] ? `@${people[other]}` : undefined; })()}
                 onPriceChanged={() => { void loadAll(); }} />
             </section>
