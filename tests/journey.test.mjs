@@ -271,3 +271,28 @@ test("get_public_lemon_comments returns only lemon comment text and date: no aut
   assert.match(sql, /grant execute on function public\.get_public_lemon_comments\(uuid\) to authenticated;/);
   assert.doesNotMatch(sql, /to anon/, "signed-in members only");
 });
+
+// Migration 0039 restates delay_start, resubmit_start and remove_helper from their current bodies.
+test("delay limit and penalty: each redefined function differs from its source only by the added rule", async () => {
+  const read = (name) => readFile(new URL(`../supabase/migrations/${name}`, import.meta.url), "utf8");
+  const fnBody = (sql, name) => sql.match(new RegExp(`function public\\.${name}\\([\\s\\S]+?\\n\\$\\$;`))[0].split("\n").slice(1);
+  const next = await read("20240101000039_delay_limit_and_penalty.sql");
+  const check = (source, name, expectedAdds) => {
+    const before = fnBody(source, name), after = fnBody(next, name);
+    const removed = before.filter((line) => !after.includes(line));
+    const added = after.filter((line) => !before.includes(line)).join("\n");
+    for (const pattern of expectedAdds) assert.match(added, pattern, `${name}: ${pattern}`);
+    return removed;
+  };
+  const delayRemoved = check(await read("20240101000022_delay_start_and_withdraw.sql"), "delay_start", [/c_max_delays constant smallint := 2/, /start_delay_count >= c_max_delays/, /start_delay_count = start_delay_count \+ 1/]);
+  assert.equal(delayRemoved.length, 1, "delay_start: only the one update line was replaced");
+  const resubmitRemoved = check(await read("20240101000031_resubmit_start.sql"), "resubmit_start", [/start_delay_count >= 2/]);
+  assert.equal(resubmitRemoved.length, 0, "resubmit_start: nothing removed");
+  const removeRemoved = check(await read("20240101000026_withdraw_exit_remove_reasons.sql"), "remove_helper", [/start_delay_count >= 2/, /'lemon'/, /lemon_count = lemon_count \+ 1/]);
+  assert.equal(removeRemoved.length, 0, "remove_helper: nothing removed");
+  const withdraw = next.match(/create function public\.withdraw_after_second_delay[\s\S]+?\n\$\$;/)[0];
+  assert.match(withdraw, /start_delay_count < 2/, "only after the second delay");
+  assert.match(withdraw, /start_delayed_at \+ c_wait/, "only once the 24 hours are up");
+  assert.match(withdraw, /'lemon'/, "and it gives the poster a lemon");
+  assert.match(next, /create trigger gigs_reset_start_delay_count before update of selected_provider_id/, "a new helper starts at zero");
+});

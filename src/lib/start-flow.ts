@@ -66,6 +66,38 @@ export function canWithdrawBeforeStart(gig: { start_requested_at: string | null;
   return now < Date.parse(gig.start_requested_at) + WAIT_MS;
 }
 
+// Migration 0039: the poster can delay a start twice at most. After the first delay the helper can ask
+// to start again; after the second they cannot, and the poster owes an answer within 24 hours or the
+// helper may withdraw and the poster gets a lemon. Removing the helper after the second delay also
+// gives the poster a lemon. The database enforces all of it; this only picks the right screen.
+export const START_MAX_DELAYS = 2;
+
+// Delays used so far. A server without migration 0039 does not send the count, so a delayed start
+// counts as one.
+export function delaysUsed(gig: { start_delay_count?: number | null; start_delayed_at?: string | null }): number {
+  return gig.start_delay_count ?? (gig.start_delayed_at ? 1 : 0);
+}
+
+export function delaysLeft(gig: { start_delay_count?: number | null; start_delayed_at?: string | null }): number {
+  return Math.max(0, START_MAX_DELAYS - delaysUsed(gig));
+}
+
+// The helper can ask to start again only while the poster has delayed once, not twice.
+export function canResubmitStart(gig: { start_delay_count?: number | null; start_delayed_at?: string | null }): boolean {
+  return !!gig.start_delayed_at && delaysUsed(gig) < START_MAX_DELAYS;
+}
+
+// After the second delay: has the poster used up the 24 hours to answer? ("final" is false before then,
+// and for a start that was delayed fewer than twice.)
+export type FinalDelay = { final: boolean; deadline: number; overdue: boolean };
+
+export function finalDelay(gig: { start_delay_count?: number | null; start_delayed_at?: string | null }, now: number): FinalDelay {
+  const delayedAt = gig.start_delayed_at ? Date.parse(gig.start_delayed_at) : NaN;
+  if (delaysUsed(gig) < START_MAX_DELAYS || Number.isNaN(delayedAt)) return { final: false, deadline: 0, overdue: false };
+  const deadline = delayedAt + WAIT_MS;
+  return { final: true, deadline, overdue: now >= deadline };
+}
+
 // Where an unanswered start request stands for the helper. "answering": the poster still has time.
 // "can-wait": 24 hours of silence passed and a wait is left. "can-withdraw": both waits are used and over.
 export type Silence = { phase: "answering" | "can-wait" | "can-withdraw"; waitsUsed: number; waitsLeft: number; nextAt: number };

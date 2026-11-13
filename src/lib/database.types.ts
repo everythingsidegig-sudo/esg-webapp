@@ -88,6 +88,8 @@ export interface Gig {
   start_approved_at: string | null;
   // Migration 0022: the poster delayed a start request / the helper withdrew while it was delayed.
   start_delayed_at: string | null;
+  // Migration 0039: how many times the poster has delayed this start (at most two) for the current helper.
+  start_delay_count?: number;
   helper_withdrawn_at: string | null;
   // Migration 0023: waits the helper took on an unanswered start request, when the latest one ends, and when the poster removed the helper.
   start_wait_count: number;

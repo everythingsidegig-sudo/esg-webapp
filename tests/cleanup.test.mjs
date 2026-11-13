@@ -5222,6 +5222,73 @@ test("start-flow helpers: who sees which step of the start request, and when the
 
 const startGig = (fields) => ({ requested_helper_id: null, selected_provider_id: "helper-1", agreed_amount: 55, start_requested_at: "2026-10-02T10:00:00Z", start_delayed_at: null, helper_withdrawn_at: null, ...fields });
 
+const helperClaim = { "helper-1": { id: "c", state: "selected", provider_id: "helper-1" } };
+
+test("start-flow: at most two delays, the helper can ask again only after the first, and the poster has 24 hours after the second", () => {
+  const { delaysUsed, delaysLeft, canResubmitStart, finalDelay, START_MAX_DELAYS } = startFlowLib;
+  assert.equal(START_MAX_DELAYS, 2);
+  assert.equal(delaysUsed({ start_delay_count: 2 }), 2);
+  assert.equal(delaysUsed({ start_delayed_at: "2026-10-01T10:00:00Z" }), 1, "a server without the count: a delayed start used one");
+  assert.equal(delaysUsed({}), 0);
+  assert.deepEqual([0, 1, 2].map((start_delay_count) => delaysLeft({ start_delay_count })), [2, 1, 0]);
+  assert.equal(canResubmitStart({ start_delayed_at: "2026-10-01T10:00:00Z", start_delay_count: 1 }), true);
+  assert.equal(canResubmitStart({ start_delayed_at: "2026-10-01T10:00:00Z", start_delay_count: 2 }), false, "not after the second delay");
+  assert.equal(canResubmitStart({ start_delayed_at: null, start_delay_count: 1 }), false, "nothing delayed, nothing to ask again");
+  const delayedAt = "2026-10-01T10:00:00Z", at = Date.parse(delayedAt);
+  assert.deepEqual(finalDelay({ start_delayed_at: delayedAt, start_delay_count: 1 }, at + 1000), { final: false, deadline: 0, overdue: false });
+  assert.deepEqual(finalDelay({ start_delayed_at: delayedAt, start_delay_count: 2 }, at + 23 * 3600000), { final: true, deadline: at + 24 * 3600000, overdue: false });
+  assert.equal(finalDelay({ start_delayed_at: delayedAt, start_delay_count: 2 }, at + 24 * 3600000).overdue, true);
+});
+
+test("Poster: the last delay warns about the lemon, and once both delays are used there is no Delay start", async () => {
+  const first = await openRequest({ asUser: "poster-1", gig: startGig({ start_delay_count: 0 }) });
+  await buttonText(first.tree, "Delay start").props.onClick();
+  assert.doesNotMatch(first.confirms[0], /last delay/, "the first delay is an ordinary confirmation");
+  const second = await openRequest({ asUser: "poster-1", gig: startGig({ start_delay_count: 1 }) });
+  await buttonText(second.tree, "Delay start").props.onClick();
+  assert.match(second.confirms[0], /last delay/);
+  assert.match(second.confirms[0], /lemon/);
+  assert.deepEqual(second.rpcs, [["delay_start", { p_gig_id: "gig-1" }]]);
+  const used = await openRequest({ asUser: "poster-1", gig: startGig({ start_delay_count: 2 }) });
+  assert.equal(buttonText(used.tree, "Delay start"), undefined, "both delays used");
+  assert.ok(buttonText(used.tree, "ACCEPT START — LET'S GO"));
+});
+
+test("Poster: after the second delay they are told to accept within 24 hours, and removing the helper warns of the lemon", async () => {
+  const afterFirst = await openRequest({ asUser: "poster-1", gig: startGig({ start_delayed_at: hoursAgo(1), start_delay_count: 1, helper_removed_at: null }) });
+  assert.doesNotMatch(textOf(afterFirst.tree), /last delay/);
+  const afterSecond = await openRequest({ asUser: "poster-1", gig: startGig({ start_delayed_at: hoursAgo(1), start_delay_count: 2, helper_removed_at: null }) });
+  assert.match(textOf(afterSecond.tree), /This was your last delay: accept the start within 2[23] h/);
+  assert.match(textOf(afterSecond.tree), /you will receive a lemon/);
+  await buttonText(afterSecond.tree, "Remove helper").props.onClick();
+  const form = afterSecond.again();
+  assert.match(textOf(nodes(form, (node) => node.props.role === "note")[0]), /removing your helper will give you a lemon/);
+  await buttonText(afterFirst.tree, "Remove helper").props.onClick();
+  assert.equal(nodes(afterFirst.again(), (node) => node.props.role === "note").length, 0, "no lemon warning after only one delay");
+});
+
+test("Helper: asks to start again only after the first delay; after the second there is a countdown, then a withdrawal that gives the poster a lemon", async () => {
+  const afterFirst = await openRequest({ asUser: "helper-1", gig: startGig({ start_delayed_at: hoursAgo(1), start_delay_count: 1 }), claims: helperClaim });
+  assert.ok(buttonText(afterFirst.tree, "Ask to start again"));
+
+  const waiting = await openRequest({ asUser: "helper-1", gig: startGig({ start_delayed_at: hoursAgo(2), start_delay_count: 2 }), claims: helperClaim });
+  assert.equal(buttonText(waiting.tree, "Ask to start again"), undefined, "not after the second delay");
+  assert.match(textOf(waiting.tree), /can't ask to start again/);
+  assert.match(textOf(waiting.tree), /The poster has 2[12] h .* left to answer/);
+  assert.equal(buttonText(waiting.tree, "Withdraw: the poster didn't answer"), undefined, "too early for the lemon withdrawal");
+  assert.ok(buttonText(waiting.tree, "Withdraw"), "the ordinary withdraw (no lemon) is always there");
+
+  const overdue = await openRequest({ asUser: "helper-1", gig: startGig({ start_delayed_at: hoursAgo(30), start_delay_count: 2 }), claims: helperClaim });
+  const lemonWithdraw = buttonText(overdue.tree, "Withdraw: the poster didn't answer");
+  assert.ok(lemonWithdraw, "24 hours have passed");
+  await lemonWithdraw.props.onClick();
+  assert.match(overdue.confirms[0], /poster will receive a lemon/);
+  assert.deepEqual(overdue.rpcs, [["withdraw_after_second_delay", { p_gig_id: "gig-1" }]]);
+  const plain = await openRequest({ asUser: "helper-1", gig: startGig({ start_delayed_at: hoursAgo(30), start_delay_count: 2 }), claims: helperClaim });
+  await buttonText(plain.tree, "Withdraw").props.onClick();
+  assert.deepEqual(plain.rpcs, [["withdraw_from_gig", { p_gig_id: "gig-1" }]], "the plain Withdraw is still the penalty-free one");
+});
+
 test("Poster: a start request can be accepted or delayed (after a confirmation), and a delayed start can still be accepted", async () => {
   const review = await openRequest({ asUser: "poster-1", gig: startGig() });
   assert.ok(buttonText(review.tree, "ACCEPT START — LET'S GO"));
