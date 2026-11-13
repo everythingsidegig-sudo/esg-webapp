@@ -114,6 +114,7 @@ async function component(path, name, overrides = {}) {
     "@/components/StatusBadge": { default: "badge" },
     "@/components/TagChip": { default: "tag-chip" },
     "@/components/ProfilePhoto": { default: "profile-photo" },
+    "@/components/OfferedServices": { default: "offered-services" },
     "@/components/SwipeCard": { default: "swipe-card" },
     "@/components/ProofPhotos": { default: "proof-photos" },
     "@/lib/proof-photos": proofPhotosLib,
@@ -6500,4 +6501,48 @@ test("Services screen: on the profile (not registration) there is no Skip, and a
   assert.match(textOf(nodes(tree, (node) => node.props.role === "note")[0]), /won't show up in helper search until it is verified/);
   const ordinary = await drillTo(sel, "Catalog", null).then(() => drillTo(sel, "Pet Care & Animal Services", "Dog Walking"));
   assert.equal(nodes(ordinary, (node) => node.props.role === "note").length, 0);
+});
+
+test("OfferedServices: shows what a member offers grouped by category and service, with Other text, and nothing when empty", async () => {
+  const app = await component("src/components/OfferedServices.tsx", "OfferedServices", {});
+  assert.equal(app.render({ rows: [] }), null, "nothing offered, nothing shown");
+  const tree = app.render({ rows: [
+    { service_id: "c12s05", subservice_id: "c12s05u02", custom_text: null },
+    { service_id: "c12s05", subservice_id: "c12s05u06", custom_text: null },
+    { service_id: "c12s05", subservice_id: null, custom_text: "Accessibility audits" },
+    { service_id: "c08s01", subservice_id: "c08s01u01", custom_text: null },
+  ] });
+  const section = nodes(tree, (node) => node.props["aria-label"] === "Services offered")[0];
+  assert.ok(section);
+  const text = textOf(section);
+  assert.match(text, /Pet Care & Animal Services.*Dog Walking: Daily walks/);
+  assert.match(text, /Technology & Electronics.*App & Software Testing: Mobile App Testing \(iOS \/ Android\) · Game Testing · Other: Accessibility audits/);
+});
+
+test("OfferedServices: licensed services are not advertised on a public profile until they are verified", async () => {
+  const app = await component("src/components/OfferedServices.tsx", "OfferedServices", {});
+  const onlyLicensed = app.render({ rows: [{ service_id: "c16s04", subservice_id: "c16s04u01", custom_text: null }] });
+  assert.equal(onlyLicensed, null, "Licensed Plumbing Work alone shows nothing");
+  const mixed = textOf(app.render({ rows: [{ service_id: "c16s04", subservice_id: "c16s04u01", custom_text: null }, { service_id: "c16s01", subservice_id: "c16s01u01", custom_text: null }] }));
+  assert.match(mixed, /Minor Plumbing Fixes/);
+  assert.doesNotMatch(mixed, /Licensed Plumbing Work/);
+});
+
+test("Public profile passes a member's offered services to the profile, ignoring rows that are not offered-service rows", async () => {
+  const calls = [];
+  const profileRow = { id: "helper-1", username: "HelperOne", photo_url: null, skills: [], wom_count: 4, profile_tags: [] };
+  const client = {
+    from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: profileRow, error: null }) }) }) }),
+    rpc: async (name, args) => {
+      calls.push([name, JSON.parse(JSON.stringify(args))]);
+      if (name === "get_public_offered_services") return { data: [{ category_id: "c08", service_id: "c08s01", subservice_id: "c08s01u01", custom_text: null }, { gigs_worked_count: 2 }], error: null };
+      return { data: [{ gigs_worked_count: 2, wom_count: 4, wom_percentage: 80 }], error: null };
+    },
+  };
+  const app = await component("src/app/profile/[username]/page.tsx", "PublicProfileView", { client });
+  app.render({ username: "HelperOne" }); await flush();
+  const tree = app.render({ username: "HelperOne" });
+  const offered = nodes(tree, (node) => node.type === "offered-services")[0];
+  assert.deepEqual(JSON.parse(JSON.stringify(offered.props.rows)), [{ category_id: "c08", service_id: "c08s01", subservice_id: "c08s01u01", custom_text: null }], "only the real row");
+  assert.deepEqual(calls.filter(([name]) => name === "get_public_offered_services"), [["get_public_offered_services", { p_profile_id: "helper-1" }]]);
 });

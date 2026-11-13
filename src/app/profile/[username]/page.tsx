@@ -4,6 +4,7 @@ import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import HelperSignInPrompt from "@/components/HelperSignInPrompt";
+import OfferedServices, { type OfferedRow } from "@/components/OfferedServices";
 import ProfilePhoto from "@/components/ProfilePhoto";
 import TagChip from "@/components/TagChip";
 import { useAuth } from "@/lib/auth-context";
@@ -29,6 +30,8 @@ function PublicProfileView({ username }: { username: string }) {
   const [womPercentage, setWomPercentage] = useState<number | null>(null);
   // Comments left with a Lemon, text and date only (no author, no gig). The Lemon COUNT stays private.
   const [lemonComments, setLemonComments] = useState<{ comment: string; created_at: string }[]>([]);
+  // What they offer (OFFER selections only -- the Services I Need Help list is never public).
+  const [offered, setOffered] = useState<OfferedRow[]>([]);
   // ESG-SAFE-001/002: Block only (Report and Call 911 are out of scope).
   const [blocking, setBlocking] = useState(false);
   const [blockError, setBlockError] = useState<string | null>(null);
@@ -62,6 +65,9 @@ function PublicProfileView({ username }: { username: string }) {
         setGigsWorked(stats?.[0]?.gigs_worked_count ?? 0);
         setWomPercentage(stats?.[0]?.wom_percentage ?? null);
         // Best effort: a failure here must not hide the rest of the profile.
+        const { data: offeredRows } = await supabase.rpc("get_public_offered_services", { p_profile_id: data.id });
+        setOffered(((offeredRows ?? []) as { service_id?: unknown; subservice_id?: unknown; custom_text?: unknown }[])
+          .filter((row): row is OfferedRow => typeof row.service_id === "string" && (row.subservice_id === null || typeof row.subservice_id === "string") && (row.custom_text === null || typeof row.custom_text === "string")));
         const { data: comments } = await supabase.rpc("get_public_lemon_comments", { p_profile_id: data.id });
         setLemonComments(((comments ?? []) as { comment?: unknown; created_at?: unknown }[])
           .filter((row): row is { comment: string; created_at: string } => typeof row.comment === "string" && typeof row.created_at === "string"));
@@ -145,6 +151,8 @@ function PublicProfileView({ username }: { username: string }) {
           </div>
         </div>
       )}
+
+      <OfferedServices rows={offered} />
 
       {profile.skills.some((s) => profileTagsForCategory(profile, s).length > 0) && (
         <div className="space-y-2">
