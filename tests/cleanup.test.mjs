@@ -5177,7 +5177,7 @@ test("Helper: waits quietly until the poster responds; when the start is delayed
   const card = nodes(delayed.tree, (node) => node.props["aria-label"] === "Start delayed")[0];
   assert.ok(card, "the choice card");
   assert.match(textOf(card), /The poster asked you to wait/);
-  assert.deepEqual(nodes(card, (node) => node.type === "button").map(textOf), ["I'll wait", "Withdraw"]);
+  assert.deepEqual(nodes(card, (node) => node.type === "button").map(textOf), ["Ask to start again", "I'll wait", "Withdraw"]);
   for (const b of nodes(card, (node) => node.type === "button")) assert.match(b.props.className, /min-h-11/);
 
   // Wait: no server call, the choices go away, and the helper is told what happens next.
@@ -5186,6 +5186,17 @@ test("Helper: waits quietly until the poster responds; when the start is delayed
   assert.deepEqual(delayed.rpcs, []);
   assert.equal(nodes(after, (node) => node.type === "button" && textOf(node) === "Withdraw").length, 0);
   assert.match(textOf(after), /notified as soon as the poster approves/);
+
+  // Ask to start again: one call, no dialog; the delay is cleared server-side so the poster is asked again.
+  const again = await openRequest({ asUser: "helper-1", gig: delayedGig, claims: { "helper-1": { id: "c", state: "selected", provider_id: "helper-1" } } });
+  await nodes(again.tree, (node) => node.type === "button" && textOf(node) === "Ask to start again")[0].props.onClick();
+  assert.deepEqual(again.rpcs, [["resubmit_start", { p_gig_id: "gig-1" }]]);
+
+  // After a resubmit the delay is gone, so the poster sees Accept start and Delay start once more.
+  const { startView } = startFlowLib;
+  const resubmitted = { status: "active", poster_id: "poster", selected_provider_id: "helper", start_requested_at: "2026-10-03T10:00:00Z", start_delayed_at: null };
+  assert.equal(startView(resubmitted, "poster"), "poster-review");
+  assert.equal(startView(resubmitted, "helper"), "helper-waiting");
 
   // Withdraw: asks first, then calls the new function.
   const leaving = await openRequest({ asUser: "helper-1", gig: delayedGig, claims: { "helper-1": { id: "c", state: "selected", provider_id: "helper-1" } } });

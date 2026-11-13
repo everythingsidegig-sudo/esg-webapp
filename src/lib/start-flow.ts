@@ -4,7 +4,8 @@ import type { GigStatus } from "./database.types";
 // what is allowed; this only picks the right screen.
 //
 //   helper asks to start ->  poster: Accept start | Delay start | Remove helper
-//   delayed              ->  poster: Accept start (when ready)   helper: wait | withdraw
+//   delayed              ->  poster: Accept start (when ready)   helper: ask to start again | wait | withdraw
+//   helper asks again    ->  (resubmit_start, migration 0031) back to the first step: poster sees Accept start | Delay start
 //   no answer            ->  helper: after 24 hours wait again (at most twice), then withdraw (the poster gets a lemon)
 //   helper withdraws / is removed -> the gig closes as cancelled; the poster can post it again for everyone (repost)
 

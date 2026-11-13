@@ -553,7 +553,9 @@ function GigDetails({ id }: { id: string }) {
                 <p role="status" className="text-sm text-yellow-900">Okay. You will be notified as soon as the poster approves the start.</p>
               ) : (
                 <>
-                  <p className="text-sm text-yellow-900">The start was delayed. You can wait for the poster to approve it, or withdraw from this gig.</p>
+                  <p className="text-sm text-yellow-900">The start was delayed. You can wait for the poster to approve it, ask to start again, or withdraw from this gig.</p>
+                  <button type="button" disabled={busy} onClick={() => void run(() => supabase.rpc("resubmit_start", { p_gig_id: id }))}
+                    className="min-h-11 w-full rounded-lg bg-emerald-600 px-4 font-medium text-white hover:bg-emerald-700 disabled:opacity-60">Ask to start again</button>
                   <div className="flex gap-3">
                     <button type="button" disabled={busy} onClick={() => setWillWait(true)}
                       className="min-h-11 flex-1 rounded-lg bg-emerald-600 px-4 font-medium text-white hover:bg-emerald-700 disabled:opacity-60">I&apos;ll wait</button>
