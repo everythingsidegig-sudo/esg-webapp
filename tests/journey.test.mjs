@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { safeNext, setupDestination, registrationError, passwordError, approximateCoordinates, gigInputError, friendlyError, rpcActionError,
+import { servicesStepHref, safeNext, setupDestination, registrationError, passwordError, approximateCoordinates, gigInputError, friendlyError, rpcActionError,
   AUTH_DESTINATION_KEY, findHelperHref, helperProfileHref, helperUsernameFromDestination, isHelperProfileDestination, rememberAuthDestination, takeAuthDestination } from "../src/lib/journey.ts";
 import { generalAreaLabel } from "../src/lib/geocoding.ts";
 import { posterSection, helperSection, helperBadge, proposalCountLabel, timeAgo } from "../src/lib/my-gigs.ts";
@@ -295,4 +295,13 @@ test("delay limit and penalty: each redefined function differs from its source o
   assert.match(withdraw, /start_delayed_at \+ c_wait/, "only once the 24 hours are up");
   assert.match(withdraw, /'lemon'/, "and it gives the poster a lemon");
   assert.match(next, /create trigger gigs_reset_start_delay_count before update of selected_provider_id/, "a new helper starts at zero");
+});
+
+test("registration continues to the optional services step, then on to where the member was heading", () => {
+  assert.equal(servicesStepHref("/post"), "/services?onboarding=1&next=%2Fpost");
+  assert.equal(servicesStepHref("https://evil.invalid"), "/services?onboarding=1&next=%2F", "an unsafe destination falls back to Home");
+  assert.equal(servicesStepHref(null), "/services?onboarding=1&next=%2F");
+  assert.equal(safeNext("/services"), "/services", "the services page can be a sign-in destination");
+  assert.equal(safeNext("/services?onboarding=1&next=%2Fpost"), "/services?onboarding=1&next=%2Fpost");
+  assert.equal(safeNext("/servicesx"), "/", "only that exact route");
 });

@@ -14,6 +14,8 @@ import * as profileSaveLib from "../src/lib/profile-save.ts";
 import * as negotiationLib from "../src/lib/negotiation.ts";
 import * as repostLib from "../src/lib/repost.ts";
 import * as proofPhotosLib from "../src/lib/proof-photos.ts";
+import * as serviceCatalogLib from "../src/lib/service-catalog.ts";
+import * as serviceSelectionLib from "../src/lib/service-selection.ts";
 import * as startFlowLib from "../src/lib/start-flow.ts";
 import * as swipeLib from "../src/lib/swipe.ts";
 import { safeNext } from "../src/lib/journey.ts";
@@ -115,6 +117,8 @@ async function component(path, name, overrides = {}) {
     "@/components/SwipeCard": { default: "swipe-card" },
     "@/components/ProofPhotos": { default: "proof-photos" },
     "@/lib/proof-photos": proofPhotosLib,
+    "@/lib/service-catalog": serviceCatalogLib,
+    "@/lib/service-selection": serviceSelectionLib,
     "@/components/AcceptConfirm": { default: "accept-confirm" },
     "@/components/FullGigView": { default: "full-gig-view" },
     "@/components/GigTile": { default: "gig-tile" },
@@ -6278,4 +6282,222 @@ test("ProofPhotos: the helper can remove their own photo, and the upload control
 
   const full = await openProofPhotos({ rows: ["a", "b", "c", "d", "e"].map((id) => proofRow(id)) });
   assert.equal(nodes(full.tree(), (node) => node.type === "input").length, 0, "five photos is the limit");
+});
+
+// ---- Services Selection screen (spec v2.0) ----
+async function openSelector({ mode = "onboarding", initial, saveResult, revisions = { OFFER: 0, NEED: 0 }, confirm = true } = {}) {
+  const saves = [], events = [], confirms = [];
+  const app = await component("src/components/ServiceSelector.tsx", "ServiceSelector", {
+    globals: { window: { addEventListener() {}, removeEventListener() {}, confirm: (message) => { confirms.push(message); return confirm; } } },
+  });
+  const props = {
+    initial: initial ?? { OFFER: serviceSelectionLib.emptySelection(), NEED: serviceSelectionLib.emptySelection() }, revisions, mode,
+    onSave: async (branch, state, revision) => { saves.push(JSON.parse(JSON.stringify([branch, serviceSelectionLib.toPayload(state), revision]))); return typeof saveResult === "function" ? saveResult(branch, saves.length) : saveResult ?? { ok: true, revision: revision + 1 }; },
+    onFinish: () => events.push("finish"), onSkip: () => events.push("skip"),
+  };
+  const render = () => app.render(props);
+  return { app, render, saves, events, confirms };
+}
+const textButton = (tree, text) => nodes(tree, (node) => node.type === "button" && textOf(node).includes(text))[0];
+const tabs = (tree) => nodes(tree, (node) => node.props.role === "tab");
+const checkboxes = (tree) => nodes(tree, (node) => node.type === "input" && node.props.type === "checkbox");
+const checkboxLabel = (tree, text) => nodes(tree, (node) => node.type === "label" && textOf(node).trim() === text)[0];
+const checkboxOf = (tree, text) => nodes(checkboxLabel(tree, text), (node) => node.type === "input")[0];
+const searchBox = (tree) => nodes(tree, (node) => node.type === "input" && node.props.type === "search")[0];
+async function drillTo(sel, categoryName, serviceName) {
+  textButton(sel.render(), categoryName).props.onClick();
+  if (serviceName) textButton(sel.render(), serviceName).props.onClick();
+  return sel.render();
+}
+
+test("Services screen: two equal-width tabs stay visible, the full catalog of 23 categories shows under each, and nothing is selected yet", async () => {
+  const sel = await openSelector();
+  let tree = sel.render();
+  const [offer, need] = tabs(tree);
+  assert.match(textOf(offer), /Services to Make Money/);
+  assert.match(textOf(need), /Services I Need Help/);
+  assert.equal(offer.props["aria-selected"], true, "Make Money is the default tab");
+  for (const side of [offer, need]) assert.match(side.props.className, /flex-1/, "equal width");
+  const categories = () => nodes(sel.render(), (node) => node.props["aria-label"] === "Categories")[0];
+  assert.equal(nodes(categories(), (node) => node.type === "li").length, 23);
+  need.props.onClick();
+  tree = sel.render();
+  assert.equal(tabs(tree)[1].props["aria-selected"], true);
+  assert.equal(nodes(categories(), (node) => node.type === "li").length, 23, "the same catalog under the other list");
+  assert.match(textOf(tabs(tree)[0]), /0 selected/);
+});
+
+test("Services screen: Category > Service > Subservice drill-down with breadcrumbs, and changing levels keeps what is checked", async () => {
+  const sel = await openSelector();
+  let tree = await drillTo(sel, "Technology & Electronics");
+  assert.match(textOf(nodes(tree, (node) => node.props["aria-label"] === "Breadcrumb")[0]), /Catalog.*Technology & Electronics/);
+  assert.ok(textButton(tree, "App & Software Testing") && textButton(tree, "Smart Home"), "the category's services");
+  tree = await drillTo(sel, "App & Software Testing");
+  assert.ok(checkboxLabel(tree, "Mobile App Testing (iOS / Android)"));
+  assert.ok(checkboxLabel(tree, "All") && checkboxLabel(tree, "Other"));
+  checkboxOf(tree, "Mobile App Testing (iOS / Android)").props.onChange({ target: { checked: true } });
+  textButton(sel.render(), "Technology & Electronics").props.onClick();   // breadcrumb back up a level
+  tree = sel.render();
+  assert.match(textOf(textButton(tree, "App & Software Testing")), /1 selected/, "the count survives changing level");
+  textButton(tree, "Catalog").props.onClick();
+  assert.match(textOf(textButton(sel.render(), "Technology & Electronics")), /1 selected/);
+  assert.match(textOf(tabs(sel.render())[0]), /1 selected/);
+});
+
+test("Services screen: the two lists are independent: a checkbox in one is never checked in the other", async () => {
+  const sel = await openSelector();
+  const tree = await drillTo(sel, "Technology & Electronics", "App & Software Testing");
+  checkboxOf(tree, "Game Testing").props.onChange({ target: { checked: true } });
+  assert.equal(checkboxOf(sel.render(), "Game Testing").props.checked, true);
+  tabs(sel.render())[1].props.onClick();
+  let need = sel.render();
+  assert.match(textOf(tabs(need)[1]), /0 selected/);
+  need = await drillTo(sel, "Technology & Electronics", "App & Software Testing");
+  assert.equal(checkboxOf(need, "Game Testing").props.checked, false, "not selected under Services I Need Help");
+  checkboxOf(need, "Bug Testing & Verification").props.onChange({ target: { checked: true } });
+  tabs(sel.render())[0].props.onClick();
+  const offer = sel.render();
+  assert.equal(checkboxOf(offer, "Game Testing").props.checked, true, "still there after switching back");
+  assert.equal(checkboxOf(offer, "Bug Testing & Verification").props.checked, false, "and the other list's choice did not leak in");
+});
+
+test("Services screen: All selects every subservice of that service, is indeterminate when partial, and leaves Other alone", async () => {
+  const sel = await openSelector();
+  let tree = await drillTo(sel, "Technology & Electronics", "App & Software Testing");
+  const total = serviceCatalogLib.SERVICE_BY_ID.get("c12s05").service.subservices.length;
+  const allBox = () => checkboxOf(sel.render(), "All");
+  allBox().props.onChange({ target: { checked: true } });
+  assert.equal(allBox().props.checked, true);
+  assert.equal(checkboxes(sel.render()).filter((box) => box.props.checked).length, total + 1, "every subservice plus All itself");
+  checkboxOf(sel.render(), "Game Testing").props.onChange({ target: { checked: false } });
+  assert.equal(allBox().props.checked, false);
+  assert.equal(allBox().props["aria-checked"], "mixed", "partial: indeterminate");
+  checkboxOf(sel.render(), "Other").props.onChange({ target: { checked: true } });
+  allBox().props.onChange({ target: { checked: false } });
+  tree = sel.render();
+  assert.equal(checkboxes(tree).filter((box) => box.props.checked).length, 1, "only Other is left checked");
+  assert.equal(checkboxOf(tree, "Other").props.checked, true, "unchecking All kept Other");
+});
+
+test("Services screen: Other reveals a text box, is required when checked, and a blank one blocks saving with a message", async () => {
+  const sel = await openSelector();
+  let tree = await drillTo(sel, "Technology & Electronics", "App & Software Testing");
+  assert.equal(nodes(tree, (node) => node.type === "input" && node.props.type === "text").length, 0, "hidden until Other is checked");
+  checkboxOf(tree, "Other").props.onChange({ target: { checked: true } });
+  tree = sel.render();
+  const text = () => nodes(sel.render(), (node) => node.type === "input" && node.props.type === "text")[0];
+  assert.ok(text(), "free text appears");
+  await textButton(sel.render(), "Save to Services to Make Money").props.onClick(); await flush();
+  assert.deepEqual(sel.saves, [], "nothing is sent while Other is blank");
+  assert.match(textOf(nodes(sel.render(), (node) => node.props.role === "alert")[0]), /Enter what you mean by Other/);
+  text().props.onChange({ target: { value: "  Accessibility audits  " } });
+  await textButton(sel.render(), "Save to Services to Make Money").props.onClick(); await flush();
+  assert.deepEqual(sel.saves, [["OFFER", { subserviceIds: [], custom: [{ service_id: "c12s05", text: "Accessibility audits" }] }, 0]], "trimmed, scoped to this service and list");
+});
+
+test("Services screen: search suggestions show the full path, selecting one opens that drill-down with the target highlighted", async () => {
+  const sel = await openSelector();
+  searchBox(sel.render()).props.onChange({ target: { value: "mobile app" } });
+  let tree = sel.render();
+  const results = nodes(tree, (node) => node.props["aria-label"] === "Search results")[0];
+  const paths = nodes(results, (node) => node.type === "button").map(textOf);
+  assert.ok(paths.includes("Technology & Electronics > App & Software Testing > Mobile App Testing (iOS / Android)›") || paths.some((p) => p.startsWith("Technology & Electronics > App & Software Testing > Mobile App Testing")));
+  nodes(results, (node) => node.type === "button" && textOf(node).includes("Mobile App Testing (iOS / Android)"))[0].props.onClick();
+  tree = sel.render();
+  assert.equal(searchBox(tree).props.value, "", "the search is cleared on opening a result");
+  assert.match(textOf(nodes(tree, (node) => node.props["aria-label"] === "Breadcrumb")[0]), /Technology & Electronics.*App & Software Testing/);
+  assert.match(checkboxLabel(tree, "Mobile App Testing (iOS / Android)").props.className, /bg-emerald-50/, "the target is highlighted");
+  assert.equal(checkboxes(tree).filter((box) => box.props.checked).length, 0, "searching selected nothing and changed nothing");
+});
+
+test("Services screen: no matches says so, offers to clear, and each list keeps its own search", async () => {
+  const sel = await openSelector();
+  searchBox(sel.render()).props.onChange({ target: { value: "zzzz" } });
+  let tree = sel.render();
+  assert.match(textOf(tree), /No matching services/);
+  assert.ok(textButton(tree, "Clear search") && textButton(tree, "Back to the catalog"));
+  tabs(tree)[1].props.onClick();
+  assert.equal(searchBox(sel.render()).props.value, "", "the other list's search box is its own");
+  tabs(sel.render())[0].props.onClick();
+  assert.equal(searchBox(sel.render()).props.value, "zzzz", "and the first list kept its query");
+  textButton(sel.render(), "Clear search").props.onClick();
+  assert.equal(nodes(sel.render(), (node) => node.props["aria-label"] === "Categories").length, 1, "back to the catalog");
+});
+
+test("Services screen: saving writes only the active list, with its revision; failing keeps every edit and offers Retry", async () => {
+  let attempt = 0;
+  const sel = await openSelector({ revisions: { OFFER: 4, NEED: 9 }, saveResult: () => (++attempt === 1 ? { ok: false, error: "Couldn't save your services. Check your connection and try again." } : { ok: true, revision: 5 }) });
+  const tree = await drillTo(sel, "Pet Care & Animal Services", "Dog Walking");
+  checkboxOf(tree, "Daily walks").props.onChange({ target: { checked: true } });
+  assert.match(textOf(tabs(sel.render())[0]), /unsaved/);
+  await textButton(sel.render(), "Save to Services to Make Money").props.onClick(); await flush();
+  assert.deepEqual(sel.saves[0], ["OFFER", { subserviceIds: ["c08s01u01"], custom: [] }, 4], "only OFFER, with the revision it was loaded at");
+  assert.match(textOf(nodes(sel.render(), (node) => node.props.role === "alert")[0]), /Couldn't save your services/);
+  assert.equal(checkboxOf(sel.render(), "Daily walks").props.checked, true, "the edit is kept after a failed save");
+  await textButton(sel.render(), "Retry").props.onClick(); await flush();
+  assert.equal(sel.saves.length, 2, "retry sends it again");
+  assert.match(textOf(nodes(sel.render(), (node) => node.props.role === "status")[0]), /Saved Services to Make Money/);
+  assert.doesNotMatch(textOf(tabs(sel.render())[0]), /unsaved/);
+  checkboxOf(sel.render(), "Group walks").props.onChange({ target: { checked: true } });
+  await textButton(sel.render(), "Save to Services to Make Money").props.onClick(); await flush();
+  assert.equal(sel.saves[2][2], 5, "the next save carries the revision the last one returned");
+});
+
+test("Services screen: Review shows the two lists separately grouped by category and service, and Save & Complete saves both then finishes", async () => {
+  const sel = await openSelector();
+  let tree = await drillTo(sel, "Technology & Electronics", "App & Software Testing");
+  checkboxOf(tree, "Game Testing").props.onChange({ target: { checked: true } });
+  tabs(sel.render())[1].props.onClick();
+  tree = await drillTo(sel, "Home Cleaning & Housekeeping", "General Cleaning");
+  checkboxOf(tree, "Deep cleaning").props.onChange({ target: { checked: true } });
+  textButton(sel.render(), "Review").props.onClick();
+  tree = sel.render();
+  const offer = nodes(tree, (node) => node.props["aria-label"] === "Services to Make Money")[0];
+  const need = nodes(tree, (node) => node.props["aria-label"] === "Services I Need Help")[0];
+  assert.match(textOf(offer), /Technology & Electronics.*App & Software Testing.*Game Testing/);
+  assert.doesNotMatch(textOf(offer), /Deep cleaning/);
+  assert.match(textOf(need), /Home Cleaning & Housekeeping.*General Cleaning.*Deep cleaning/);
+  assert.ok(nodes(offer, (node) => node.type === "button" && textOf(node) === "Edit" && !node.props["aria-label"]).length === 1, "an Edit link for the list");
+  const editCategory = nodes(offer, (node) => node.props["aria-label"] === "Edit Technology & Electronics in Services to Make Money")[0];
+  assert.ok(editCategory, "and one for each category");
+  editCategory.props.onClick();
+  assert.match(textOf(nodes(sel.render(), (node) => node.props["aria-label"] === "Breadcrumb")[0]), /Technology & Electronics/, "Edit opens that category in that list");
+  assert.equal(tabs(sel.render())[0].props["aria-selected"], true);
+  textButton(sel.render(), "Review").props.onClick();
+  tree = sel.render();
+  await textButton(tree, "Save & Complete Registration").props.onClick(); await flush();
+  assert.deepEqual(sel.saves.map((save) => save[0]), ["OFFER", "NEED"], "both lists saved, each on its own");
+  assert.deepEqual(sel.events, ["finish"]);
+});
+
+test("Services screen: registration can be completed with nothing chosen, and Skip leaves (after a warning if there are unsaved edits)", async () => {
+  const empty = await openSelector();
+  textButton(empty.render(), "Review").props.onClick();
+  await textButton(empty.render(), "Save & Complete Registration").props.onClick(); await flush();
+  assert.deepEqual(empty.saves, [], "nothing to save, nothing sent");
+  assert.deepEqual(empty.events, ["finish"], "no services is allowed");
+
+  const skip = await openSelector();
+  textButton(skip.render(), "Skip for now").props.onClick();
+  assert.deepEqual([skip.events, skip.confirms], [["skip"], []], "no edits, no warning");
+  const tree = await drillTo(skip, "Pet Care & Animal Services", "Dog Walking");
+  checkboxOf(tree, "Daily walks").props.onChange({ target: { checked: true } });
+  const refused = await openSelector({ confirm: false });
+  const t2 = await drillTo(refused, "Pet Care & Animal Services", "Dog Walking");
+  checkboxOf(t2, "Daily walks").props.onChange({ target: { checked: true } });
+  textButton(refused.render(), "Skip for now").props.onClick();
+  assert.deepEqual(refused.events, [], "declining the warning stays on the page");
+  assert.match(refused.confirms[0], /without saving/);
+});
+
+test("Services screen: on the profile (not registration) there is no Skip, and a licensed service says it is not searchable yet", async () => {
+  const sel = await openSelector({ mode: "profile" });
+  assert.equal(textButton(sel.render(), "Skip for now"), undefined);
+  textButton(sel.render(), "Review").props.onClick();
+  assert.ok(textButton(sel.render(), "Save changes"));
+  textButton(sel.render(), "Keep editing").props.onClick();
+  const tree = await drillTo(sel, "Plumbing, Electrical & HVAC", "Licensed Plumbing Work");
+  assert.match(textOf(nodes(tree, (node) => node.props.role === "note")[0]), /won't show up in helper search until it is verified/);
+  const ordinary = await drillTo(sel, "Catalog", null).then(() => drillTo(sel, "Pet Care & Animal Services", "Dog Walking"));
+  assert.equal(nodes(ordinary, (node) => node.props.role === "note").length, 0);
 });

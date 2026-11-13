@@ -7,11 +7,16 @@ export function safeNext(value: string | null | undefined): string {
     if (/[\\\u0000-\u001f\u007f]/.test(decoded) || decoded.startsWith("//")) return "/";
     const url = new URL(value, "https://esg.invalid");
     if (url.origin !== "https://esg.invalid") return "/";
-    if (!/^\/(?:post|browse|location|my-gigs|profile|need-help|messages|find-helper)?$/.test(url.pathname)
+    if (!/^\/(?:post|browse|location|my-gigs|profile|need-help|messages|find-helper|services)?$/.test(url.pathname)
         && !/^\/gigs\/[0-9a-f-]{36}$/i.test(url.pathname)
         && !/^\/profile\/[A-Za-z0-9_]+$/.test(url.pathname)) return "/";
     return url.pathname + url.search + url.hash;
   } catch { return "/"; }
+}
+
+// After the profile is set up, registration continues to the optional services step, then on to `next`.
+export function servicesStepHref(next: string | null | undefined) {
+  return `/services?onboarding=1&next=${encodeURIComponent(safeNext(next))}`;
 }
 
 export function setupDestination(next: string | null | undefined) {
