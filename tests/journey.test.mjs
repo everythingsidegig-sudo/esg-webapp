@@ -221,3 +221,16 @@ test("only helper-profile destinations are ever stored, and tampered storage is 
   assert.equal(rememberAuthDestination("/profile/HelperOne", broken, now), false, "unavailable storage never throws");
   assert.equal(takeAuthDestination(broken, now), null);
 });
+
+// Deleting an account cancels the open gigs it posted (migration 0034). That migration restates
+// delete_own_account() from its previous body, so guard against it drifting from that body.
+test("deleting an account closes its open gigs, and otherwise leaves delete_own_account() as it was", async () => {
+  const body = (sql) => sql.match(/create or replace function public\.delete_own_account\(\)[\s\S]+?\n\$\$;/)[0];
+  const before = body(await readFile(new URL("../supabase/migrations/20240101000019_helper_requests.sql", import.meta.url), "utf8"));
+  const after = body(await readFile(new URL("../supabase/migrations/20240101000034_close_deleted_accounts_open_gigs.sql", import.meta.url), "utf8"));
+  const added = after.split("\n").filter((line) => !before.split("\n").includes(line)).join("\n");
+  assert.match(added, /update public\.gigs set status = 'cancelled'/);
+  assert.match(added, /poster_id = v_uid and status in \('active', 'saved_non_public'\) and selected_provider_id is null/);
+  assert.doesNotMatch(added, /selected_provider_id is not null/, "gigs with a helper selected are not touched (they block deletion instead)");
+  assert.equal(before.split("\n").filter((line) => !after.split("\n").includes(line)).length, 0, "nothing from the old body was removed");
+});
