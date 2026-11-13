@@ -27,8 +27,9 @@ interface CreationRequest {
   p_photo_url: string | null; p_publish: boolean; p_tag_ids: string[]; p_private_address?: string | null;
   // Set only for a private request to one helper (/post?helper=<username>); absent for a public gig.
   p_requested_helper_id?: string | null;
-  // Find Help Profile Swiping v1.0: "Save & Find Helpers Nearby" saves the gig non-public instead
-  // of publishing it; absent (or false) for every other submission.
+  // Saves the gig non-public (for the helper swipe deck) instead of publishing it. The form no longer
+  // sets it -- a saved draft offers "Find helpers nearby" instead -- but a retained request from before
+  // that change can still carry it, so it stays here to be re-sent unchanged.
   p_find_helpers?: boolean;
 }
 // The helper a private request is addressed to, as the page knows them.
@@ -251,12 +252,11 @@ function PostGigForm() {
       : current.length >= MAX_GIG_TAGS ? current : [...current, id]);
   }
 
-  async function submit(mode: "draft" | "publish" | "find_helpers") {
+  async function submit(mode: "draft" | "publish") {
     if (pending.current) return;
     setError(null);
     if (lookup.state === "loading" || lookup.state === "error") return;
-    // Save & Find Helpers Nearby validates like a full submission (same as Post Gig), not like a
-    // draft -- only Draft is allowed to be incomplete.
+    // Only a draft is allowed to be incomplete.
     const requiresFullSubmission = mode !== "draft";
     if (!retained) {
       const invalid = gigInputError(title, description, amount, scheduledAt, locationText, requiresFullSubmission);
@@ -284,8 +284,7 @@ function PostGigForm() {
           p_location_text: locationText.trim(), p_lat: coords.lat, p_lng: coords.lng,
           p_photo_url: photoUrl, p_publish: mode === "publish", p_tag_ids: tagIds,
           p_private_address: privateAddress.trim() || null,
-          ...(requestedHelper ? { p_requested_helper_id: requestedHelper.id } : {}),
-          ...(mode === "find_helpers" ? { p_find_helpers: true } : {}) };
+          ...(requestedHelper ? { p_requested_helper_id: requestedHelper.id } : {}) };
         // Preserve the request before sending. Ambiguous network failures reuse this ID/payload.
         try { sessionStorage.setItem(key, JSON.stringify(request)); } catch {
           setError("Browser storage is unavailable. Enable site storage before posting so retries stay safe."); return;
@@ -445,13 +444,6 @@ function PostGigForm() {
     {error && <p role="alert" className="text-red-600">{error}</p>}
     <div className="flex flex-wrap gap-3">
       {!retained && <button onClick={() => void submit("draft")} disabled={submitting} className="flex-1 rounded-lg border py-2.5 disabled:opacity-60">Save as Draft</button>}
-      {/* Find Help Profile Swiping v1.0: only for an ordinary public gig -- a private request to
-          one named helper (/post?helper=<username>) already has its own addressed flow. */}
-      {!retained && !requestedHelper && (
-        <button onClick={() => void submit("find_helpers")} disabled={submitting} className="flex-1 rounded-lg border border-emerald-600 py-2.5 text-emerald-700 disabled:opacity-60">
-          {submitting ? "Saving…" : "Save & Find Helpers Nearby"}
-        </button>
-      )}
       <button onClick={() => void submit("publish")} disabled={submitting} className="flex-1 rounded-lg bg-emerald-600 py-2.5 text-white disabled:opacity-60">{submitting ? (requestedHelper ? "Sending…" : "Posting…") : retained ? "Retry previous request" : requestedHelper ? "Send request" : "Post Gig"}</button>
     </div>
   </div>;

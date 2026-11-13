@@ -5834,10 +5834,20 @@ test("Find Helpers Nearby: an invalid or missing gig shows an error instead of a
   assert.match(textOf(tree), /No gig was specified/);
 });
 
-test("Post a Gig: 'Save & Find Helpers Nearby' sends p_find_helpers and routes to the new find-helpers deck on success", async () => {
-  const calls = [];
-  const destinations = [];
-  const stored = new Map();
+test("Post a Gig: the form offers only Save as Draft and Post Gig; finding helpers starts from the saved draft", async () => {
+  const { app } = await openRequestForm({ search: "" });
+  const labels = nodes(app.render(), (node) => node.type === "button").map(textOf);
+  assert.ok(labels.includes("Save as Draft") && labels.includes("Post Gig"));
+  assert.equal(labels.some((label) => /Find Helpers/i.test(label)), false, "no Save & Find Helpers Nearby on the posting form");
+  const privateForm = await openRequestForm();
+  assert.equal(nodes(privateForm.app.render(), (node) => node.type === "button").map(textOf).some((label) => /Find Helpers/i.test(label)), false);
+});
+
+test("Post a Gig: a retained find-helpers request from before the change is still re-sent unchanged and still opens the helper deck", async () => {
+  const calls = [], destinations = [];
+  const request = { p_request_id: "old-1", p_service_type: "Cleaning", p_title: "Assemble IKEA bed", p_description: "Need help today", p_amount: 50, p_price_type: "fixed",
+    p_scheduled_at: new Date(Date.now() + 86400000).toISOString(), p_location_text: "Kävlinge", p_lat: null, p_lng: null, p_photo_url: null, p_publish: false, p_tag_ids: [], p_private_address: null, p_find_helpers: true };
+  const stored = new Map([[`esg:post:${user.id}`, JSON.stringify(request)]]);
   const app = await component("src/app/post/page.tsx", "PostGigForm", {
     client: { rpc: async (name, payload) => { calls.push({ name, payload }); return { data: { id: "new-gig", status: "saved_non_public" }, error: null }; } },
     storage: { getItem: (key) => stored.get(key) ?? null, setItem: (key, value) => stored.set(key, value), removeItem: (key) => stored.delete(key) },
@@ -5846,27 +5856,10 @@ test("Post a Gig: 'Save & Find Helpers Nearby' sends p_find_helpers and routes t
       "@/lib/location": { loadJourneyLocation: () => ({ text: "Kävlinge", lat: 55.79, lng: 13.12 }) },
     },
   });
-  let tree = app.render();
-  for (const [predicate, value] of [
-    [(node) => node.type === "input" && node.props.maxLength === 120, "Assemble IKEA bed"],
-    [(node) => node.type === "textarea", "Need help today"],
-    [(node) => node.props.type === "number", "50"],
-    [(node) => node.props.type === "datetime-local", new Date(Date.now() + 86400000).toISOString().slice(0, 16)],
-  ]) nodes(tree, predicate)[0].props.onChange({ target: { value } });
-  tree = app.render();
-  button(tree, "Save & Find Helpers Nearby").props.onClick();
+  button(app.render(), "Retry previous request").props.onClick();
   await flush();
-  assert.equal(calls[0].name, "create_gig");
   assert.equal(calls[0].payload.p_find_helpers, true);
-  assert.equal(calls[0].payload.p_publish, false);
   assert.deepEqual(destinations, ["/post/find-helpers?gig=new-gig"]);
-});
-
-test("Post a Gig: 'Save & Find Helpers Nearby' is not offered for a private request to one named helper", async () => {
-  const { app } = await openRequestForm();
-  const tree = app.render();
-  assert.equal(nodes(tree, (node) => node.type === "button" && node.props.children === "Save & Find Helpers Nearby").length, 0,
-    "a private single-helper request already has its own addressed flow");
 });
 
 test("My Gigs: a saved non-public gig shows its sent requests (only a pending/interested one offers Accept), and Resume Finding Helpers / Cancel wire to the right RPCs", async () => {
