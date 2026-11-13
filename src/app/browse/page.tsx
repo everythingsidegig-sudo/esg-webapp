@@ -53,6 +53,21 @@ function BrowseInner() {
   const [toastIsError, setToastIsError] = useState(false);
   const [lastRejected, setLastRejected] = useState<string | null>(null);
 
+  // The full gig view is an overlay, not a route, so the browser/phone Back button used to skip
+  // straight past it to the previous page. Give it its own history entry: Back closes the
+  // overlay (returning to the gig list); closing it in-app removes the entry it added.
+  const viewingGigId = viewingGig?.id ?? null;
+  useEffect(() => {
+    if (!viewingGigId) return;
+    window.history.pushState({ esgGigView: true }, "");
+    const onPop = () => setViewingGig(null);
+    window.addEventListener("popstate", onPop);
+    return () => {
+      window.removeEventListener("popstate", onPop);
+      if ((window.history.state as { esgGigView?: boolean } | null)?.esgGigView) window.history.back();
+    };
+  }, [viewingGigId]);
+
   useEffect(() => {
     const saved = loadJourneyLocation();
     if (saved.text) {

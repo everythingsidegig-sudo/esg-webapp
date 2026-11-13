@@ -48,6 +48,7 @@ export default function ChatPanel({
   const [proposals, setProposals] = useState<PriceProposal[]>([]);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
   const [priceFormOpen, setPriceFormOpen] = useState(false);
   const [priceDraft, setPriceDraft] = useState("");
   const [priceBusy, setPriceBusy] = useState<string | null>(null);
@@ -101,7 +102,7 @@ export default function ChatPanel({
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "chat_messages", filter: `gig_id=eq.${gigId}` },
         (payload) => {
-          setMessages((prev) => [...prev, payload.new as ChatMessage]);
+          setMessages((prev) => prev.some((m) => m.id === (payload.new as ChatMessage).id) ? prev : [...prev, payload.new as ChatMessage]);
           if ((payload.new as ChatMessage).sender_id !== currentUserId) void markRead();
         }
       )
@@ -136,13 +137,18 @@ export default function ChatPanel({
   async function send() {
     if (!draft.trim() || sending) return;
     setSending(true);
-    const { error } = await supabase.from("chat_messages").insert({
+    setSendError(null);
+    const { data, error } = await supabase.from("chat_messages").insert({
       gig_id: gigId,
       sender_id: currentUserId,
       body: draft.trim(),
-    });
+    }).select().single();
     setSending(false);
-    if (!error) setDraft("");
+    if (error) { setSendError("Your message didn't send. Check your connection and try again."); return; }
+    setDraft("");
+    // Show your own message right away instead of waiting for the realtime feed (which may be
+    // delayed or unavailable); the realtime copy of the same row is ignored by id.
+    if (data) setMessages((prev) => prev.some((m) => m.id === (data as ChatMessage).id) ? prev : [...prev, data as ChatMessage]);
   }
 
   const open = !!negotiation?.open && !readOnly && !unavailable;
@@ -332,6 +338,7 @@ export default function ChatPanel({
         </div>
       )}
 
+      {sendError && !readOnly && <p role="alert" className="border-t border-neutral-200 bg-white px-4 pt-2 text-sm text-red-600">{sendError}</p>}
       {!readOnly ? (
         <form
           onSubmit={(event) => { event.preventDefault(); void send(); }}

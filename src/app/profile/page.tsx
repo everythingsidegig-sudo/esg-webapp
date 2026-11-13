@@ -389,6 +389,11 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
       <div className="rounded-lg border border-neutral-200 bg-white p-3"><div className="text-lg font-semibold">{profile.lemon_count}</div><div className="text-xs text-neutral-500">Lemons (private)</div></div>
       <div className="rounded-lg border border-neutral-200 bg-white p-3"><div className="text-lg font-semibold">{formatMoney(profile.money_made)}</div><div className="text-xs text-neutral-500">Money Made (private)</div></div>
     </div>
+    <section aria-label="Your services" className="space-y-1 rounded-lg border border-neutral-200 bg-white p-4">
+      <h2 className="text-sm font-medium">Your services</h2>
+      <p className="text-sm text-neutral-500">Choose the services you offer to make money and the ones you might need help with. They are saved separately, and only what you offer appears on your public profile and in helper search.</p>
+      <Link href="/services" className="touch-link inline-block text-sm font-medium text-emerald-700">Choose or edit your services</Link>
+    </section>
     <form onSubmit={saveProfile} className="space-y-3 rounded-lg border border-neutral-200 bg-white p-4">
       <fieldset disabled={saving} className="space-y-3">
         <CategoryList title="Skills I can use to make money" selected={skills} setSelected={handleSkillsChange} otherText={skillsOtherText} setOtherText={setSkillsOtherText} />

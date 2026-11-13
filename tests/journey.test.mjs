@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { safeNext, setupDestination, registrationError, passwordError, approximateCoordinates, gigInputError, friendlyError, rpcActionError,
+import { servicesStepHref, safeNext, setupDestination, registrationError, passwordError, approximateCoordinates, gigInputError, friendlyError, rpcActionError,
   AUTH_DESTINATION_KEY, findHelperHref, helperProfileHref, helperUsernameFromDestination, isHelperProfileDestination, rememberAuthDestination, takeAuthDestination } from "../src/lib/journey.ts";
 import { generalAreaLabel } from "../src/lib/geocoding.ts";
 import { posterSection, helperSection, helperBadge, proposalCountLabel, timeAgo } from "../src/lib/my-gigs.ts";
@@ -220,4 +220,88 @@ test("only helper-profile destinations are ever stored, and tampered storage is 
   const broken = { getItem() { throw new Error("blocked"); }, setItem() { throw new Error("blocked"); }, removeItem() { throw new Error("blocked"); } };
   assert.equal(rememberAuthDestination("/profile/HelperOne", broken, now), false, "unavailable storage never throws");
   assert.equal(takeAuthDestination(broken, now), null);
+});
+
+// Deleting an account cancels the open gigs it posted (migration 0034). That migration restates
+// delete_own_account() from its previous body, so guard against it drifting from that body.
+test("deleting an account closes its open gigs, and otherwise leaves delete_own_account() as it was", async () => {
+  const body = (sql) => sql.match(/create or replace function public\.delete_own_account\(\)[\s\S]+?\n\$\$;/)[0];
+  const before = body(await readFile(new URL("../supabase/migrations/20240101000019_helper_requests.sql", import.meta.url), "utf8"));
+  const after = body(await readFile(new URL("../supabase/migrations/20240101000034_close_deleted_accounts_open_gigs.sql", import.meta.url), "utf8"));
+  const added = after.split("\n").filter((line) => !before.split("\n").includes(line)).join("\n");
+  assert.match(added, /update public\.gigs set status = 'cancelled'/);
+  assert.match(added, /poster_id = v_uid and status in \('active', 'saved_non_public'\) and selected_provider_id is null/);
+  assert.doesNotMatch(added, /selected_provider_id is not null/, "gigs with a helper selected are not touched (they block deletion instead)");
+  assert.equal(before.split("\n").filter((line) => !after.split("\n").includes(line)).length, 0, "nothing from the old body was removed");
+});
+
+// Migration 0036 restates add_proof_photo() from migration 0035 to add the poster notification.
+test("adding a proof photo notifies the poster once per batch, and otherwise add_proof_photo() is unchanged", async () => {
+  const body = (sql) => sql.match(/function public\.add_proof_photo[\s\S]+?\n\$\$;/)[0].split("\n").slice(1);
+  const before = body(await readFile(new URL("../supabase/migrations/20240101000035_proof_photos.sql", import.meta.url), "utf8"));
+  const afterSql = await readFile(new URL("../supabase/migrations/20240101000036_proof_photo_notification.sql", import.meta.url), "utf8");
+  const after = body(afterSql);
+  assert.equal(before.filter((line) => !after.includes(line)).length, 0, "nothing from the 0035 body was removed");
+  const added = after.filter((line) => !before.includes(line)).join("\n");
+  assert.match(added, /perform public\.notify\(v_gig\.poster_id, p_gig_id, 'proof_photos'/);
+  assert.match(added, /not v_existed/, "a retry of a photo that is already saved does not notify again");
+  assert.match(added, /type = 'proof_photos' and not read/, "no second update while one is still unread");
+  assert.match(afterSql, /create or replace function public\.add_proof_photo\(p_gig_id uuid, p_path text\)/);
+});
+
+// Migration 0037 restates create_gig() from migration 0030 to allow a negotiable price on every gig.
+test("create_gig() accepts a negotiable price for any gig, and is otherwise unchanged from migration 0030", async () => {
+  const body = (sql) => sql.match(/create or replace function public\.create_gig\([\s\S]+?\n\$\$;/)[0].split("\n");
+  const before = body(await readFile(new URL("../supabase/migrations/20240101000030_description_limit_100.sql", import.meta.url), "utf8"));
+  const after = body(await readFile(new URL("../supabase/migrations/20240101000037_negotiable_public_gigs.sql", import.meta.url), "utf8"));
+  const added = after.filter((line) => !before.includes(line)).join("\n");
+  const removed = before.filter((line) => !after.includes(line)).join("\n");
+  assert.match(added, /p_price_type not in \('fixed', 'negotiable'\)/);
+  assert.match(removed, /fixed-price gigs only/);
+  assert.equal(removed.split("\n").length, 3, "only the old three-line price check was removed");
+});
+
+// Migration 0038: the only thing exposed about a Lemon comment is its text and date.
+test("get_public_lemon_comments returns only lemon comment text and date: no author, gig or count", async () => {
+  const sql = await readFile(new URL("../supabase/migrations/20240101000038_public_lemon_comments.sql", import.meta.url), "utf8");
+  const fn = sql.match(/create function public\.get_public_lemon_comments[\s\S]+?\$\$;/)[0];
+  assert.match(fn, /returns table\(comment text, created_at timestamptz\)/);
+  assert.match(fn, /f\.type = 'lemon' and f\.comment is not null/);
+  assert.doesNotMatch(fn, /from_id|gig_id|lemon_count/, "never reveals who wrote it, which gig, or the count");
+  assert.match(sql, /grant execute on function public\.get_public_lemon_comments\(uuid\) to authenticated;/);
+  assert.doesNotMatch(sql, /to anon/, "signed-in members only");
+});
+
+// Migration 0039 restates delay_start, resubmit_start and remove_helper from their current bodies.
+test("delay limit and penalty: each redefined function differs from its source only by the added rule", async () => {
+  const read = (name) => readFile(new URL(`../supabase/migrations/${name}`, import.meta.url), "utf8");
+  const fnBody = (sql, name) => sql.match(new RegExp(`function public\\.${name}\\([\\s\\S]+?\\n\\$\\$;`))[0].split("\n").slice(1);
+  const next = await read("20240101000039_delay_limit_and_penalty.sql");
+  const check = (source, name, expectedAdds) => {
+    const before = fnBody(source, name), after = fnBody(next, name);
+    const removed = before.filter((line) => !after.includes(line));
+    const added = after.filter((line) => !before.includes(line)).join("\n");
+    for (const pattern of expectedAdds) assert.match(added, pattern, `${name}: ${pattern}`);
+    return removed;
+  };
+  const delayRemoved = check(await read("20240101000022_delay_start_and_withdraw.sql"), "delay_start", [/c_max_delays constant smallint := 2/, /start_delay_count >= c_max_delays/, /start_delay_count = start_delay_count \+ 1/]);
+  assert.equal(delayRemoved.length, 1, "delay_start: only the one update line was replaced");
+  const resubmitRemoved = check(await read("20240101000031_resubmit_start.sql"), "resubmit_start", [/start_delay_count >= 2/]);
+  assert.equal(resubmitRemoved.length, 0, "resubmit_start: nothing removed");
+  const removeRemoved = check(await read("20240101000026_withdraw_exit_remove_reasons.sql"), "remove_helper", [/start_delay_count >= 2/, /'lemon'/, /lemon_count = lemon_count \+ 1/]);
+  assert.equal(removeRemoved.length, 0, "remove_helper: nothing removed");
+  const withdraw = next.match(/create function public\.withdraw_after_second_delay[\s\S]+?\n\$\$;/)[0];
+  assert.match(withdraw, /start_delay_count < 2/, "only after the second delay");
+  assert.match(withdraw, /start_delayed_at \+ c_wait/, "only once the 24 hours are up");
+  assert.match(withdraw, /'lemon'/, "and it gives the poster a lemon");
+  assert.match(next, /create trigger gigs_reset_start_delay_count before update of selected_provider_id/, "a new helper starts at zero");
+});
+
+test("registration continues to the optional services step, then on to where the member was heading", () => {
+  assert.equal(servicesStepHref("/post"), "/services?onboarding=1&next=%2Fpost");
+  assert.equal(servicesStepHref("https://evil.invalid"), "/services?onboarding=1&next=%2F", "an unsafe destination falls back to Home");
+  assert.equal(servicesStepHref(null), "/services?onboarding=1&next=%2F");
+  assert.equal(safeNext("/services"), "/services", "the services page can be a sign-in destination");
+  assert.equal(safeNext("/services?onboarding=1&next=%2Fpost"), "/services?onboarding=1&next=%2Fpost");
+  assert.equal(safeNext("/servicesx"), "/", "only that exact route");
 });

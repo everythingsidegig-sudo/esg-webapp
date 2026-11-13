@@ -88,6 +88,8 @@ export interface Gig {
   start_approved_at: string | null;
   // Migration 0022: the poster delayed a start request / the helper withdrew while it was delayed.
   start_delayed_at: string | null;
+  // Migration 0039: how many times the poster has delayed this start (at most two) for the current helper.
+  start_delay_count?: number;
   helper_withdrawn_at: string | null;
   // Migration 0023: waits the helper took on an unanswered start request, when the latest one ends, and when the poster removed the helper.
   start_wait_count: number;
@@ -141,6 +143,15 @@ export interface DirectRequest {
 export interface GigPrivateLocation {
   gig_id: string;
   address_text: string;
+  created_at: string;
+}
+
+// A helper's proof / supporting photo for a finished gig (private bucket "proof-photos").
+export interface GigProofPhoto {
+  id: string;
+  gig_id: string;
+  uploader_id: string;
+  storage_path: string;
   created_at: string;
 }
 
@@ -203,6 +214,7 @@ export interface Database {
       price_proposals: { Row: PriceProposal; Insert: Partial<PriceProposal>; Update: Partial<PriceProposal> };
       blocks: { Row: Block; Insert: Partial<Block>; Update: Partial<Block> };
       direct_requests: { Row: DirectRequest; Insert: Partial<DirectRequest>; Update: Partial<DirectRequest> };
+      gig_proof_photos: { Row: GigProofPhoto; Insert: Partial<GigProofPhoto>; Update: Partial<GigProofPhoto> };
     };
     Functions: {
       ensure_profile: { Args: Record<string, never>; Returns: Profile };

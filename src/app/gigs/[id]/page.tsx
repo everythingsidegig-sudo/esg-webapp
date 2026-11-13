@@ -9,10 +9,12 @@ import { createClient } from "@/lib/supabase/client";
 import { rpcActionError } from "@/lib/journey";
 import { formatMoney, offerError } from "@/lib/money";
 import { priceLabel, requestStage } from "@/lib/helper-request";
-import { canRepost, repostHref, repostPrivateHref } from "@/lib/repost";
-import { START_MAX_WAITS, canWithdrawBeforeStart, delayAvailable, helperRemoved, helperWithdrew, removeAvailable, silence, startView, timeUntil, waitAvailable } from "@/lib/start-flow";
+import { canReopenPublicly, canRepost, repostHref, repostPrivateHref } from "@/lib/repost";
+import { START_MAX_WAITS, canResubmitStart, canWithdrawBeforeStart, delayAvailable, delaysLeft, finalDelay, helperRemoved, helperWithdrew, removeAvailable, silence, startView, timeUntil, waitAvailable } from "@/lib/start-flow";
 import StatusBadge from "@/components/StatusBadge";
 import ChatPanel from "@/components/ChatPanel";
+import ProofPhotos from "@/components/ProofPhotos";
+import { canAddProofPhotos } from "@/lib/proof-photos";
 import TagChip from "@/components/TagChip";
 import { gigTagNames } from "@/lib/tags";
 import type { Claim, ClaimState, CompletionOutcome, ExitReason, FeedbackType, GigWithTags, IncompleteChoice, PublicProfile } from "@/lib/database.types";
@@ -189,6 +191,16 @@ function GigDetails({ id }: { id: string }) {
     }
   }
 
+  // A saved draft can be sent to the helper swipe deck instead of being published.
+  async function findHelpers() {
+    setBusy(true);
+    setError(null);
+    const { error: actionError } = await supabase.rpc("find_helpers_for_gig", { p_gig_id: id });
+    setBusy(false);
+    if (actionError) { setError(rpcActionError(actionError)); return; }
+    router.push(`/post/find-helpers?gig=${encodeURIComponent(id)}`);
+  }
+
   if (gig === undefined || authLoading) return <p className="text-neutral-500">Loading…</p>;
   if (gig === null) return <p className="text-neutral-500">Gig not found.</p>;
 
@@ -342,9 +354,13 @@ function GigDetails({ id }: { id: string }) {
           <h2 className="font-medium">{requested ? "This request is a draft" : "This gig is a draft"}</h2>
           <p className="text-sm text-neutral-500">{requested
             ? `Send it so ${requestedName ? `@${requestedName}` : "the helper"} can accept, decline${negotiable ? " or counteroffer" : ""}. It stays private.`
-            : "Publish it so helpers can find it and send offers."}</p>
+            : "Choose how to go next: post it publicly so helpers can send offers, or find helpers nearby and send it to them yourself."}</p>
           <button disabled={busy} onClick={() => run(() => supabase.rpc("publish_gig", { p_gig_id: id }))}
-            className="w-full rounded-lg bg-emerald-600 py-2.5 font-medium text-white hover:bg-emerald-700 disabled:opacity-60">{requested ? "Send request" : "Publish gig"}</button>
+            className="w-full rounded-lg bg-emerald-600 py-2.5 font-medium text-white hover:bg-emerald-700 disabled:opacity-60">{requested ? "Send request" : "Post publicly"}</button>
+          {!requested && (
+            <button disabled={busy} onClick={() => void findHelpers()}
+              className="flex min-h-11 w-full items-center justify-center rounded-lg border border-emerald-600 bg-white py-2.5 font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-60">Find helpers nearby</button>
+          )}
         </div>
       )}
 
@@ -453,6 +469,7 @@ function GigDetails({ id }: { id: string }) {
               {view === "poster-delayed" && (
                 <p role="status" className="rounded-lg bg-yellow-50 p-3 text-sm text-yellow-800">
                   You delayed the start. {people[gig.selected_provider_id!] ? `@${people[gig.selected_provider_id!]}` : "Your helper"} can wait or withdraw. Accept the start whenever you are ready.
+                  {finalDelay(gig, now).final && ` This was your last delay: accept the start within ${timeUntil(finalDelay(gig, now).deadline, now)}. If you remove your helper, or stay quiet until then and they withdraw, you will receive a lemon.`}
                 </p>
               )}
               {view === "poster-review" && waitAvailable(gig) && gig.start_wait_count > 0 && (
@@ -467,10 +484,12 @@ function GigDetails({ id }: { id: string }) {
               >
                 ACCEPT START — LET&apos;S GO
               </button>
-              {view === "poster-review" && delayAvailable(gig) && (
+              {view === "poster-review" && delayAvailable(gig) && delaysLeft(gig) > 0 && (
                 <button
                   disabled={busy}
-                  onClick={() => { if (window.confirm("Delay the start? Your helper will be asked to wait, and can choose to withdraw.")) void run(() => supabase.rpc("delay_start", { p_gig_id: id })); }}
+                  onClick={() => { if (window.confirm(delaysLeft(gig) === 1
+                    ? "Delay the start? This is your last delay. After it you must accept the start: if you remove your helper, or don't answer within 24 hours and they withdraw, you will receive a lemon."
+                    : "Delay the start? Your helper will be asked to wait, and can choose to withdraw.")) void run(() => supabase.rpc("delay_start", { p_gig_id: id })); }}
                   className="flex min-h-11 w-full items-center justify-center rounded-lg border border-neutral-300 bg-white px-4 py-2.5 font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-60"
                 >
                   Delay start
@@ -522,6 +541,7 @@ function GigDetails({ id }: { id: string }) {
                   <textarea disabled={busy} maxLength={500} rows={2} value={removeReason} onChange={(e) => setRemoveReason(e.target.value)}
                     className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm disabled:opacity-60" />
                 </label>
+                {finalDelay(gig, now).final && <p role="note" className="text-sm font-medium text-red-700">You delayed this start twice, so removing your helper will give you a lemon.</p>}
                 <p className="text-xs text-neutral-500">{helperName ? `@${helperName}` : "Your helper"} will be told. {claims.length > 0 ? "The gig reopens so you can choose another offer." : "The gig will close and you can post it again for everyone."}</p>
                 <div className="flex gap-2">
                   <button type="button" disabled={busy || !removeReason.trim()}
@@ -549,11 +569,25 @@ function GigDetails({ id }: { id: string }) {
           {view === "helper-delayed" && (
             <section aria-label="Start delayed" className="space-y-3 rounded-xl border border-yellow-300 bg-yellow-50 p-4">
               <h2 className="font-medium text-yellow-900">The poster asked you to wait</h2>
-              {willWait ? (
+              {willWait && !finalDelay(gig, now).overdue ? (
                 <p role="status" className="text-sm text-yellow-900">Okay. You will be notified as soon as the poster approves the start.</p>
               ) : (
                 <>
-                  <p className="text-sm text-yellow-900">The start was delayed. You can wait for the poster to approve it, or withdraw from this gig.</p>
+                  <p className="text-sm text-yellow-900">{canResubmitStart(gig)
+                    ? "The start was delayed. You can wait for the poster to approve it, ask to start again, or withdraw from this gig."
+                    : "The poster delayed the start a second time, so you can't ask to start again. You can wait for them to approve it, or withdraw from this gig."}</p>
+                  {canResubmitStart(gig) && (
+                    <button type="button" disabled={busy} onClick={() => void run(() => supabase.rpc("resubmit_start", { p_gig_id: id }))}
+                      className="min-h-11 w-full rounded-lg bg-emerald-600 px-4 font-medium text-white hover:bg-emerald-700 disabled:opacity-60">Ask to start again</button>
+                  )}
+                  {finalDelay(gig, now).final && !finalDelay(gig, now).overdue && (
+                    <p role="status" className="text-sm text-yellow-900">The poster has {timeUntil(finalDelay(gig, now).deadline, now)} left to answer. After that you can withdraw and they will receive a lemon.</p>
+                  )}
+                  {finalDelay(gig, now).overdue && (
+                    <button type="button" disabled={busy}
+                      onClick={() => { if (window.confirm("Withdraw because the poster didn't answer after the second delay? The poster will receive a lemon, and you cannot claim this gig again.")) void run(() => supabase.rpc("withdraw_after_second_delay", { p_gig_id: id })); }}
+                      className="min-h-11 w-full rounded-lg border border-red-300 bg-white px-4 font-medium text-red-700 hover:bg-red-50 disabled:opacity-60">Withdraw: the poster didn&apos;t answer</button>
+                  )}
                   <div className="flex gap-3">
                     <button type="button" disabled={busy} onClick={() => setWillWait(true)}
                       className="min-h-11 flex-1 rounded-lg bg-emerald-600 px-4 font-medium text-white hover:bg-emerald-700 disabled:opacity-60">I&apos;ll wait</button>
@@ -592,6 +626,12 @@ function GigDetails({ id }: { id: string }) {
                 </div>
               )}
             </div>
+          )}
+
+          {/* Proof photos: the helper adds them once they mark the gig complete; the poster sees them. */}
+          {(gig.status === "in_progress" || gig.status === "awaiting_payment" || gig.status === "completed" || gig.status === "incomplete") && (
+            <ProofPhotos gigId={id} userId={user!.id} canAdd={canAddProofPhotos(gig, user?.id, myCompletion)}
+              helperName={isPoster && gig.selected_provider_id ? people[gig.selected_provider_id] : undefined} />
           )}
 
           {isSelectedProvider && gig.status === "in_progress" && !gig.incomplete_choice_phase && !myCompletion && (
@@ -696,7 +736,8 @@ function GigDetails({ id }: { id: string }) {
               <h2 className="font-medium">Messages</h2>
               <ChatPanel gigId={id} currentUserId={user!.id} readOnly={gig.status !== "in_progress" && gig.status !== "active"}
                 // The price can be negotiated in the chat until the helper asks to start (rules: migration 0021).
-                negotiation={{ open: gig.status === "active" && !!gig.selected_provider_id && !gig.start_requested_at, agreedAmount: Number(gig.agreed_amount ?? gig.amount) }}
+                // Only a negotiable gig has a price to haggle over: a fixed price is take it or leave it.
+                negotiation={{ open: negotiable && gig.status === "active" && !!gig.selected_provider_id && !gig.start_requested_at, agreedAmount: Number(gig.agreed_amount ?? gig.amount) }}
                 otherName={(() => { const other = isPoster ? gig.selected_provider_id : gig.poster_id; return other && people[other] ? `@${people[other]}` : undefined; })()}
                 onPriceChanged={() => { void loadAll(); }} />
             </section>
@@ -772,9 +813,21 @@ function GigDetails({ id }: { id: string }) {
               : "Start a new gig with the same details. This one stays in your history as it is."}
           </p>
           {gig.requested_helper_id && <p className="text-sm text-neutral-500">This was a private request. Reposting it as a new gig makes it visible to every helper.</p>}
-          <Link href={repostHref(gig.id)} className="flex min-h-11 w-full items-center justify-center rounded-lg bg-emerald-600 px-4 py-2.5 text-center font-medium text-white hover:bg-emerald-700">
-            {helperWithdrew(gig) || helperRemoved(gig) ? "Post it publicly as a new gig" : "Repost as a new gig"}
-          </Link>
+          {canReopenPublicly(gig, user?.id, now) ? (
+            <>
+              {/* The helper left and the date is still ahead: publish this same gig, no form in between. */}
+              <button type="button" disabled={busy}
+                onClick={() => { if (window.confirm("Post this gig publicly again? Anyone nearby will be able to see it and send offers. Your earlier conversation is cleared.")) void run(() => supabase.rpc("reopen_gig_publicly", { p_gig_id: id })); }}
+                className="flex min-h-11 w-full items-center justify-center rounded-lg bg-emerald-600 px-4 py-2.5 text-center font-medium text-white hover:bg-emerald-700 disabled:opacity-60">
+                Post it publicly again
+              </button>
+              <Link href={repostHref(gig.id)} className="touch-link block text-center text-sm font-medium text-emerald-700">Change the details first</Link>
+            </>
+          ) : (
+            <Link href={repostHref(gig.id)} className="flex min-h-11 w-full items-center justify-center rounded-lg bg-emerald-600 px-4 py-2.5 text-center font-medium text-white hover:bg-emerald-700">
+              {helperWithdrew(gig) || helperRemoved(gig) ? "Post it publicly as a new gig" : "Repost as a new gig"}
+            </Link>
+          )}
           {gig.requested_helper_id && requestedName && !helperWithdrew(gig) && !helperRemoved(gig) && (
             <Link href={repostPrivateHref(gig.id, requestedName, gig.service_type)} className="flex min-h-11 w-full items-center justify-center rounded-lg border border-emerald-600 px-4 py-2.5 text-center font-medium text-emerald-700 hover:bg-emerald-50">
               Send to @{requestedName} again

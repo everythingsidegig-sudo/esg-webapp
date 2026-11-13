@@ -7,11 +7,16 @@ export function safeNext(value: string | null | undefined): string {
     if (/[\\\u0000-\u001f\u007f]/.test(decoded) || decoded.startsWith("//")) return "/";
     const url = new URL(value, "https://esg.invalid");
     if (url.origin !== "https://esg.invalid") return "/";
-    if (!/^\/(?:post|browse|location|my-gigs|profile|need-help|messages|find-helper)?$/.test(url.pathname)
+    if (!/^\/(?:post|browse|location|my-gigs|profile|need-help|messages|find-helper|services)?$/.test(url.pathname)
         && !/^\/gigs\/[0-9a-f-]{36}$/i.test(url.pathname)
         && !/^\/profile\/[A-Za-z0-9_]+$/.test(url.pathname)) return "/";
     return url.pathname + url.search + url.hash;
   } catch { return "/"; }
+}
+
+// After the profile is set up, registration continues to the optional services step, then on to `next`.
+export function servicesStepHref(next: string | null | undefined) {
+  return `/services?onboarding=1&next=${encodeURIComponent(safeNext(next))}`;
 }
 
 export function setupDestination(next: string | null | undefined) {
@@ -39,7 +44,7 @@ export function approximateCoordinates(lat: number | null, lng: number | null) {
 
 export function gigInputError(title: string, description: string, amount: string, date: string, area: string, publish: boolean): string | null {
   if (!title.trim() || title.trim().length > 120) return "Enter a title of 1–120 characters.";
-  if (!description.trim() || description.trim().length > 50) return "Enter a description of 1–50 characters.";
+  if (!description.trim() || description.trim().length > 100) return "Enter a description of 1–100 characters.";
   if (!area.trim() || area.trim().length > 200) return "Enter a general area of 1–200 characters, not a street address.";
   const price = Number(amount);
   if (!Number.isFinite(price) || price <= 0 || price > 9999999999.99 || !/^\d+(\.\d{1,2})?$/.test(amount)) return "Enter a positive amount with at most two decimal places.";

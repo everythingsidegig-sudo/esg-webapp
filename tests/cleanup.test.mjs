@@ -13,6 +13,9 @@ import * as helperRequestLib from "../src/lib/helper-request.ts";
 import * as profileSaveLib from "../src/lib/profile-save.ts";
 import * as negotiationLib from "../src/lib/negotiation.ts";
 import * as repostLib from "../src/lib/repost.ts";
+import * as proofPhotosLib from "../src/lib/proof-photos.ts";
+import * as serviceCatalogLib from "../src/lib/service-catalog.ts";
+import * as serviceSelectionLib from "../src/lib/service-selection.ts";
 import * as startFlowLib from "../src/lib/start-flow.ts";
 import * as swipeLib from "../src/lib/swipe.ts";
 import { safeNext } from "../src/lib/journey.ts";
@@ -67,7 +70,7 @@ async function component(path, name, overrides = {}) {
   const mocks = {
     react: hooks,
     "next/link": { default: "a" },
-    "next/navigation": { useSearchParams: () => params, usePathname: () => "/profile", useRouter: () => ({ replace() {} }) },
+    "next/navigation": { useSearchParams: () => params, usePathname: () => "/profile", useRouter: () => ({ replace() {}, push() {} }) },
     "@/lib/auth-context": { useAuth: () => auth },
     "@/lib/supabase/client": { createClient: () => overrides.client },
     "@/lib/services": { SERVICE_TYPES: ["Cleaning", "Other"], SPECIALIZATION_PROMPTS: { Cleaning: "What kind of cleaning?", Handyman: "What kind of handyman work?", Other: "What kind of help?" } },
@@ -110,6 +113,13 @@ async function component(path, name, overrides = {}) {
     "@/components/MessagesLink": { default: "messages-link" },
     "@/components/StatusBadge": { default: "badge" },
     "@/components/TagChip": { default: "tag-chip" },
+    "@/components/ProfilePhoto": { default: "profile-photo" },
+    "@/components/OfferedServices": { default: "offered-services" },
+    "@/components/SwipeCard": { default: "swipe-card" },
+    "@/components/ProofPhotos": { default: "proof-photos" },
+    "@/lib/proof-photos": proofPhotosLib,
+    "@/lib/service-catalog": serviceCatalogLib,
+    "@/lib/service-selection": serviceSelectionLib,
     "@/components/AcceptConfirm": { default: "accept-confirm" },
     "@/components/FullGigView": { default: "full-gig-view" },
     "@/components/GigTile": { default: "gig-tile" },
@@ -1099,6 +1109,41 @@ test("Public profile shows the pre-computed WOM% (never the raw lemon_count, whi
   assert.equal(nodes(tree, (node) => node.props.children === "—").length, 1, "no WOM/Lemon signal yet falls back to an em dash, not 0%/NaN");
 });
 
+test("Public profile shows comments left with a Lemon (text and date only), still never the lemon count", async () => {
+  const withComments = { id: "helper-1", username: "HelperOne", photo_url: null, skills: [], wom_count: 4, profile_tags: [] };
+  const calls = [];
+  const client = {
+    from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: withComments, error: null }) }) }) }),
+    rpc: async (name, args) => {
+      calls.push([name, args]);
+      if (name === "get_public_lemon_comments") return { data: [{ comment: "Arrived two hours late", created_at: "2026-10-05T10:00:00Z" }, { comment: "Left a mess" , created_at: "2026-10-01T10:00:00Z" }], error: null };
+      return { data: [{ gigs_worked_count: 2, wom_count: 4, wom_percentage: 80 }], error: null };
+    },
+  };
+  const app = await component("src/app/profile/[username]/page.tsx", "PublicProfileView", { client });
+  app.render({ username: "HelperOne" }); await flush();
+  const tree = app.render({ username: "HelperOne" });
+  const section = nodes(tree, (node) => node.props["aria-label"] === "Lemon comments")[0];
+  assert.ok(section, "the comments are shown");
+  assert.match(textOf(section), /Arrived two hours late/);
+  assert.match(textOf(section), /Left a mess/);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls.filter(([name]) => name === "get_public_lemon_comments"))), [["get_public_lemon_comments", { p_profile_id: "helper-1" }]]);
+  assert.equal(nodes(tree, (node) => String(node.props.children).includes("lemon_count")).length, 0, "the count itself is still never shown");
+});
+
+test("Public profile has no comments section when there are none, or when the lookup returns nothing usable", async () => {
+  const profileRow = { id: "helper-1", username: "HelperOne", photo_url: null, skills: [], wom_count: 4, profile_tags: [] };
+  for (const comments of [[], null, [{ gigs_worked_count: 2 }]]) {
+    const client = {
+      from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: profileRow, error: null }) }) }) }),
+      rpc: async (name) => name === "get_public_lemon_comments" ? { data: comments, error: null } : { data: [{ gigs_worked_count: 2, wom_count: 4, wom_percentage: 80 }], error: null },
+    };
+    const app = await component("src/app/profile/[username]/page.tsx", "PublicProfileView", { client });
+    app.render({ username: "HelperOne" }); await flush();
+    assert.equal(nodes(app.render({ username: "HelperOne" }), (node) => node.props["aria-label"] === "Lemon comments").length, 0);
+  }
+});
+
 test("Browse chips select one existing category and All Services restores results", async () => {
   const gigs = ["Cleaning", "Other"].map((service_type) => ({ id: service_type, service_type, title: service_type, amount: 10 }));
   const client = { from: () => ({ select: () => ({ eq: () => ({ order: async () => ({ data: gigs, error: null }) }) }) }) };
@@ -1962,9 +2007,10 @@ test("Chat opening marks the other party's messages read and tells the header ba
 });
 
 // Gig hub ------------------------------------------------------------------
-function gigHubDb({ gig, claims = [], myClaim = null, address = null, addressQueries = [] }) {
+function gigHubDb({ gig, claims = [], myClaim = null, myCompletion = null, address = null, addressQueries = [] }) {
   return fakeDb((query, single) => {
     if (query.table === "gigs") return { data: gig, error: null };
+    if (query.table === "gig_completions") return { data: myCompletion ? { outcome: myCompletion } : null, error: null };
     if (query.table === "gig_private_locations") { addressQueries.push(query.eq.gig_id); return { data: address ? { address_text: address } : null, error: null }; }
     if (query.table === "public_profiles") return { data: [{ id: "poster-1", username: "customer1" }, { id: "helper-1", username: "helper1" }].filter((row) => query.in.id.includes(row.id)), error: null };
     if (query.table === "claims" && query.eq.provider_id) return { data: myClaim, error: null };
@@ -2001,10 +2047,38 @@ test("Gig hub (owner, open): proposals live on the gig, with Accept offer, Cance
   void app; void props;
 });
 
-test("Gig hub (owner, draft): offers Publish via the existing RPC", async () => {
+test("Gig hub (owner, draft): offers both ways forward, Post publicly and Find helpers nearby", async () => {
   const { rpcs, tree } = await openGig({ poster_id: user.id, status: "draft" });
-  await nodes(tree, (node) => node.type === "button" && textOf(node) === "Publish gig")[0].props.onClick();
+  const labels = nodes(tree, (node) => node.type === "button").map(textOf);
+  assert.ok(labels.includes("Post publicly") && labels.includes("Find helpers nearby"), "both options are shown, neither is the default");
+  await nodes(tree, (node) => node.type === "button" && textOf(node) === "Post publicly")[0].props.onClick();
   assert.deepEqual(JSON.parse(JSON.stringify(rpcs[0])), ["publish_gig", { p_gig_id: "gig-1" }]);
+});
+
+test("Gig hub (owner, draft): Find helpers nearby moves the draft to the helper search", async () => {
+  const { rpcs, tree } = await openGig({ poster_id: user.id, status: "draft" });
+  await nodes(tree, (node) => node.type === "button" && textOf(node) === "Find helpers nearby")[0].props.onClick();
+  assert.deepEqual(JSON.parse(JSON.stringify(rpcs[0])), ["find_helpers_for_gig", { p_gig_id: "gig-1" }]);
+});
+
+test("Gig hub: price negotiation in the chat is only open for a negotiable gig, never a fixed-price one", async () => {
+  const chatProps = async (fields, asUser) => nodes((await openGig({ poster_id: "poster-1", selected_provider_id: "helper-1", ...fields }, {}, asUser)).tree, (node) => node.type === "chat-panel")[0].props;
+  for (const asUser of ["poster-1", "helper-1"]) {
+    assert.equal((await chatProps({ price_type: "fixed" }, asUser)).negotiation.open, false, `fixed price, as ${asUser}`);
+    assert.equal((await chatProps({ price_type: "negotiable" }, asUser)).negotiation.open, true, `negotiable, as ${asUser}`);
+  }
+  assert.equal((await chatProps({ price_type: "negotiable", start_requested_at: "2026-10-01T10:00:00Z" }, "poster-1")).negotiation.open, false, "still closes once the helper asks to start");
+});
+
+test("Gig hub: the helper can add proof photos only after marking the gig complete; the poster only sees them", async () => {
+  const photos = async (fields, db, asUser) => nodes((await openGig({ status: "in_progress", selected_provider_id: "helper-1", ...fields }, db, asUser)).tree, (node) => node.type === "proof-photos")[0];
+  assert.equal((await photos({}, { myCompletion: "complete" }, "helper-1")).props.canAdd, true, "helper, marked complete");
+  assert.equal((await photos({}, {}, "helper-1")).props.canAdd, false, "helper, not marked yet");
+  assert.equal((await photos({}, { myCompletion: "incomplete" }, "helper-1")).props.canAdd, false, "helper marked it incomplete");
+  const poster = await photos({ poster_id: "poster-1" }, { myCompletion: "complete" }, "poster-1");
+  assert.equal(poster.props.canAdd, false, "the poster never uploads");
+  assert.equal(poster.props.helperName, "helper1");
+  assert.equal(await photos({ status: "active", start_requested_at: null }, { myCompletion: "complete" }, "helper-1"), undefined, "nothing before the gig starts");
 });
 
 test("Gig hub (owner, helper selected): shows the helper and the gig's messages section", async () => {
@@ -2189,7 +2263,7 @@ test("Post category chips select Cleaning, submit its unchanged value, and resto
     mocks: { "@/lib/location": { loadJourneyLocation: () => ({ text: "Test city", lat: null, lng: null }) } },
   };
   const app = await component("src/app/post/page.tsx", "PostGigForm", options);
-  const chips = (tree) => nodes(tree, (node) => node.type === "selection-chip");
+  const chips = (tree) => nodes(tree, (node) => node.type === "selection-chip" && !["Fixed", "Negotiable"].includes(node.props.children)); // the category chips, not the pricing choice
   let tree = app.render();
   chips(tree)[1].props.onClick(); tree = app.render();
   assert.equal(chips(tree).filter((node) => node.props.selected).length, 1);
@@ -2337,7 +2411,7 @@ test("Post category arrow keys move selection and focus with wrapping", async ()
   const app = await component("src/app/post/page.tsx", "PostGigForm", {
     mocks: { "@/lib/location": { loadJourneyLocation: () => ({ text: "", lat: null, lng: null }) } },
   });
-  const chips = () => nodes(app.render(), (node) => node.type === "selection-chip");
+  const chips = () => nodes(app.render(), (node) => node.type === "selection-chip" && !["Fixed", "Negotiable"].includes(node.props.children)); // the category chips, not the pricing choice
   let focused, prevented = false;
   chips()[0].props.onKeyDown({ key: "ArrowLeft", preventDefault() { prevented = true; },
     currentTarget: { parentElement: { querySelectorAll: () => [0, 1].map((index) => ({ focus() { focused = index; } })) } } });
@@ -4118,17 +4192,29 @@ test("Post a Gig for a helper: bad links and ineligible helpers stop with a clea
   }
 });
 
-test("Post a Gig without a helper is unchanged: public, fixed price, no helper id, Post Gig", async () => {
+test("Post a Gig without a helper: public, fixed price unless the poster picks Negotiable, no helper id, Post Gig", async () => {
   const { app, calls, fill } = await openRequestForm({ search: "" });
   let tree = app.render();
   assert.match(textOf(nodes(tree, (node) => node.type === "h1")[0]), /^Post a Gig$/);
   assert.equal(nodes(tree, (node) => node.props.role === "note").length, 0);
-  assert.equal(radios(tree).filter((node) => ["Fixed", "Negotiable"].includes(textOf(node))).length, 0, "no pricing choice on a public gig");
-  assert.match(textOf(tree), /Pricing: Fixed/);
+  assert.deepEqual(radios(tree).map(textOf).filter((label) => ["Fixed", "Negotiable"].includes(label)), ["Fixed", "Negotiable"], "a public gig can be fixed or negotiable");
+  assert.equal(radios(tree).find((node) => textOf(node) === "Fixed").props.selected, true, "fixed is still the default");
+  assert.match(textOf(tree), /Helpers take your price as it is/, "worded for helpers, not one helper");
   fill(tree);
   button(app.render(), "Post Gig").props.onClick(); await flush();
   assert.equal(calls[0].payload.p_price_type, "fixed");
   assert.equal("p_requested_helper_id" in calls[0].payload, false, "never sent for a public gig");
+});
+
+test("Post a Gig without a helper: choosing Negotiable posts a negotiable public gig", async () => {
+  const { app, calls, fill } = await openRequestForm({ search: "" });
+  radios(app.render()).find((node) => textOf(node) === "Negotiable").props.onClick();
+  const tree = app.render();
+  assert.match(textOf(tree), /Helpers can accept your price or offer their own/);
+  fill(tree);
+  button(app.render(), "Post Gig").props.onClick(); await flush();
+  assert.equal(calls[0].payload.p_price_type, "negotiable");
+  assert.equal("p_requested_helper_id" in calls[0].payload, false, "still a public gig");
 });
 
 // ---- the requested helper's and the poster's gig page ----
@@ -4259,7 +4345,8 @@ test("A counteroffer reaches the poster as an ordinary proposal they can accept 
 test("A draft request is sent from the gig page with the existing publish RPC", async () => {
   const { tree, rpcs } = await openRequest({ asUser: "poster-1", gig: { status: "draft" } });
   assert.match(textOf(tree), /This request is a draft/);
-  assert.equal(buttonText(tree, "Publish gig"), undefined, "worded as sending, not publishing");
+  assert.equal(buttonText(tree, "Post publicly"), undefined, "worded as sending, not publishing");
+  assert.equal(buttonText(tree, "Find helpers nearby"), undefined, "a private request is not searched for");
   await buttonText(tree, "Send request").props.onClick();
   assert.deepEqual(rpcs, [["publish_gig", { p_gig_id: "gig-1" }]]);
 });
@@ -4604,14 +4691,20 @@ test("Gig page: the Message helper link and the proposal's View profile link cen
 });
 
 // ---- Chat panel presentation ----
-async function openChat({ rows = [], readOnly = false, proposals = [], negotiation, rpcError = null, onPriceChanged, proposalsError = null } = {}) {
+async function openChat({ rows = [], readOnly = false, proposals = [], negotiation, rpcError = null, onPriceChanged, proposalsError = null, insertError = null } = {}) {
   const inserts = [], rpcs = [], current = { proposals: proposals.map((proposal) => ({ ...proposal })) };
   const table = (data, error = null) => {
     const query = {
       select() { return query; }, eq() { return query; },
       order() { return { then: (ok) => Promise.resolve(error ? { data: null, error } : { data: data() }).then(ok) }; },
       update() { const chain = { eq() { return chain; }, neq() { return chain; }, is() { return Promise.resolve({ error: null }); } }; return chain; },
-      insert: async (payload) => { inserts.push(JSON.parse(JSON.stringify(payload))); return { error: null }; },
+      // Like supabase-js: awaitable on its own, or chained with .select().single() to get the new row back.
+      insert: (payload) => {
+        inserts.push(JSON.parse(JSON.stringify(payload)));
+        const row = { ...payload, id: `new-${inserts.length}`, created_at: new Date().toISOString(), read_at: null };
+        const result = insertError ? { data: null, error: insertError } : { data: row, error: null };
+        return { select() { return { single: async () => result }; }, then: (ok, bad) => Promise.resolve({ error: result.error }).then(ok, bad) };
+      },
     };
     return query;
   };
@@ -4683,6 +4776,27 @@ test("Chat: the composer is a form; Send is disabled until there is text, Enter 
   assert.equal(prevented, true, "the page never reloads");
   assert.deepEqual(inserts, [{ gig_id: "g1", sender_id: "me", body: "On my way" }]);
   assert.equal(nodes(form(), (node) => node.type === "input")[0].props.value, "", "the box clears after a successful send");
+});
+
+test("Chat: a sent message appears immediately, without waiting for the realtime feed", async () => {
+  const { app, props } = await openChat();
+  const form = () => nodes(app.render(props), (node) => node.type === "form")[0];
+  nodes(form(), (node) => node.type === "input")[0].props.onChange({ target: { value: "Hello there" } });
+  await form().props.onSubmit({ preventDefault() {} });
+  await flush();
+  assert.match(textOf(app.render(props)), /Hello there/);
+});
+
+test("Chat: a failed send keeps the typed text and says so instead of failing silently", async () => {
+  const { app, props } = await openChat({ insertError: { message: "boom" } });
+  const form = () => nodes(app.render(props), (node) => node.type === "form")[0];
+  nodes(form(), (node) => node.type === "input")[0].props.onChange({ target: { value: "Are you there?" } });
+  await form().props.onSubmit({ preventDefault() {} });
+  await flush();
+  const tree = app.render(props);
+  assert.equal(nodes(tree, (node) => node.type === "input")[0].props.value, "Are you there?", "the draft is kept for a retry");
+  assert.match(nodes(tree, (node) => node.props.role === "alert").map(textOf).join(" "), /didn't send/);
+  assert.doesNotMatch(textOf(nodes(tree, (node) => node.props.role === "log")[0]), /Are you there/);
 });
 
 test("Chat: a closed gig shows the read-only notice instead of a composer", async () => {
@@ -4868,11 +4982,11 @@ test("Chat negotiation: the propose control is hidden when the price cannot chan
 
 test("Gig page: the chat is told when the price can be negotiated (helper chosen, start not yet requested) and who the other person is", async () => {
   const chat = (tree) => nodes(tree, (node) => node.type === "chat-panel")[0];
-  const selected = await openGig({ poster_id: user.id, selected_provider_id: "helper-1", agreed_amount: 55, amount: 50 });
+  const selected = await openGig({ poster_id: user.id, selected_provider_id: "helper-1", agreed_amount: 55, amount: 50, price_type: "negotiable" });
   assert.deepEqual({ ...chat(selected.tree).props.negotiation }, { open: true, agreedAmount: 55 }, "negotiate from the agreed price, not the original budget");
   assert.equal(chat(selected.tree).props.otherName, "@helper1");
   assert.equal(typeof chat(selected.tree).props.onPriceChanged, "function", "the page reloads the gig when a price is accepted");
-  const asHelper = await openGig({ selected_provider_id: user.id, agreed_amount: 50 });
+  const asHelper = await openGig({ selected_provider_id: user.id, agreed_amount: 50, price_type: "negotiable" });
   assert.equal(chat(asHelper.tree).props.otherName, "@customer1");
   assert.equal(chat(asHelper.tree).props.negotiation.open, true);
   const started = await openGig({ poster_id: user.id, selected_provider_id: "helper-1", start_requested_at: "2026-10-02T10:00:00Z" });
@@ -4889,6 +5003,7 @@ test("A price notification opens the chat where the proposal waits; other notifi
   assert.equal(bell.notificationHref({ gig_id: "g1", type: "gig_request" }), "/gigs/g1#request");
   assert.equal(bell.notificationHref({ gig_id: "g1", type: "claim_received" }), "/gigs/g1#proposals");
   assert.equal(bell.notificationHref({ gig_id: "g1", type: "selected" }), "/gigs/g1");
+  assert.equal(bell.notificationHref({ gig_id: "g1", type: "proof_photos" }), "/gigs/g1", "photos added opens the gig, where the photos are");
 });
 
 test("Chat negotiation: on a server without migration 0021 the price controls stay hidden and the chat still works", async () => {
@@ -5112,6 +5227,73 @@ test("start-flow helpers: who sees which step of the start request, and when the
 
 const startGig = (fields) => ({ requested_helper_id: null, selected_provider_id: "helper-1", agreed_amount: 55, start_requested_at: "2026-10-02T10:00:00Z", start_delayed_at: null, helper_withdrawn_at: null, ...fields });
 
+const helperClaim = { "helper-1": { id: "c", state: "selected", provider_id: "helper-1" } };
+
+test("start-flow: at most two delays, the helper can ask again only after the first, and the poster has 24 hours after the second", () => {
+  const { delaysUsed, delaysLeft, canResubmitStart, finalDelay, START_MAX_DELAYS } = startFlowLib;
+  assert.equal(START_MAX_DELAYS, 2);
+  assert.equal(delaysUsed({ start_delay_count: 2 }), 2);
+  assert.equal(delaysUsed({ start_delayed_at: "2026-10-01T10:00:00Z" }), 1, "a server without the count: a delayed start used one");
+  assert.equal(delaysUsed({}), 0);
+  assert.deepEqual([0, 1, 2].map((start_delay_count) => delaysLeft({ start_delay_count })), [2, 1, 0]);
+  assert.equal(canResubmitStart({ start_delayed_at: "2026-10-01T10:00:00Z", start_delay_count: 1 }), true);
+  assert.equal(canResubmitStart({ start_delayed_at: "2026-10-01T10:00:00Z", start_delay_count: 2 }), false, "not after the second delay");
+  assert.equal(canResubmitStart({ start_delayed_at: null, start_delay_count: 1 }), false, "nothing delayed, nothing to ask again");
+  const delayedAt = "2026-10-01T10:00:00Z", at = Date.parse(delayedAt);
+  assert.deepEqual(finalDelay({ start_delayed_at: delayedAt, start_delay_count: 1 }, at + 1000), { final: false, deadline: 0, overdue: false });
+  assert.deepEqual(finalDelay({ start_delayed_at: delayedAt, start_delay_count: 2 }, at + 23 * 3600000), { final: true, deadline: at + 24 * 3600000, overdue: false });
+  assert.equal(finalDelay({ start_delayed_at: delayedAt, start_delay_count: 2 }, at + 24 * 3600000).overdue, true);
+});
+
+test("Poster: the last delay warns about the lemon, and once both delays are used there is no Delay start", async () => {
+  const first = await openRequest({ asUser: "poster-1", gig: startGig({ start_delay_count: 0 }) });
+  await buttonText(first.tree, "Delay start").props.onClick();
+  assert.doesNotMatch(first.confirms[0], /last delay/, "the first delay is an ordinary confirmation");
+  const second = await openRequest({ asUser: "poster-1", gig: startGig({ start_delay_count: 1 }) });
+  await buttonText(second.tree, "Delay start").props.onClick();
+  assert.match(second.confirms[0], /last delay/);
+  assert.match(second.confirms[0], /lemon/);
+  assert.deepEqual(second.rpcs, [["delay_start", { p_gig_id: "gig-1" }]]);
+  const used = await openRequest({ asUser: "poster-1", gig: startGig({ start_delay_count: 2 }) });
+  assert.equal(buttonText(used.tree, "Delay start"), undefined, "both delays used");
+  assert.ok(buttonText(used.tree, "ACCEPT START — LET'S GO"));
+});
+
+test("Poster: after the second delay they are told to accept within 24 hours, and removing the helper warns of the lemon", async () => {
+  const afterFirst = await openRequest({ asUser: "poster-1", gig: startGig({ start_delayed_at: hoursAgo(1), start_delay_count: 1, helper_removed_at: null }) });
+  assert.doesNotMatch(textOf(afterFirst.tree), /last delay/);
+  const afterSecond = await openRequest({ asUser: "poster-1", gig: startGig({ start_delayed_at: hoursAgo(1), start_delay_count: 2, helper_removed_at: null }) });
+  assert.match(textOf(afterSecond.tree), /This was your last delay: accept the start within 2[23] h/);
+  assert.match(textOf(afterSecond.tree), /you will receive a lemon/);
+  await buttonText(afterSecond.tree, "Remove helper").props.onClick();
+  const form = afterSecond.again();
+  assert.match(textOf(nodes(form, (node) => node.props.role === "note")[0]), /removing your helper will give you a lemon/);
+  await buttonText(afterFirst.tree, "Remove helper").props.onClick();
+  assert.equal(nodes(afterFirst.again(), (node) => node.props.role === "note").length, 0, "no lemon warning after only one delay");
+});
+
+test("Helper: asks to start again only after the first delay; after the second there is a countdown, then a withdrawal that gives the poster a lemon", async () => {
+  const afterFirst = await openRequest({ asUser: "helper-1", gig: startGig({ start_delayed_at: hoursAgo(1), start_delay_count: 1 }), claims: helperClaim });
+  assert.ok(buttonText(afterFirst.tree, "Ask to start again"));
+
+  const waiting = await openRequest({ asUser: "helper-1", gig: startGig({ start_delayed_at: hoursAgo(2), start_delay_count: 2 }), claims: helperClaim });
+  assert.equal(buttonText(waiting.tree, "Ask to start again"), undefined, "not after the second delay");
+  assert.match(textOf(waiting.tree), /can't ask to start again/);
+  assert.match(textOf(waiting.tree), /The poster has 2[12] h .* left to answer/);
+  assert.equal(buttonText(waiting.tree, "Withdraw: the poster didn't answer"), undefined, "too early for the lemon withdrawal");
+  assert.ok(buttonText(waiting.tree, "Withdraw"), "the ordinary withdraw (no lemon) is always there");
+
+  const overdue = await openRequest({ asUser: "helper-1", gig: startGig({ start_delayed_at: hoursAgo(30), start_delay_count: 2 }), claims: helperClaim });
+  const lemonWithdraw = buttonText(overdue.tree, "Withdraw: the poster didn't answer");
+  assert.ok(lemonWithdraw, "24 hours have passed");
+  await lemonWithdraw.props.onClick();
+  assert.match(overdue.confirms[0], /poster will receive a lemon/);
+  assert.deepEqual(overdue.rpcs, [["withdraw_after_second_delay", { p_gig_id: "gig-1" }]]);
+  const plain = await openRequest({ asUser: "helper-1", gig: startGig({ start_delayed_at: hoursAgo(30), start_delay_count: 2 }), claims: helperClaim });
+  await buttonText(plain.tree, "Withdraw").props.onClick();
+  assert.deepEqual(plain.rpcs, [["withdraw_from_gig", { p_gig_id: "gig-1" }]], "the plain Withdraw is still the penalty-free one");
+});
+
 test("Poster: a start request can be accepted or delayed (after a confirmation), and a delayed start can still be accepted", async () => {
   const review = await openRequest({ asUser: "poster-1", gig: startGig() });
   assert.ok(buttonText(review.tree, "ACCEPT START — LET'S GO"));
@@ -5150,7 +5332,7 @@ test("Helper: waits quietly until the poster responds; when the start is delayed
   const card = nodes(delayed.tree, (node) => node.props["aria-label"] === "Start delayed")[0];
   assert.ok(card, "the choice card");
   assert.match(textOf(card), /The poster asked you to wait/);
-  assert.deepEqual(nodes(card, (node) => node.type === "button").map(textOf), ["I'll wait", "Withdraw"]);
+  assert.deepEqual(nodes(card, (node) => node.type === "button").map(textOf), ["Ask to start again", "I'll wait", "Withdraw"]);
   for (const b of nodes(card, (node) => node.type === "button")) assert.match(b.props.className, /min-h-11/);
 
   // Wait: no server call, the choices go away, and the helper is told what happens next.
@@ -5159,6 +5341,17 @@ test("Helper: waits quietly until the poster responds; when the start is delayed
   assert.deepEqual(delayed.rpcs, []);
   assert.equal(nodes(after, (node) => node.type === "button" && textOf(node) === "Withdraw").length, 0);
   assert.match(textOf(after), /notified as soon as the poster approves/);
+
+  // Ask to start again: one call, no dialog; the delay is cleared server-side so the poster is asked again.
+  const again = await openRequest({ asUser: "helper-1", gig: delayedGig, claims: { "helper-1": { id: "c", state: "selected", provider_id: "helper-1" } } });
+  await nodes(again.tree, (node) => node.type === "button" && textOf(node) === "Ask to start again")[0].props.onClick();
+  assert.deepEqual(again.rpcs, [["resubmit_start", { p_gig_id: "gig-1" }]]);
+
+  // After a resubmit the delay is gone, so the poster sees Accept start and Delay start once more.
+  const { startView } = startFlowLib;
+  const resubmitted = { status: "active", poster_id: "poster", selected_provider_id: "helper", start_requested_at: "2026-10-03T10:00:00Z", start_delayed_at: null };
+  assert.equal(startView(resubmitted, "poster"), "poster-review");
+  assert.equal(startView(resubmitted, "helper"), "helper-waiting");
 
   // Withdraw: asks first, then calls the new function.
   const leaving = await openRequest({ asUser: "helper-1", gig: delayedGig, claims: { "helper-1": { id: "c", state: "selected", provider_id: "helper-1" } } });
@@ -5179,6 +5372,41 @@ test("Nobody else gets the start decisions: not a stranger, not the poster as he
   assert.equal(buttonText(helperView.tree, "ACCEPT START — LET'S GO"), undefined);
   const posterView = await openRequest({ asUser: "poster-1", gig: delayedGig });
   assert.equal(buttonText(posterView.tree, "Withdraw"), undefined, "the poster cannot withdraw the helper");
+});
+
+test("After the helper leaves with the date still ahead: Post it publicly again reopens the same gig directly, after one confirmation", async () => {
+  const future = new Date(Date.now() + 3 * 86400000).toISOString();
+  const left = { status: "cancelled", selected_provider_id: null, agreed_amount: null, scheduled_at: future, helper_removed_at: "2026-10-03T10:00:00Z", requested_helper_id: null };
+  const ok = await openRequest({ asUser: "poster-1", gig: left });
+  const section = nodes(ok.tree, (node) => node.props["aria-label"] === "Repost this gig")[0];
+  assert.match(textOf(section), /You removed your helper/);
+  await buttonText(section, "Post it publicly again").props.onClick();
+  assert.deepEqual(ok.rpcs, [["reopen_gig_publicly", { p_gig_id: "gig-1" }]], "the same gig is reopened, not re-created through the form");
+  assert.equal(ok.confirms.length, 1, "one confirmation, then it is published");
+  assert.equal(nodes(section, (node) => node.type === "a").map((node) => node.props.href)[0], "/post?repost=gig-1", "changing details still goes through the form");
+
+  const declined = await openRequest({ asUser: "poster-1", gig: left, confirm: false });
+  await buttonText(nodes(declined.tree, (node) => node.props["aria-label"] === "Repost this gig")[0], "Post it publicly again").props.onClick();
+  assert.deepEqual(declined.rpcs, [], "cancelling the dialog publishes nothing");
+
+  // A date that has passed has to be re-entered, so that case keeps the form.
+  const past = await openRequest({ asUser: "poster-1", gig: { ...left, scheduled_at: "2020-01-01T10:00:00Z" } });
+  assert.equal(buttonText(past.tree, "Post it publicly again"), undefined);
+  assert.equal(textOf(nodes(nodes(past.tree, (node) => node.props["aria-label"] === "Repost this gig")[0], (node) => node.type === "a")[0]), "Post it publicly as a new gig");
+});
+
+test("canReopenPublicly: only the poster, only a cancelled gig whose helper left, only with a future date", () => {
+  const { canReopenPublicly } = repostLib;
+  const now = Date.parse("2026-11-01T00:00:00Z");
+  const gig = (fields) => ({ poster_id: "p", status: "cancelled", scheduled_at: "2026-11-05T00:00:00Z", selected_provider_id: null, helper_removed_at: "2026-10-30T00:00:00Z", helper_withdrawn_at: null, ...fields });
+  assert.equal(canReopenPublicly(gig(), "p", now), true);
+  assert.equal(canReopenPublicly(gig({ helper_removed_at: null, helper_withdrawn_at: "2026-10-30T00:00:00Z" }), "p", now), true, "a withdrawal counts too");
+  assert.equal(canReopenPublicly(gig(), "someone-else", now), false);
+  assert.equal(canReopenPublicly(gig(), null, now), false);
+  assert.equal(canReopenPublicly(gig({ helper_removed_at: null }), "p", now), false, "a plain cancelled gig is reposted, not reopened");
+  assert.equal(canReopenPublicly(gig({ status: "completed" }), "p", now), false);
+  assert.equal(canReopenPublicly(gig({ scheduled_at: "2026-10-01T00:00:00Z" }), "p", now), false, "past date");
+  assert.equal(canReopenPublicly(gig({ scheduled_at: null }), "p", now), false, "no date");
 });
 
 test("After the helper withdraws: the poster is offered to post it publicly again, the helper sees they withdrew", async () => {
@@ -5498,6 +5726,26 @@ const providerProfile = (fields = {}) => ({ id: "provider-1", username: "HelperO
 const findHelpersGig = (fields = {}) => ({ id: "gig-1", poster_id: "poster-1", service_type: "Cleaning", title: "Assemble IKEA bed",
   amount: 50, price_type: "fixed", status: "saved_non_public", lat: null, lng: null, scheduled_at: null, location_text: "Kävlinge", photo_url: null, ...fields });
 
+test("ProfilePhoto: a profile photo opens full size and closes again; with no photo there is nothing to open", async () => {
+  const app = await component("src/components/ProfilePhoto.tsx", "ProfilePhoto", { globals: { window: { addEventListener() {}, removeEventListener() {} } } });
+  const props = { url: "https://img.example/a.jpg", username: "HelperOne", sizeClass: "h-16 w-16" };
+  const tree = app.render(props);
+  const open = nodes(tree, (node) => node.type === "button")[0];
+  assert.equal(open.props["aria-label"], "View @HelperOne's photo");
+  assert.equal(nodes(tree, (node) => node.props.role === "dialog").length, 0, "closed until tapped");
+  open.props.onClick();
+  const expanded = app.render(props);
+  const dialog = nodes(expanded, (node) => node.props.role === "dialog")[0];
+  assert.ok(dialog, "the full-size photo opens");
+  assert.equal(nodes(dialog, (node) => node.type === "img")[0].props.src, "https://img.example/a.jpg");
+  dialog.props.onClick();
+  assert.equal(nodes(app.render(props), (node) => node.props.role === "dialog").length, 0, "tapping the photo closes it");
+
+  const none = app.render({ ...props, url: null });
+  assert.equal(nodes(none, (node) => node.type === "button").length, 0, "no photo, nothing to tap");
+  assert.match(textOf(none), /👤/);
+});
+
 test("ProviderCard: shows the provider's summary, and Skip/View Full Profile/Send Gig call their own callbacks without any drag", async () => {
   const calls = [];
   const app = await component("src/components/ProviderCard.tsx", "ProviderCard", {});
@@ -5693,10 +5941,20 @@ test("Find Helpers Nearby: an invalid or missing gig shows an error instead of a
   assert.match(textOf(tree), /No gig was specified/);
 });
 
-test("Post a Gig: 'Save & Find Helpers Nearby' sends p_find_helpers and routes to the new find-helpers deck on success", async () => {
-  const calls = [];
-  const destinations = [];
-  const stored = new Map();
+test("Post a Gig: the form offers only Save as Draft and Post Gig; finding helpers starts from the saved draft", async () => {
+  const { app } = await openRequestForm({ search: "" });
+  const labels = nodes(app.render(), (node) => node.type === "button").map(textOf);
+  assert.ok(labels.includes("Save as Draft") && labels.includes("Post Gig"));
+  assert.equal(labels.some((label) => /Find Helpers/i.test(label)), false, "no Save & Find Helpers Nearby on the posting form");
+  const privateForm = await openRequestForm();
+  assert.equal(nodes(privateForm.app.render(), (node) => node.type === "button").map(textOf).some((label) => /Find Helpers/i.test(label)), false);
+});
+
+test("Post a Gig: a retained find-helpers request from before the change is still re-sent unchanged and still opens the helper deck", async () => {
+  const calls = [], destinations = [];
+  const request = { p_request_id: "old-1", p_service_type: "Cleaning", p_title: "Assemble IKEA bed", p_description: "Need help today", p_amount: 50, p_price_type: "fixed",
+    p_scheduled_at: new Date(Date.now() + 86400000).toISOString(), p_location_text: "Kävlinge", p_lat: null, p_lng: null, p_photo_url: null, p_publish: false, p_tag_ids: [], p_private_address: null, p_find_helpers: true };
+  const stored = new Map([[`esg:post:${user.id}`, JSON.stringify(request)]]);
   const app = await component("src/app/post/page.tsx", "PostGigForm", {
     client: { rpc: async (name, payload) => { calls.push({ name, payload }); return { data: { id: "new-gig", status: "saved_non_public" }, error: null }; } },
     storage: { getItem: (key) => stored.get(key) ?? null, setItem: (key, value) => stored.set(key, value), removeItem: (key) => stored.delete(key) },
@@ -5705,27 +5963,10 @@ test("Post a Gig: 'Save & Find Helpers Nearby' sends p_find_helpers and routes t
       "@/lib/location": { loadJourneyLocation: () => ({ text: "Kävlinge", lat: 55.79, lng: 13.12 }) },
     },
   });
-  let tree = app.render();
-  for (const [predicate, value] of [
-    [(node) => node.type === "input" && node.props.maxLength === 120, "Assemble IKEA bed"],
-    [(node) => node.type === "textarea", "Need help today"],
-    [(node) => node.props.type === "number", "50"],
-    [(node) => node.props.type === "datetime-local", new Date(Date.now() + 86400000).toISOString().slice(0, 16)],
-  ]) nodes(tree, predicate)[0].props.onChange({ target: { value } });
-  tree = app.render();
-  button(tree, "Save & Find Helpers Nearby").props.onClick();
+  button(app.render(), "Retry previous request").props.onClick();
   await flush();
-  assert.equal(calls[0].name, "create_gig");
   assert.equal(calls[0].payload.p_find_helpers, true);
-  assert.equal(calls[0].payload.p_publish, false);
   assert.deepEqual(destinations, ["/post/find-helpers?gig=new-gig"]);
-});
-
-test("Post a Gig: 'Save & Find Helpers Nearby' is not offered for a private request to one named helper", async () => {
-  const { app } = await openRequestForm();
-  const tree = app.render();
-  assert.equal(nodes(tree, (node) => node.type === "button" && node.props.children === "Save & Find Helpers Nearby").length, 0,
-    "a private single-helper request already has its own addressed flow");
 });
 
 test("My Gigs: a saved non-public gig shows its sent requests (only a pending/interested one offers Accept), and Resume Finding Helpers / Cancel wire to the right RPCs", async () => {
@@ -5794,6 +6035,143 @@ test("My Gigs: a received direct request shows under Direct Requests, and Intere
   assert.deepEqual(JSON.parse(JSON.stringify(calls.filter(([name]) => name === "respond_direct_request"))), [["respond_direct_request", { p_request_id: "dr-9", p_interested: true }]]);
 });
 
+test("SwipeCard: right commits the positive answer, left the negative, and a short, vertical or disabled swipe does nothing", async () => {
+  const calls = [];
+  const app = await component("src/components/SwipeCard.tsx", "SwipeCard", {});
+  const props = (fields = {}) => ({ enabled: true, onSwipeRight: () => calls.push("right"), onSwipeLeft: () => calls.push("left"), rightLabel: "Interested", leftLabel: "Decline", className: "card", children: "body", ...fields });
+  const render = (fields) => app.render(props(fields));
+  drag(render, 120); assert.deepEqual(calls, ["right"]);
+  drag(render, -120); assert.deepEqual(calls, ["right", "left"]);
+  drag(render, 30); drag(render, -30); drag(render, 120, 200);
+  assert.deepEqual(calls, ["right", "left"], "short or mostly-vertical drags do not commit");
+  drag((fields) => render({ enabled: false, ...fields }), 120); drag((fields) => render({ enabled: false, ...fields }), -120);
+  assert.deepEqual(calls, ["right", "left"], "turned off: no gesture at all");
+  render().props.onPointerDown({ clientX: 0, clientY: 0, pointerId: 1, target: {} });
+  render().props.onPointerMove({ clientX: 60, clientY: 0 });
+  assert.equal(textOf(render()), "Interested" + "body", "the card says what the swipe will do while it is being dragged");
+});
+
+test("SwipeCard: a drag cancels the click that follows it, a plain tap does not", async () => {
+  const app = await component("src/components/SwipeCard.tsx", "SwipeCard", {});
+  const render = () => app.render({ enabled: true, onSwipeRight() {}, onSwipeLeft() {}, rightLabel: "Interested", leftLabel: "Decline", children: "body" });
+  const click = () => { const event = { prevented: false, preventDefault() { this.prevented = true; }, stopPropagation() {} }; render().props.onClickCapture(event); return event.prevented; };
+  render().props.onPointerDown({ clientX: 0, clientY: 0, pointerId: 1, target: {} });
+  render().props.onPointerUp();
+  assert.equal(click(), false, "a tap opens the link");
+  drag(render, 120);
+  assert.equal(click(), true, "the click after a swipe is swallowed");
+  assert.equal(click(), false, "and only that one");
+});
+
+test("My Gigs: a pending direct request can be swiped (right = Interested, left = Decline); an answered one cannot", async () => {
+  const calls = [];
+  const gig = myGig("g-recv", { poster_id: "poster-9", title: "Move a couch", status: "saved_non_public" });
+  const rows = [
+    { id: "dr-1", gig_id: "g-recv", poster_id: "poster-9", provider_id: user.id, state: "pending", created_at: "2026-01-01T00:00:00Z", gig },
+    { id: "dr-2", gig_id: "g-recv", poster_id: "poster-9", provider_id: user.id, state: "interested", created_at: "2026-01-02T00:00:00Z", gig },
+  ];
+  const db = fakeDb((query) => {
+    if (query.table === "gigs") return { data: [], error: null };
+    if (query.table === "claims") return { data: [], error: null };
+    if (query.table === "direct_requests" && query.eq.provider_id) return { data: rows, error: null };
+    if (query.table === "public_profiles") return { data: [{ id: "poster-9", username: "poster9" }].filter((p) => query.in.id.includes(p.id)), error: null };
+    throw new Error(`unhandled query for table "${query.table}"`);
+  });
+  db.rpc = async (name, args) => { calls.push([name, args]); return { error: null }; };
+  const app = await component("src/app/my-gigs/page.tsx", "MyGigsInner", {
+    client: db, mocks: { "next/navigation": { useSearchParams: () => new URLSearchParams({ tab: "helping" }) } },
+  });
+  app.render(); await flush(); app.render(); await flush();
+  const cards = nodes(sectionNamed(app.render(), "Direct Requests"), (node) => node.type === "swipe-card");
+  assert.equal(cards.length, 2);
+  const [pending, answered] = cards;
+  assert.equal(pending.props.enabled, true);
+  assert.equal(answered.props.enabled, false, "already answered: no gesture");
+  pending.props.onSwipeRight(); pending.props.onSwipeLeft();
+  assert.deepEqual(JSON.parse(JSON.stringify(calls.filter(([name]) => name === "respond_direct_request"))), [
+    ["respond_direct_request", { p_request_id: "dr-1", p_interested: true }],
+    ["respond_direct_request", { p_request_id: "dr-1", p_interested: false }],
+  ]);
+  assert.equal(button(pending, "Interested") !== undefined && button(pending, "Decline") !== undefined, true, "the buttons stay as the non-gesture way to answer");
+});
+
+test("My Gigs: Direct Requests are a deck, one waiting request at a time, with answered ones listed underneath", async () => {
+  const calls = [];
+  const mk = (id, title, state, at) => ({ id, gig_id: `g-${id}`, poster_id: "poster-9", provider_id: user.id, state, created_at: at,
+    gig: myGig(`g-${id}`, { poster_id: "poster-9", title, status: "saved_non_public" }) });
+  const rows = [mk("dr-1", "Move a couch", "pending", "2026-01-03T00:00:00Z"), mk("dr-2", "Paint a fence", "pending", "2026-01-02T00:00:00Z"), mk("dr-3", "Rake leaves", "declined", "2026-01-01T00:00:00Z")];
+  const db = fakeDb((query) => {
+    if (query.table === "gigs") return { data: [], error: null };
+    if (query.table === "claims") return { data: [], error: null };
+    if (query.table === "direct_requests" && query.eq.provider_id) return { data: rows, error: null };
+    if (query.table === "public_profiles") return { data: [{ id: "poster-9", username: "poster9" }].filter((p) => query.in.id.includes(p.id)), error: null };
+    throw new Error(`unhandled query for table "${query.table}"`);
+  });
+  db.rpc = async (name, args) => { calls.push([name, args]); return { error: null }; };
+  const app = await component("src/app/my-gigs/page.tsx", "MyGigsInner", {
+    client: db, mocks: { "next/navigation": { useSearchParams: () => new URLSearchParams({ tab: "helping" }) } },
+  });
+  app.render(); await flush(); app.render(); await flush();
+  const section = sectionNamed(app.render(), "Direct Requests");
+  assert.match(textOf(section), /Request 1 of 2 waiting for your answer/);
+  const cards = nodes(section, (node) => node.type === "swipe-card");
+  assert.equal(cards.length, 2, "one waiting request plus the answered one");
+  assert.equal(cards[0].props.enabled, true);
+  assert.match(textOf(cards[0]), /Move a couch/);
+  assert.doesNotMatch(textOf(section.props.children), /Paint a fence/, "the second waiting request is not shown until the first is answered");
+  assert.equal(cards[1].props.enabled, false);
+  assert.match(textOf(cards[1]), /Rake leaves/);
+  assert.match(textOf(section), /Answered/);
+  cards[0].props.onSwipeRight();
+  assert.deepEqual(JSON.parse(JSON.stringify(calls.filter(([name]) => name === "respond_direct_request"))), [["respond_direct_request", { p_request_id: "dr-1", p_interested: true }]]);
+});
+
+test("My Gigs: Not now sends the waiting request to the back of the deck without answering it", async () => {
+  const calls = [];
+  const mk = (id, title, at) => ({ id, gig_id: `g-${id}`, poster_id: "poster-9", provider_id: user.id, state: "pending", created_at: at,
+    gig: myGig(`g-${id}`, { poster_id: "poster-9", title, status: "saved_non_public" }) });
+  const rows = [mk("dr-1", "Move a couch", "2026-01-03T00:00:00Z"), mk("dr-2", "Paint a fence", "2026-01-02T00:00:00Z"), mk("dr-3", "Rake leaves", "2026-01-01T00:00:00Z")];
+  const db = fakeDb((query) => {
+    if (query.table === "gigs") return { data: [], error: null };
+    if (query.table === "claims") return { data: [], error: null };
+    if (query.table === "direct_requests" && query.eq.provider_id) return { data: rows.slice(0, query.__limit ?? 3), error: null };
+    if (query.table === "public_profiles") return { data: [{ id: "poster-9", username: "poster9" }].filter((p) => query.in.id.includes(p.id)), error: null };
+    throw new Error(`unhandled query for table "${query.table}"`);
+  });
+  db.rpc = async (name, args) => { calls.push([name, args]); return { error: null }; };
+  const app = await component("src/app/my-gigs/page.tsx", "MyGigsInner", {
+    client: db, mocks: { "next/navigation": { useSearchParams: () => new URLSearchParams({ tab: "helping" }) } },
+  });
+  app.render(); await flush(); app.render(); await flush();
+  const shown = () => textOf(nodes(sectionNamed(app.render(), "Direct Requests"), (node) => node.type === "swipe-card")[0]);
+  const notNow = () => button(sectionNamed(app.render(), "Direct Requests"), "Not now");
+  assert.match(shown(), /Move a couch/);
+  notNow().props.onClick();
+  assert.match(shown(), /Paint a fence/, "the next request comes up");
+  notNow().props.onClick();
+  assert.match(shown(), /Rake leaves/);
+  notNow().props.onClick();
+  assert.match(shown(), /Move a couch/, "set-aside requests come back round, in the order they were set aside");
+  assert.match(textOf(sectionNamed(app.render(), "Direct Requests")), /Request 1 of 3 waiting/, "nothing was answered or dropped");
+  assert.deepEqual(calls.filter(([name]) => name === "respond_direct_request"), [], "Not now never answers anything");
+});
+
+test("My Gigs: Not now is only offered when there is another waiting request to look at", async () => {
+  const gig = myGig("g-recv", { poster_id: "poster-9", title: "Move a couch", status: "saved_non_public" });
+  const rows = [{ id: "dr-1", gig_id: "g-recv", poster_id: "poster-9", provider_id: user.id, state: "pending", created_at: "2026-01-01T00:00:00Z", gig }];
+  const db = fakeDb((query) => {
+    if (query.table === "gigs" || query.table === "claims") return { data: [], error: null };
+    if (query.table === "direct_requests" && query.eq.provider_id) return { data: rows, error: null };
+    if (query.table === "public_profiles") return { data: [{ id: "poster-9", username: "poster9" }].filter((p) => query.in.id.includes(p.id)), error: null };
+    throw new Error(`unhandled query for table "${query.table}"`);
+  });
+  const app = await component("src/app/my-gigs/page.tsx", "MyGigsInner", {
+    client: db, mocks: { "next/navigation": { useSearchParams: () => new URLSearchParams({ tab: "helping" }) } },
+  });
+  app.render(); await flush(); app.render(); await flush();
+  assert.equal(button(sectionNamed(app.render(), "Direct Requests"), "Not now"), undefined, "a single waiting request has nothing to move behind");
+});
+
 test("My Gigs: a received direct request's Decline button calls respond_direct_request with p_interested: false", async () => {
   const calls = [];
   const gig = myGig("g-recv", { poster_id: "poster-9", title: "Move a couch", status: "saved_non_public" });
@@ -5816,4 +6194,437 @@ test("My Gigs: a received direct request's Decline button calls respond_direct_r
   button(section, "Decline").props.onClick();
   await flush();
   assert.deepEqual(JSON.parse(JSON.stringify(calls.filter(([name]) => name === "respond_direct_request"))), [["respond_direct_request", { p_request_id: "dr-9", p_interested: false }]]);
+});
+
+// ---- Proof photos (migration 0035) ----
+test("proof-photos helpers: who can add, what file is acceptable, and the folder layout the database checks", () => {
+  const { canAddProofPhotos, proofPhotoError, proofPhotoPath, MAX_PROOF_PHOTOS } = proofPhotosLib;
+  const gig = (fields) => ({ status: "in_progress", selected_provider_id: "h", ...fields });
+  assert.equal(canAddProofPhotos(gig(), "h", "complete"), true);
+  for (const status of ["awaiting_payment", "completed", "incomplete"]) assert.equal(canAddProofPhotos(gig({ status }), "h", "complete"), true, status);
+  for (const status of ["draft", "active", "cancelled", "disputed"]) assert.equal(canAddProofPhotos(gig({ status }), "h", "complete"), false, status);
+  assert.equal(canAddProofPhotos(gig(), "h", null), false);
+  assert.equal(canAddProofPhotos(gig(), "h", "incomplete"), false);
+  assert.equal(canAddProofPhotos(gig(), "poster", "complete"), false);
+  assert.equal(canAddProofPhotos(gig(), null, "complete"), false);
+  assert.equal(proofPhotoError({ type: "image/jpeg", size: 1000 }, 0), null);
+  assert.equal(proofPhotoError({ type: "image/webp", size: 5 * 1024 * 1024 }, MAX_PROOF_PHOTOS - 1), null);
+  assert.match(proofPhotoError({ type: "application/pdf", size: 1000 }, 0), /JPG, PNG or WebP/);
+  assert.match(proofPhotoError({ type: "image/png", size: 5 * 1024 * 1024 + 1 }, 0), /smaller than 5 MB/);
+  assert.match(proofPhotoError({ type: "image/png", size: 1000 }, MAX_PROOF_PHOTOS), /up to 5/);
+  assert.equal(proofPhotoPath("gig-1", "user-1", "file-1"), "gig-1/user-1/file-1");
+});
+
+async function openProofPhotos({ rows = [], userId = "me", canAdd = true, rpcError = null, uploadError = null } = {}) {
+  const calls = [];
+  const client = {
+    from: () => { const q = { select: () => q, eq: () => q, order: () => Promise.resolve({ data: rows, error: null }) }; return q; },
+    storage: { from: (bucket) => ({
+      createSignedUrls: async (paths) => ({ data: paths.map((path) => ({ path, signedUrl: `https://signed.example/${path}` })) }),
+      upload: async (path, file, options) => { calls.push(["upload", bucket, path, options.contentType]); return { error: uploadError }; },
+      remove: async (paths) => { calls.push(["remove", bucket, paths]); return { error: null }; },
+    }) },
+    rpc: async (name, args) => { calls.push([name, JSON.parse(JSON.stringify(args))]); return { error: rpcError }; },
+  };
+  const app = await component("src/components/ProofPhotos.tsx", "ProofPhotos", { client, globals: { crypto: { randomUUID: () => "file-1" } } });
+  const props = { gigId: "g1", userId, canAdd, helperName: "helper1" };
+  app.render(props); await flush();
+  return { app, props, calls, tree: () => app.render(props) };
+}
+const proofRow = (id, uploader = "me") => ({ id, gig_id: "g1", uploader_id: uploader, storage_path: `g1/${uploader}/${id}`, created_at: "2026-11-01T00:00:00Z" });
+
+test("ProofPhotos: the poster sees the helper's photos through signed links and cannot add or remove any", async () => {
+  const { tree } = await openProofPhotos({ rows: [proofRow("p1", "helper-1"), proofRow("p2", "helper-1")], userId: "poster-1", canAdd: false });
+  assert.match(textOf(tree()), /Photos from @helper1/);
+  const images = nodes(tree(), (node) => node.type === "img").map((node) => node.props.src);
+  assert.deepEqual(images, ["https://signed.example/g1/helper-1/p1", "https://signed.example/g1/helper-1/p2"]);
+  assert.equal(nodes(tree(), (node) => node.type === "input").length, 0, "no upload control");
+  assert.equal(nodes(tree(), (node) => node.type === "button").length, 0, "no remove control");
+});
+
+test("ProofPhotos: with nothing to show and nothing to add, nothing is rendered", async () => {
+  const { tree } = await openProofPhotos({ rows: [], canAdd: false });
+  assert.equal(tree(), null);
+});
+
+test("ProofPhotos: the helper uploads a photo into their own folder, then records it", async () => {
+  const { tree, calls } = await openProofPhotos({ rows: [] });
+  assert.match(textOf(tree()), /Proof photos/);
+  const input = nodes(tree(), (node) => node.type === "input")[0];
+  assert.equal(input.props.accept, "image/jpeg,image/png,image/webp");
+  await input.props.onChange({ target: { files: [{ type: "image/jpeg", size: 1000 }], value: "x" } });
+  await flush();
+  assert.deepEqual(calls, [["upload", "proof-photos", "g1/me/file-1", "image/jpeg"], ["add_proof_photo", { p_gig_id: "g1", p_path: "g1/me/file-1" }]]);
+});
+
+test("ProofPhotos: a wrong type or size is refused before anything is uploaded", async () => {
+  const { tree, calls } = await openProofPhotos({ rows: [] });
+  await nodes(tree(), (node) => node.type === "input")[0].props.onChange({ target: { files: [{ type: "application/pdf", size: 1000 }], value: "x" } });
+  await flush();
+  assert.deepEqual(calls, []);
+  assert.match(textOf(nodes(tree(), (node) => node.props.role === "alert")[0]), /JPG, PNG or WebP/);
+});
+
+test("ProofPhotos: if the record is refused, the uploaded file is removed again and the reason is shown", async () => {
+  const { tree, calls } = await openProofPhotos({ rows: [], rpcError: { code: "22023", message: "Mark the gig complete before adding photos." } });
+  await nodes(tree(), (node) => node.type === "input")[0].props.onChange({ target: { files: [{ type: "image/png", size: 1000 }], value: "x" } });
+  await flush();
+  assert.deepEqual(calls.map((call) => call[0]), ["upload", "add_proof_photo", "remove"], "no orphaned file");
+  assert.equal(nodes(tree(), (node) => node.props.role === "alert").length, 1);
+});
+
+test("ProofPhotos: the helper can remove their own photo, and the upload control goes away at the limit", async () => {
+  const { tree, calls } = await openProofPhotos({ rows: [proofRow("p1"), proofRow("p2", "helper-1")] });
+  const remove = nodes(tree(), (node) => node.type === "button" && textOf(node) === "Remove");
+  assert.equal(remove.length, 1, "only their own photo has a Remove control");
+  await remove[0].props.onClick();
+  await flush();
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [["remove_proof_photo", { p_photo_id: "p1" }], ["remove", "proof-photos", ["g1/me/p1"]]]);
+
+  const full = await openProofPhotos({ rows: ["a", "b", "c", "d", "e"].map((id) => proofRow(id)) });
+  assert.equal(nodes(full.tree(), (node) => node.type === "input").length, 0, "five photos is the limit");
+});
+
+// ---- Services Selection screen (spec v2.0) ----
+async function openSelector({ mode = "onboarding", initial, saveResult, revisions = { OFFER: 0, NEED: 0 }, confirm = true } = {}) {
+  const saves = [], events = [], confirms = [];
+  const app = await component("src/components/ServiceSelector.tsx", "ServiceSelector", {
+    globals: { window: { addEventListener() {}, removeEventListener() {}, confirm: (message) => { confirms.push(message); return confirm; } } },
+  });
+  const props = {
+    initial: initial ?? { OFFER: serviceSelectionLib.emptySelection(), NEED: serviceSelectionLib.emptySelection() }, revisions, mode,
+    onSave: async (branch, state, revision) => { saves.push(JSON.parse(JSON.stringify([branch, serviceSelectionLib.toPayload(state), revision]))); return typeof saveResult === "function" ? saveResult(branch, saves.length) : saveResult ?? { ok: true, revision: revision + 1 }; },
+    onFinish: () => events.push("finish"), onSkip: () => events.push("skip"),
+  };
+  const render = () => app.render(props);
+  return { app, render, saves, events, confirms };
+}
+const textButton = (tree, text) => nodes(tree, (node) => node.type === "button" && textOf(node).includes(text))[0];
+const tabs = (tree) => nodes(tree, (node) => node.props.role === "tab");
+const checkboxes = (tree) => nodes(tree, (node) => node.type === "input" && node.props.type === "checkbox");
+const checkboxLabel = (tree, text) => nodes(tree, (node) => node.type === "label" && textOf(node).trim() === text)[0];
+const checkboxOf = (tree, text) => nodes(checkboxLabel(tree, text), (node) => node.type === "input")[0];
+const searchBox = (tree) => nodes(tree, (node) => node.type === "input" && node.props.type === "search")[0];
+async function drillTo(sel, categoryName, serviceName) {
+  textButton(sel.render(), categoryName).props.onClick();
+  if (serviceName) textButton(sel.render(), serviceName).props.onClick();
+  return sel.render();
+}
+
+test("Services screen: two equal-width tabs stay visible, the full catalog of 23 categories shows under each, and nothing is selected yet", async () => {
+  const sel = await openSelector();
+  let tree = sel.render();
+  const [offer, need] = tabs(tree);
+  assert.match(textOf(offer), /Services to Make Money/);
+  assert.match(textOf(need), /Services I Need Help/);
+  assert.equal(offer.props["aria-selected"], true, "Make Money is the default tab");
+  for (const side of [offer, need]) assert.match(side.props.className, /flex-1/, "equal width");
+  const categories = () => nodes(sel.render(), (node) => node.props["aria-label"] === "Categories")[0];
+  assert.equal(nodes(categories(), (node) => node.type === "li").length, 23);
+  need.props.onClick();
+  tree = sel.render();
+  assert.equal(tabs(tree)[1].props["aria-selected"], true);
+  assert.equal(nodes(categories(), (node) => node.type === "li").length, 23, "the same catalog under the other list");
+  assert.match(textOf(tabs(tree)[0]), /0 selected/);
+});
+
+test("Services screen: Category > Service > Subservice drill-down with breadcrumbs, and changing levels keeps what is checked", async () => {
+  const sel = await openSelector();
+  let tree = await drillTo(sel, "Technology & Electronics");
+  assert.match(textOf(nodes(tree, (node) => node.props["aria-label"] === "Breadcrumb")[0]), /Catalog.*Technology & Electronics/);
+  assert.ok(textButton(tree, "App & Software Testing") && textButton(tree, "Smart Home"), "the category's services");
+  tree = await drillTo(sel, "App & Software Testing");
+  assert.ok(checkboxLabel(tree, "Mobile App Testing (iOS / Android)"));
+  assert.ok(checkboxLabel(tree, "All") && checkboxLabel(tree, "Other"));
+  checkboxOf(tree, "Mobile App Testing (iOS / Android)").props.onChange({ target: { checked: true } });
+  textButton(sel.render(), "Technology & Electronics").props.onClick();   // breadcrumb back up a level
+  tree = sel.render();
+  assert.match(textOf(textButton(tree, "App & Software Testing")), /1 selected/, "the count survives changing level");
+  textButton(tree, "Catalog").props.onClick();
+  assert.match(textOf(textButton(sel.render(), "Technology & Electronics")), /1 selected/);
+  assert.match(textOf(tabs(sel.render())[0]), /1 selected/);
+});
+
+test("Services screen: the two lists are independent: a checkbox in one is never checked in the other", async () => {
+  const sel = await openSelector();
+  const tree = await drillTo(sel, "Technology & Electronics", "App & Software Testing");
+  checkboxOf(tree, "Game Testing").props.onChange({ target: { checked: true } });
+  assert.equal(checkboxOf(sel.render(), "Game Testing").props.checked, true);
+  tabs(sel.render())[1].props.onClick();
+  let need = sel.render();
+  assert.match(textOf(tabs(need)[1]), /0 selected/);
+  need = await drillTo(sel, "Technology & Electronics", "App & Software Testing");
+  assert.equal(checkboxOf(need, "Game Testing").props.checked, false, "not selected under Services I Need Help");
+  checkboxOf(need, "Bug Testing & Verification").props.onChange({ target: { checked: true } });
+  tabs(sel.render())[0].props.onClick();
+  const offer = sel.render();
+  assert.equal(checkboxOf(offer, "Game Testing").props.checked, true, "still there after switching back");
+  assert.equal(checkboxOf(offer, "Bug Testing & Verification").props.checked, false, "and the other list's choice did not leak in");
+});
+
+test("Services screen: All selects every subservice of that service, is indeterminate when partial, and leaves Other alone", async () => {
+  const sel = await openSelector();
+  let tree = await drillTo(sel, "Technology & Electronics", "App & Software Testing");
+  const total = serviceCatalogLib.SERVICE_BY_ID.get("c12s05").service.subservices.length;
+  const allBox = () => checkboxOf(sel.render(), "All");
+  allBox().props.onChange({ target: { checked: true } });
+  assert.equal(allBox().props.checked, true);
+  assert.equal(checkboxes(sel.render()).filter((box) => box.props.checked).length, total + 1, "every subservice plus All itself");
+  checkboxOf(sel.render(), "Game Testing").props.onChange({ target: { checked: false } });
+  assert.equal(allBox().props.checked, false);
+  assert.equal(allBox().props["aria-checked"], "mixed", "partial: indeterminate");
+  checkboxOf(sel.render(), "Other").props.onChange({ target: { checked: true } });
+  allBox().props.onChange({ target: { checked: false } });
+  tree = sel.render();
+  assert.equal(checkboxes(tree).filter((box) => box.props.checked).length, 1, "only Other is left checked");
+  assert.equal(checkboxOf(tree, "Other").props.checked, true, "unchecking All kept Other");
+});
+
+test("Services screen: Other reveals a text box, is required when checked, and a blank one blocks saving with a message", async () => {
+  const sel = await openSelector();
+  let tree = await drillTo(sel, "Technology & Electronics", "App & Software Testing");
+  assert.equal(nodes(tree, (node) => node.type === "input" && node.props.type === "text").length, 0, "hidden until Other is checked");
+  checkboxOf(tree, "Other").props.onChange({ target: { checked: true } });
+  tree = sel.render();
+  const text = () => nodes(sel.render(), (node) => node.type === "input" && node.props.type === "text")[0];
+  assert.ok(text(), "free text appears");
+  await textButton(sel.render(), "Save to Services to Make Money").props.onClick(); await flush();
+  assert.deepEqual(sel.saves, [], "nothing is sent while Other is blank");
+  assert.match(textOf(nodes(sel.render(), (node) => node.props.role === "alert")[0]), /Enter what you mean by Other/);
+  text().props.onChange({ target: { value: "  Accessibility audits  " } });
+  await textButton(sel.render(), "Save to Services to Make Money").props.onClick(); await flush();
+  assert.deepEqual(sel.saves, [["OFFER", { subserviceIds: [], custom: [{ service_id: "c12s05", text: "Accessibility audits" }] }, 0]], "trimmed, scoped to this service and list");
+});
+
+test("Services screen: search suggestions show the full path, selecting one opens that drill-down with the target highlighted", async () => {
+  const sel = await openSelector();
+  searchBox(sel.render()).props.onChange({ target: { value: "mobile app" } });
+  let tree = sel.render();
+  const results = nodes(tree, (node) => node.props["aria-label"] === "Search results")[0];
+  const paths = nodes(results, (node) => node.type === "button").map(textOf);
+  assert.ok(paths.includes("Technology & Electronics > App & Software Testing > Mobile App Testing (iOS / Android)›") || paths.some((p) => p.startsWith("Technology & Electronics > App & Software Testing > Mobile App Testing")));
+  nodes(results, (node) => node.type === "button" && textOf(node).includes("Mobile App Testing (iOS / Android)"))[0].props.onClick();
+  tree = sel.render();
+  assert.equal(searchBox(tree).props.value, "", "the search is cleared on opening a result");
+  assert.match(textOf(nodes(tree, (node) => node.props["aria-label"] === "Breadcrumb")[0]), /Technology & Electronics.*App & Software Testing/);
+  assert.match(checkboxLabel(tree, "Mobile App Testing (iOS / Android)").props.className, /bg-emerald-50/, "the target is highlighted");
+  assert.equal(checkboxes(tree).filter((box) => box.props.checked).length, 0, "searching selected nothing and changed nothing");
+});
+
+test("Services screen: no matches says so, offers to clear, and each list keeps its own search", async () => {
+  const sel = await openSelector();
+  searchBox(sel.render()).props.onChange({ target: { value: "zzzz" } });
+  let tree = sel.render();
+  assert.match(textOf(tree), /No matching services/);
+  assert.ok(textButton(tree, "Clear search") && textButton(tree, "Back to the catalog"));
+  tabs(tree)[1].props.onClick();
+  assert.equal(searchBox(sel.render()).props.value, "", "the other list's search box is its own");
+  tabs(sel.render())[0].props.onClick();
+  assert.equal(searchBox(sel.render()).props.value, "zzzz", "and the first list kept its query");
+  textButton(sel.render(), "Clear search").props.onClick();
+  assert.equal(nodes(sel.render(), (node) => node.props["aria-label"] === "Categories").length, 1, "back to the catalog");
+});
+
+test("Services screen: saving writes only the active list, with its revision; failing keeps every edit and offers Retry", async () => {
+  let attempt = 0;
+  const sel = await openSelector({ revisions: { OFFER: 4, NEED: 9 }, saveResult: () => (++attempt === 1 ? { ok: false, error: "Couldn't save your services. Check your connection and try again." } : { ok: true, revision: 5 }) });
+  const tree = await drillTo(sel, "Pet Care & Animal Services", "Dog Walking");
+  checkboxOf(tree, "Daily walks").props.onChange({ target: { checked: true } });
+  assert.match(textOf(tabs(sel.render())[0]), /unsaved/);
+  await textButton(sel.render(), "Save to Services to Make Money").props.onClick(); await flush();
+  assert.deepEqual(sel.saves[0], ["OFFER", { subserviceIds: ["c08s01u01"], custom: [] }, 4], "only OFFER, with the revision it was loaded at");
+  assert.match(textOf(nodes(sel.render(), (node) => node.props.role === "alert")[0]), /Couldn't save your services/);
+  assert.equal(checkboxOf(sel.render(), "Daily walks").props.checked, true, "the edit is kept after a failed save");
+  await textButton(sel.render(), "Retry").props.onClick(); await flush();
+  assert.equal(sel.saves.length, 2, "retry sends it again");
+  assert.match(textOf(nodes(sel.render(), (node) => node.props.role === "status")[0]), /Saved Services to Make Money/);
+  assert.doesNotMatch(textOf(tabs(sel.render())[0]), /unsaved/);
+  checkboxOf(sel.render(), "Group walks").props.onChange({ target: { checked: true } });
+  await textButton(sel.render(), "Save to Services to Make Money").props.onClick(); await flush();
+  assert.equal(sel.saves[2][2], 5, "the next save carries the revision the last one returned");
+});
+
+test("Services screen: Review shows the two lists separately grouped by category and service, and Save & Complete saves both then finishes", async () => {
+  const sel = await openSelector();
+  let tree = await drillTo(sel, "Technology & Electronics", "App & Software Testing");
+  checkboxOf(tree, "Game Testing").props.onChange({ target: { checked: true } });
+  tabs(sel.render())[1].props.onClick();
+  tree = await drillTo(sel, "Home Cleaning & Housekeeping", "General Cleaning");
+  checkboxOf(tree, "Deep cleaning").props.onChange({ target: { checked: true } });
+  textButton(sel.render(), "Review").props.onClick();
+  tree = sel.render();
+  const offer = nodes(tree, (node) => node.props["aria-label"] === "Services to Make Money")[0];
+  const need = nodes(tree, (node) => node.props["aria-label"] === "Services I Need Help")[0];
+  assert.match(textOf(offer), /Technology & Electronics.*App & Software Testing.*Game Testing/);
+  assert.doesNotMatch(textOf(offer), /Deep cleaning/);
+  assert.match(textOf(need), /Home Cleaning & Housekeeping.*General Cleaning.*Deep cleaning/);
+  assert.ok(nodes(offer, (node) => node.type === "button" && textOf(node) === "Edit" && !node.props["aria-label"]).length === 1, "an Edit link for the list");
+  const editCategory = nodes(offer, (node) => node.props["aria-label"] === "Edit Technology & Electronics in Services to Make Money")[0];
+  assert.ok(editCategory, "and one for each category");
+  editCategory.props.onClick();
+  assert.match(textOf(nodes(sel.render(), (node) => node.props["aria-label"] === "Breadcrumb")[0]), /Technology & Electronics/, "Edit opens that category in that list");
+  assert.equal(tabs(sel.render())[0].props["aria-selected"], true);
+  textButton(sel.render(), "Review").props.onClick();
+  tree = sel.render();
+  await textButton(tree, "Save & Complete Registration").props.onClick(); await flush();
+  assert.deepEqual(sel.saves.map((save) => save[0]), ["OFFER", "NEED"], "both lists saved, each on its own");
+  assert.deepEqual(sel.events, ["finish"]);
+});
+
+test("Services screen: registration can be completed with nothing chosen, and Skip leaves (after a warning if there are unsaved edits)", async () => {
+  const empty = await openSelector();
+  textButton(empty.render(), "Review").props.onClick();
+  await textButton(empty.render(), "Save & Complete Registration").props.onClick(); await flush();
+  assert.deepEqual(empty.saves, [], "nothing to save, nothing sent");
+  assert.deepEqual(empty.events, ["finish"], "no services is allowed");
+
+  const skip = await openSelector();
+  textButton(skip.render(), "Skip for now").props.onClick();
+  assert.deepEqual([skip.events, skip.confirms], [["skip"], []], "no edits, no warning");
+  const tree = await drillTo(skip, "Pet Care & Animal Services", "Dog Walking");
+  checkboxOf(tree, "Daily walks").props.onChange({ target: { checked: true } });
+  const refused = await openSelector({ confirm: false });
+  const t2 = await drillTo(refused, "Pet Care & Animal Services", "Dog Walking");
+  checkboxOf(t2, "Daily walks").props.onChange({ target: { checked: true } });
+  textButton(refused.render(), "Skip for now").props.onClick();
+  assert.deepEqual(refused.events, [], "declining the warning stays on the page");
+  assert.match(refused.confirms[0], /without saving/);
+});
+
+test("Services screen: on the profile (not registration) there is no Skip, and a licensed service says it is not searchable yet", async () => {
+  const sel = await openSelector({ mode: "profile" });
+  assert.equal(textButton(sel.render(), "Skip for now"), undefined);
+  textButton(sel.render(), "Review").props.onClick();
+  assert.ok(textButton(sel.render(), "Save changes"));
+  textButton(sel.render(), "Keep editing").props.onClick();
+  const tree = await drillTo(sel, "Plumbing, Electrical & HVAC", "Licensed Plumbing Work");
+  assert.match(textOf(nodes(tree, (node) => node.props.role === "note")[0]), /won't show up in helper search until it is verified/);
+  const ordinary = await drillTo(sel, "Catalog", null).then(() => drillTo(sel, "Pet Care & Animal Services", "Dog Walking"));
+  assert.equal(nodes(ordinary, (node) => node.props.role === "note").length, 0);
+});
+
+test("OfferedServices: shows what a member offers grouped by category and service, with Other text, and nothing when empty", async () => {
+  const app = await component("src/components/OfferedServices.tsx", "OfferedServices", {});
+  assert.equal(app.render({ rows: [] }), null, "nothing offered, nothing shown");
+  const tree = app.render({ rows: [
+    { service_id: "c12s05", subservice_id: "c12s05u02", custom_text: null },
+    { service_id: "c12s05", subservice_id: "c12s05u06", custom_text: null },
+    { service_id: "c12s05", subservice_id: null, custom_text: "Accessibility audits" },
+    { service_id: "c08s01", subservice_id: "c08s01u01", custom_text: null },
+  ] });
+  const section = nodes(tree, (node) => node.props["aria-label"] === "Services offered")[0];
+  assert.ok(section);
+  const text = textOf(section);
+  assert.match(text, /Pet Care & Animal Services.*Dog Walking: Daily walks/);
+  assert.match(text, /Technology & Electronics.*App & Software Testing: Mobile App Testing \(iOS \/ Android\) · Game Testing · Other: Accessibility audits/);
+});
+
+test("OfferedServices: licensed services are not advertised on a public profile until they are verified", async () => {
+  const app = await component("src/components/OfferedServices.tsx", "OfferedServices", {});
+  const onlyLicensed = app.render({ rows: [{ service_id: "c16s04", subservice_id: "c16s04u01", custom_text: null }] });
+  assert.equal(onlyLicensed, null, "Licensed Plumbing Work alone shows nothing");
+  const mixed = textOf(app.render({ rows: [{ service_id: "c16s04", subservice_id: "c16s04u01", custom_text: null }, { service_id: "c16s01", subservice_id: "c16s01u01", custom_text: null }] }));
+  assert.match(mixed, /Minor Plumbing Fixes/);
+  assert.doesNotMatch(mixed, /Licensed Plumbing Work/);
+});
+
+test("Public profile passes a member's offered services to the profile, ignoring rows that are not offered-service rows", async () => {
+  const calls = [];
+  const profileRow = { id: "helper-1", username: "HelperOne", photo_url: null, skills: [], wom_count: 4, profile_tags: [] };
+  const client = {
+    from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: profileRow, error: null }) }) }) }),
+    rpc: async (name, args) => {
+      calls.push([name, JSON.parse(JSON.stringify(args))]);
+      if (name === "get_public_offered_services") return { data: [{ category_id: "c08", service_id: "c08s01", subservice_id: "c08s01u01", custom_text: null }, { gigs_worked_count: 2 }], error: null };
+      return { data: [{ gigs_worked_count: 2, wom_count: 4, wom_percentage: 80 }], error: null };
+    },
+  };
+  const app = await component("src/app/profile/[username]/page.tsx", "PublicProfileView", { client });
+  app.render({ username: "HelperOne" }); await flush();
+  const tree = app.render({ username: "HelperOne" });
+  const offered = nodes(tree, (node) => node.type === "offered-services")[0];
+  assert.deepEqual(JSON.parse(JSON.stringify(offered.props.rows)), [{ category_id: "c08", service_id: "c08s01", subservice_id: "c08s01u01", custom_text: null }], "only the real row");
+  assert.deepEqual(calls.filter(([name]) => name === "get_public_offered_services"), [["get_public_offered_services", { p_profile_id: "helper-1" }]]);
+});
+
+// ---- Find a Helper: search by service (matches what members OFFER, by id) ----
+async function openServiceSearch({ profiles = [helperSkillsProfile("a", "HelperOne"), helperSkillsProfile("b", "HelperTwo")], providerIds = ["a"], rpcError = null, signedIn = null } = {}) {
+  const calls = [], filters = [];
+  const base = helperClient(profiles, filters);
+  const client = {
+    rpc: async (name, args) => { calls.push([name, JSON.parse(JSON.stringify(args))]); return rpcError ? { data: null, error: rpcError } : { data: providerIds.map((provider_id) => ({ provider_id })), error: null }; },
+    from: (table) => ({ select: () => ({ ...base.from(table).select(), in: async (column, ids) => ({ data: profiles.filter((profile) => ids.includes(profile.id)), error: null }) }) }),
+  };
+  const app = await component("src/app/find-helper/page.tsx", "FindHelper", {
+    client, mocks: { "@/lib/tags": { loadTagCatalog: async () => ({}), ...helperTagsMock }, "@/lib/location": originLocationMock },
+  });
+  app.auth.user = signedIn;
+  app.render(); await flush();
+  setDistance(app, app.render(), null);
+  const type = (value) => nodes(app.render(), (node) => node.type === "input" && node.props.type === "search")[0].props.onChange({ target: { value } });
+  const suggestions = () => nodes(nodes(app.render(), (node) => node.props["aria-label"] === "Matching services")[0] ?? {}, (node) => node.type === "button");
+  const pick = async (text) => { suggestions().find((node) => textOf(node).includes(text)).props.onClick(); await flush(); app.render(); await flush(); };
+  return { app, calls, type, suggestions, pick, results: () => nodes(nodes(app.render(), (node) => node.props["aria-label"] === "Helpers offering this service")[0] ?? {}, (node) => node.props?.profile?.username) };
+}
+
+test("Find a Helper: Search by service suggests catalog entries with their full path", async () => {
+  const search = await openServiceSearch();
+  search.type("mobile app");
+  assert.ok(search.suggestions().map(textOf).includes("Technology & Electronics > App & Software Testing > Mobile App Testing (iOS / Android)"));
+  search.type("zzzz");
+  assert.match(textOf(app_tree(search)), /No matching services/);
+});
+const app_tree = (search) => search.app.render();
+
+test("Find a Helper: choosing a service finds the members who OFFER it, by id, and opens their profile plainly", async () => {
+  const search = await openServiceSearch({ providerIds: ["a"] });
+  search.type("mobile app testing");
+  await search.pick("Mobile App Testing (iOS / Android)");
+  assert.deepEqual(search.calls, [["find_providers_by_service", { p_level: "subservice", p_id: "c12s05u02" }]], "by stable id and level, not by label");
+  assert.deepEqual(search.results().map((card) => card.props.profile.username), ["HelperOne"], "only members the database returned");
+  const link = search.results()[0].type(search.results()[0].props);
+  assert.equal(link.props.href, "/profile/HelperOne", "no category-search context, so no private-request shortcut that needs the old categories");
+  assert.match(textOf(nodes(search.app.render(), (node) => node.props["aria-label"] === "Helpers offering this service")[0]), /Helpers offering Technology & Electronics > App & Software Testing > Mobile App Testing/);
+});
+
+test("Find a Helper: a service or category match asks at that level; nobody offering it says so; your own profile is never listed", async () => {
+  const byService = await openServiceSearch();
+  byService.type("dog walking");
+  await byService.pick("Pet Care & Animal Services > Dog Walking");
+  assert.deepEqual(byService.calls[0], ["find_providers_by_service", { p_level: "service", p_id: "c08s01" }]);
+
+  const byCategory = await openServiceSearch();
+  byCategory.type("pet care");
+  await byCategory.pick("Pet Care & Animal Services");
+  assert.deepEqual(byCategory.calls[0], ["find_providers_by_service", { p_level: "category", p_id: "c08" }]);
+
+  const none = await openServiceSearch({ providerIds: [] });
+  none.type("dog walking");
+  await none.pick("Dog Walking");
+  assert.match(textOf(none.app.render()), /No helpers offer this yet/);
+
+  const self = await openServiceSearch({ providerIds: ["a", "b"], signedIn: { id: "a" } });
+  self.type("dog walking");
+  await self.pick("Dog Walking");
+  assert.deepEqual(self.results().map((card) => card.props.profile.username), ["HelperTwo"], "the searcher is not shown to themselves");
+});
+
+test("Find a Helper: a failed lookup says so, Clear removes the service filter, and choosing a category switches back to the category search", async () => {
+  const failing = await openServiceSearch({ rpcError: { message: "boom" } });
+  failing.type("dog walking");
+  await failing.pick("Dog Walking");
+  assert.match(textOf(nodes(failing.app.render(), (node) => node.props.role === "alert")[0]), /Couldn't load helpers/);
+
+  const search = await openServiceSearch();
+  search.type("dog walking");
+  await search.pick("Dog Walking");
+  assert.equal(search.results().length, 1);
+  nodes(search.app.render(), (node) => node.type === "button" && textOf(node) === "Clear")[0].props.onClick();
+  assert.equal(nodes(search.app.render(), (node) => node.props["aria-label"] === "Helpers offering this service").length, 0);
+
+  search.type("dog walking");
+  await search.pick("Dog Walking");
+  nodes(search.app.render(), (node) => node.type === "selection-chip" && node.props.children === "Cleaning")[0].props.onClick();
+  await flush(); search.app.render();
+  assert.equal(nodes(search.app.render(), (node) => node.props["aria-label"] === "Helpers offering this service").length, 0, "the service filter is gone once a category is chosen");
 });
