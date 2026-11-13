@@ -67,7 +67,7 @@ async function component(path, name, overrides = {}) {
   const mocks = {
     react: hooks,
     "next/link": { default: "a" },
-    "next/navigation": { useSearchParams: () => params, usePathname: () => "/profile", useRouter: () => ({ replace() {} }) },
+    "next/navigation": { useSearchParams: () => params, usePathname: () => "/profile", useRouter: () => ({ replace() {}, push() {} }) },
     "@/lib/auth-context": { useAuth: () => auth },
     "@/lib/supabase/client": { createClient: () => overrides.client },
     "@/lib/services": { SERVICE_TYPES: ["Cleaning", "Other"], SPECIALIZATION_PROMPTS: { Cleaning: "What kind of cleaning?", Handyman: "What kind of handyman work?", Other: "What kind of help?" } },
@@ -2002,10 +2002,18 @@ test("Gig hub (owner, open): proposals live on the gig, with Accept offer, Cance
   void app; void props;
 });
 
-test("Gig hub (owner, draft): offers Publish via the existing RPC", async () => {
+test("Gig hub (owner, draft): offers both ways forward, Post publicly and Find helpers nearby", async () => {
   const { rpcs, tree } = await openGig({ poster_id: user.id, status: "draft" });
-  await nodes(tree, (node) => node.type === "button" && textOf(node) === "Publish gig")[0].props.onClick();
+  const labels = nodes(tree, (node) => node.type === "button").map(textOf);
+  assert.ok(labels.includes("Post publicly") && labels.includes("Find helpers nearby"), "both options are shown, neither is the default");
+  await nodes(tree, (node) => node.type === "button" && textOf(node) === "Post publicly")[0].props.onClick();
   assert.deepEqual(JSON.parse(JSON.stringify(rpcs[0])), ["publish_gig", { p_gig_id: "gig-1" }]);
+});
+
+test("Gig hub (owner, draft): Find helpers nearby moves the draft to the helper search", async () => {
+  const { rpcs, tree } = await openGig({ poster_id: user.id, status: "draft" });
+  await nodes(tree, (node) => node.type === "button" && textOf(node) === "Find helpers nearby")[0].props.onClick();
+  assert.deepEqual(JSON.parse(JSON.stringify(rpcs[0])), ["find_helpers_for_gig", { p_gig_id: "gig-1" }]);
 });
 
 test("Gig hub (owner, helper selected): shows the helper and the gig's messages section", async () => {
@@ -4260,7 +4268,8 @@ test("A counteroffer reaches the poster as an ordinary proposal they can accept 
 test("A draft request is sent from the gig page with the existing publish RPC", async () => {
   const { tree, rpcs } = await openRequest({ asUser: "poster-1", gig: { status: "draft" } });
   assert.match(textOf(tree), /This request is a draft/);
-  assert.equal(buttonText(tree, "Publish gig"), undefined, "worded as sending, not publishing");
+  assert.equal(buttonText(tree, "Post publicly"), undefined, "worded as sending, not publishing");
+  assert.equal(buttonText(tree, "Find helpers nearby"), undefined, "a private request is not searched for");
   await buttonText(tree, "Send request").props.onClick();
   assert.deepEqual(rpcs, [["publish_gig", { p_gig_id: "gig-1" }]]);
 });

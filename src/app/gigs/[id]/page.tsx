@@ -189,6 +189,16 @@ function GigDetails({ id }: { id: string }) {
     }
   }
 
+  // A saved draft can be sent to the helper swipe deck instead of being published.
+  async function findHelpers() {
+    setBusy(true);
+    setError(null);
+    const { error: actionError } = await supabase.rpc("find_helpers_for_gig", { p_gig_id: id });
+    setBusy(false);
+    if (actionError) { setError(rpcActionError(actionError)); return; }
+    router.push(`/post/find-helpers?gig=${encodeURIComponent(id)}`);
+  }
+
   if (gig === undefined || authLoading) return <p className="text-neutral-500">Loading…</p>;
   if (gig === null) return <p className="text-neutral-500">Gig not found.</p>;
 
@@ -342,9 +352,13 @@ function GigDetails({ id }: { id: string }) {
           <h2 className="font-medium">{requested ? "This request is a draft" : "This gig is a draft"}</h2>
           <p className="text-sm text-neutral-500">{requested
             ? `Send it so ${requestedName ? `@${requestedName}` : "the helper"} can accept, decline${negotiable ? " or counteroffer" : ""}. It stays private.`
-            : "Publish it so helpers can find it and send offers."}</p>
+            : "Choose how to go next: post it publicly so helpers can send offers, or find helpers nearby and send it to them yourself."}</p>
           <button disabled={busy} onClick={() => run(() => supabase.rpc("publish_gig", { p_gig_id: id }))}
-            className="w-full rounded-lg bg-emerald-600 py-2.5 font-medium text-white hover:bg-emerald-700 disabled:opacity-60">{requested ? "Send request" : "Publish gig"}</button>
+            className="w-full rounded-lg bg-emerald-600 py-2.5 font-medium text-white hover:bg-emerald-700 disabled:opacity-60">{requested ? "Send request" : "Post publicly"}</button>
+          {!requested && (
+            <button disabled={busy} onClick={() => void findHelpers()}
+              className="flex min-h-11 w-full items-center justify-center rounded-lg border border-emerald-600 bg-white py-2.5 font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-60">Find helpers nearby</button>
+          )}
         </div>
       )}
 
