@@ -4,6 +4,7 @@ import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import HelperSignInPrompt from "@/components/HelperSignInPrompt";
+import ProfilePhoto from "@/components/ProfilePhoto";
 import TagChip from "@/components/TagChip";
 import { useAuth } from "@/lib/auth-context";
 import { findHelperHref, helperProfileHref, rpcActionError } from "@/lib/journey";
@@ -80,11 +81,7 @@ function PublicProfileView({ username }: { username: string }) {
         <Link href={findHelperHref(category, SERVICE_TYPES)} className="touch-link text-sm font-medium text-emerald-700">← Back to Find a Helper</Link>
       )}
       <div className="flex items-center gap-4">
-        {profile.photo_url ? (
-          <img src={profile.photo_url} alt="" className="h-16 w-16 shrink-0 rounded-full object-cover" />
-        ) : (
-          <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-neutral-200 text-xl">👤</div>
-        )}
+        <ProfilePhoto url={profile.photo_url} username={profile.username} sizeClass="h-16 w-16" />
         <div className="min-w-0 flex-1 truncate text-lg font-semibold">@{profile.username}</div>
         {/* Another member's profile only: a private request to this helper (never shown on your own). */}
         {/* Only when the profile was opened from Find a Helper: from a gig in Find Gigs the viewer is

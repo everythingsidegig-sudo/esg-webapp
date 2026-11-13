@@ -110,6 +110,7 @@ async function component(path, name, overrides = {}) {
     "@/components/MessagesLink": { default: "messages-link" },
     "@/components/StatusBadge": { default: "badge" },
     "@/components/TagChip": { default: "tag-chip" },
+    "@/components/ProfilePhoto": { default: "profile-photo" },
     "@/components/AcceptConfirm": { default: "accept-confirm" },
     "@/components/FullGigView": { default: "full-gig-view" },
     "@/components/GigTile": { default: "gig-tile" },
@@ -5535,6 +5536,26 @@ const providerProfile = (fields = {}) => ({ id: "provider-1", username: "HelperO
   wom_count: 2, public_lat: null, public_lng: null, profile_tags: [], ...fields });
 const findHelpersGig = (fields = {}) => ({ id: "gig-1", poster_id: "poster-1", service_type: "Cleaning", title: "Assemble IKEA bed",
   amount: 50, price_type: "fixed", status: "saved_non_public", lat: null, lng: null, scheduled_at: null, location_text: "Kävlinge", photo_url: null, ...fields });
+
+test("ProfilePhoto: a profile photo opens full size and closes again; with no photo there is nothing to open", async () => {
+  const app = await component("src/components/ProfilePhoto.tsx", "ProfilePhoto", { globals: { window: { addEventListener() {}, removeEventListener() {} } } });
+  const props = { url: "https://img.example/a.jpg", username: "HelperOne", sizeClass: "h-16 w-16" };
+  const tree = app.render(props);
+  const open = nodes(tree, (node) => node.type === "button")[0];
+  assert.equal(open.props["aria-label"], "View @HelperOne's photo");
+  assert.equal(nodes(tree, (node) => node.props.role === "dialog").length, 0, "closed until tapped");
+  open.props.onClick();
+  const expanded = app.render(props);
+  const dialog = nodes(expanded, (node) => node.props.role === "dialog")[0];
+  assert.ok(dialog, "the full-size photo opens");
+  assert.equal(nodes(dialog, (node) => node.type === "img")[0].props.src, "https://img.example/a.jpg");
+  dialog.props.onClick();
+  assert.equal(nodes(app.render(props), (node) => node.props.role === "dialog").length, 0, "tapping the photo closes it");
+
+  const none = app.render({ ...props, url: null });
+  assert.equal(nodes(none, (node) => node.type === "button").length, 0, "no photo, nothing to tap");
+  assert.match(textOf(none), /👤/);
+});
 
 test("ProviderCard: shows the provider's summary, and Skip/View Full Profile/Send Gig call their own callbacks without any drag", async () => {
   const calls = [];

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import ProfilePhoto from "@/components/ProfilePhoto";
 import TagChip from "@/components/TagChip";
 import { profileTagsForCategory } from "@/lib/tags";
 import { resolveSwipe } from "@/lib/swipe";
@@ -74,11 +75,7 @@ export default function FullProviderView({
 
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-3">
-            {profile.photo_url ? (
-              <img src={profile.photo_url} alt="" className="h-16 w-16 shrink-0 rounded-full object-cover" />
-            ) : (
-              <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-neutral-200 text-xl">👤</div>
-            )}
+            <ProfilePhoto url={profile.photo_url} username={profile.username} sizeClass="h-16 w-16" />
             <div>
               <h2 className="text-xl font-semibold">@{profile.username}</h2>
               <p className="text-sm text-neutral-500">{distanceKm != null ? `${distanceKm.toFixed(1)} km away` : "Distance: Not available"}</p>
