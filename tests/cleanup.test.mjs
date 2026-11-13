@@ -6546,3 +6546,85 @@ test("Public profile passes a member's offered services to the profile, ignoring
   assert.deepEqual(JSON.parse(JSON.stringify(offered.props.rows)), [{ category_id: "c08", service_id: "c08s01", subservice_id: "c08s01u01", custom_text: null }], "only the real row");
   assert.deepEqual(calls.filter(([name]) => name === "get_public_offered_services"), [["get_public_offered_services", { p_profile_id: "helper-1" }]]);
 });
+
+// ---- Find a Helper: search by service (matches what members OFFER, by id) ----
+async function openServiceSearch({ profiles = [helperSkillsProfile("a", "HelperOne"), helperSkillsProfile("b", "HelperTwo")], providerIds = ["a"], rpcError = null, signedIn = null } = {}) {
+  const calls = [], filters = [];
+  const base = helperClient(profiles, filters);
+  const client = {
+    rpc: async (name, args) => { calls.push([name, JSON.parse(JSON.stringify(args))]); return rpcError ? { data: null, error: rpcError } : { data: providerIds.map((provider_id) => ({ provider_id })), error: null }; },
+    from: (table) => ({ select: () => ({ ...base.from(table).select(), in: async (column, ids) => ({ data: profiles.filter((profile) => ids.includes(profile.id)), error: null }) }) }),
+  };
+  const app = await component("src/app/find-helper/page.tsx", "FindHelper", {
+    client, mocks: { "@/lib/tags": { loadTagCatalog: async () => ({}), ...helperTagsMock }, "@/lib/location": originLocationMock },
+  });
+  app.auth.user = signedIn;
+  app.render(); await flush();
+  setDistance(app, app.render(), null);
+  const type = (value) => nodes(app.render(), (node) => node.type === "input" && node.props.type === "search")[0].props.onChange({ target: { value } });
+  const suggestions = () => nodes(nodes(app.render(), (node) => node.props["aria-label"] === "Matching services")[0] ?? {}, (node) => node.type === "button");
+  const pick = async (text) => { suggestions().find((node) => textOf(node).includes(text)).props.onClick(); await flush(); app.render(); await flush(); };
+  return { app, calls, type, suggestions, pick, results: () => nodes(nodes(app.render(), (node) => node.props["aria-label"] === "Helpers offering this service")[0] ?? {}, (node) => node.props?.profile?.username) };
+}
+
+test("Find a Helper: Search by service suggests catalog entries with their full path", async () => {
+  const search = await openServiceSearch();
+  search.type("mobile app");
+  assert.ok(search.suggestions().map(textOf).includes("Technology & Electronics > App & Software Testing > Mobile App Testing (iOS / Android)"));
+  search.type("zzzz");
+  assert.match(textOf(app_tree(search)), /No matching services/);
+});
+const app_tree = (search) => search.app.render();
+
+test("Find a Helper: choosing a service finds the members who OFFER it, by id, and opens their profile plainly", async () => {
+  const search = await openServiceSearch({ providerIds: ["a"] });
+  search.type("mobile app testing");
+  await search.pick("Mobile App Testing (iOS / Android)");
+  assert.deepEqual(search.calls, [["find_providers_by_service", { p_level: "subservice", p_id: "c12s05u02" }]], "by stable id and level, not by label");
+  assert.deepEqual(search.results().map((card) => card.props.profile.username), ["HelperOne"], "only members the database returned");
+  const link = search.results()[0].type(search.results()[0].props);
+  assert.equal(link.props.href, "/profile/HelperOne", "no category-search context, so no private-request shortcut that needs the old categories");
+  assert.match(textOf(nodes(search.app.render(), (node) => node.props["aria-label"] === "Helpers offering this service")[0]), /Helpers offering Technology & Electronics > App & Software Testing > Mobile App Testing/);
+});
+
+test("Find a Helper: a service or category match asks at that level; nobody offering it says so; your own profile is never listed", async () => {
+  const byService = await openServiceSearch();
+  byService.type("dog walking");
+  await byService.pick("Pet Care & Animal Services > Dog Walking");
+  assert.deepEqual(byService.calls[0], ["find_providers_by_service", { p_level: "service", p_id: "c08s01" }]);
+
+  const byCategory = await openServiceSearch();
+  byCategory.type("pet care");
+  await byCategory.pick("Pet Care & Animal Services");
+  assert.deepEqual(byCategory.calls[0], ["find_providers_by_service", { p_level: "category", p_id: "c08" }]);
+
+  const none = await openServiceSearch({ providerIds: [] });
+  none.type("dog walking");
+  await none.pick("Dog Walking");
+  assert.match(textOf(none.app.render()), /No helpers offer this yet/);
+
+  const self = await openServiceSearch({ providerIds: ["a", "b"], signedIn: { id: "a" } });
+  self.type("dog walking");
+  await self.pick("Dog Walking");
+  assert.deepEqual(self.results().map((card) => card.props.profile.username), ["HelperTwo"], "the searcher is not shown to themselves");
+});
+
+test("Find a Helper: a failed lookup says so, Clear removes the service filter, and choosing a category switches back to the category search", async () => {
+  const failing = await openServiceSearch({ rpcError: { message: "boom" } });
+  failing.type("dog walking");
+  await failing.pick("Dog Walking");
+  assert.match(textOf(nodes(failing.app.render(), (node) => node.props.role === "alert")[0]), /Couldn't load helpers/);
+
+  const search = await openServiceSearch();
+  search.type("dog walking");
+  await search.pick("Dog Walking");
+  assert.equal(search.results().length, 1);
+  nodes(search.app.render(), (node) => node.type === "button" && textOf(node) === "Clear")[0].props.onClick();
+  assert.equal(nodes(search.app.render(), (node) => node.props["aria-label"] === "Helpers offering this service").length, 0);
+
+  search.type("dog walking");
+  await search.pick("Dog Walking");
+  nodes(search.app.render(), (node) => node.type === "selection-chip" && node.props.children === "Cleaning")[0].props.onClick();
+  await flush(); search.app.render();
+  assert.equal(nodes(search.app.render(), (node) => node.props["aria-label"] === "Helpers offering this service").length, 0, "the service filter is gone once a category is chosen");
+});
