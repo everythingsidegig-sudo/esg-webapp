@@ -280,7 +280,7 @@ function PostGigForm() {
         const coords = approximateCoordinates(coordinates.lat, coordinates.lng);
         request = { p_request_id: crypto.randomUUID(), p_service_type: serviceType,
           p_title: title.trim(), p_description: description.trim(), p_amount: Number(amount),
-          p_price_type: requestedHelper ? priceType : "fixed", p_scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null,
+          p_price_type: priceType, p_scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null,
           p_location_text: locationText.trim(), p_lat: coords.lat, p_lng: coords.lng,
           p_photo_url: photoUrl, p_publish: mode === "publish", p_tag_ids: tagIds,
           p_private_address: privateAddress.trim() || null,
@@ -378,7 +378,7 @@ function PostGigForm() {
       <label className="block">Photo (optional)<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => { setPhoto(e.target.files?.[0] ?? null); setUploadedPhoto(null); }} /></label>
       {uploadedPhoto && !photo && repost.state === "ready" && <p className="text-sm text-neutral-500">The original photo will be reused. Choose a file to replace it.</p>}
       <label className="block">Budget ({CURRENCY})<input type="number" min="0.01" step="0.01" required value={amount} onChange={(e) => setAmount(e.target.value)} className={input} /></label>
-      {requestedHelper ? (
+      {(
         <div role="radiogroup" aria-labelledby="pricing-label">
           <p id="pricing-label" className="text-sm font-medium">Pricing</p>
           <div className="mt-2 flex flex-wrap gap-2">
@@ -392,9 +392,9 @@ function PostGigForm() {
                 event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="radio"]')[PRICE_CHOICES.indexOf(other)]?.focus();
               }}>{choice.label}</SelectionChip>)}
           </div>
-          <p className="mt-1 text-sm text-neutral-500">{PRICE_CHOICES.find((choice) => choice.value === priceType)!.hint}</p>
+          <p className="mt-1 text-sm text-neutral-500">{requestedHelper ? PRICE_CHOICES.find((choice) => choice.value === priceType)!.hint : PRICE_CHOICES.find((choice) => choice.value === priceType)!.publicHint}</p>
         </div>
-      ) : <p className="text-sm">Pricing: Fixed</p>}
+      )}
       <label className="block">Expected Date/Time<input type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} className={input} /></label>
       {!locationExpanded ? (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-neutral-300 bg-white px-3 py-2.5">

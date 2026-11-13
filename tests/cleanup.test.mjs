@@ -2223,7 +2223,7 @@ test("Post category chips select Cleaning, submit its unchanged value, and resto
     mocks: { "@/lib/location": { loadJourneyLocation: () => ({ text: "Test city", lat: null, lng: null }) } },
   };
   const app = await component("src/app/post/page.tsx", "PostGigForm", options);
-  const chips = (tree) => nodes(tree, (node) => node.type === "selection-chip");
+  const chips = (tree) => nodes(tree, (node) => node.type === "selection-chip" && !["Fixed", "Negotiable"].includes(node.props.children)); // the category chips, not the pricing choice
   let tree = app.render();
   chips(tree)[1].props.onClick(); tree = app.render();
   assert.equal(chips(tree).filter((node) => node.props.selected).length, 1);
@@ -2371,7 +2371,7 @@ test("Post category arrow keys move selection and focus with wrapping", async ()
   const app = await component("src/app/post/page.tsx", "PostGigForm", {
     mocks: { "@/lib/location": { loadJourneyLocation: () => ({ text: "", lat: null, lng: null }) } },
   });
-  const chips = () => nodes(app.render(), (node) => node.type === "selection-chip");
+  const chips = () => nodes(app.render(), (node) => node.type === "selection-chip" && !["Fixed", "Negotiable"].includes(node.props.children)); // the category chips, not the pricing choice
   let focused, prevented = false;
   chips()[0].props.onKeyDown({ key: "ArrowLeft", preventDefault() { prevented = true; },
     currentTarget: { parentElement: { querySelectorAll: () => [0, 1].map((index) => ({ focus() { focused = index; } })) } } });
@@ -4152,17 +4152,29 @@ test("Post a Gig for a helper: bad links and ineligible helpers stop with a clea
   }
 });
 
-test("Post a Gig without a helper is unchanged: public, fixed price, no helper id, Post Gig", async () => {
+test("Post a Gig without a helper: public, fixed price unless the poster picks Negotiable, no helper id, Post Gig", async () => {
   const { app, calls, fill } = await openRequestForm({ search: "" });
   let tree = app.render();
   assert.match(textOf(nodes(tree, (node) => node.type === "h1")[0]), /^Post a Gig$/);
   assert.equal(nodes(tree, (node) => node.props.role === "note").length, 0);
-  assert.equal(radios(tree).filter((node) => ["Fixed", "Negotiable"].includes(textOf(node))).length, 0, "no pricing choice on a public gig");
-  assert.match(textOf(tree), /Pricing: Fixed/);
+  assert.deepEqual(radios(tree).map(textOf).filter((label) => ["Fixed", "Negotiable"].includes(label)), ["Fixed", "Negotiable"], "a public gig can be fixed or negotiable");
+  assert.equal(radios(tree).find((node) => textOf(node) === "Fixed").props.selected, true, "fixed is still the default");
+  assert.match(textOf(tree), /Helpers take your price as it is/, "worded for helpers, not one helper");
   fill(tree);
   button(app.render(), "Post Gig").props.onClick(); await flush();
   assert.equal(calls[0].payload.p_price_type, "fixed");
   assert.equal("p_requested_helper_id" in calls[0].payload, false, "never sent for a public gig");
+});
+
+test("Post a Gig without a helper: choosing Negotiable posts a negotiable public gig", async () => {
+  const { app, calls, fill } = await openRequestForm({ search: "" });
+  radios(app.render()).find((node) => textOf(node) === "Negotiable").props.onClick();
+  const tree = app.render();
+  assert.match(textOf(tree), /Helpers can accept your price or offer their own/);
+  fill(tree);
+  button(app.render(), "Post Gig").props.onClick(); await flush();
+  assert.equal(calls[0].payload.p_price_type, "negotiable");
+  assert.equal("p_requested_helper_id" in calls[0].payload, false, "still a public gig");
 });
 
 // ---- the requested helper's and the poster's gig page ----

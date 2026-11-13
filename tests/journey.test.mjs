@@ -248,3 +248,15 @@ test("adding a proof photo notifies the poster once per batch, and otherwise add
   assert.match(added, /type = 'proof_photos' and not read/, "no second update while one is still unread");
   assert.match(afterSql, /create or replace function public\.add_proof_photo\(p_gig_id uuid, p_path text\)/);
 });
+
+// Migration 0037 restates create_gig() from migration 0030 to allow a negotiable price on every gig.
+test("create_gig() accepts a negotiable price for any gig, and is otherwise unchanged from migration 0030", async () => {
+  const body = (sql) => sql.match(/create or replace function public\.create_gig\([\s\S]+?\n\$\$;/)[0].split("\n");
+  const before = body(await readFile(new URL("../supabase/migrations/20240101000030_description_limit_100.sql", import.meta.url), "utf8"));
+  const after = body(await readFile(new URL("../supabase/migrations/20240101000037_negotiable_public_gigs.sql", import.meta.url), "utf8"));
+  const added = after.filter((line) => !before.includes(line)).join("\n");
+  const removed = before.filter((line) => !after.includes(line)).join("\n");
+  assert.match(added, /p_price_type not in \('fixed', 'negotiable'\)/);
+  assert.match(removed, /fixed-price gigs only/);
+  assert.equal(removed.split("\n").length, 3, "only the old three-line price check was removed");
+});
