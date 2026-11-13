@@ -1104,6 +1104,41 @@ test("Public profile shows the pre-computed WOM% (never the raw lemon_count, whi
   assert.equal(nodes(tree, (node) => node.props.children === "—").length, 1, "no WOM/Lemon signal yet falls back to an em dash, not 0%/NaN");
 });
 
+test("Public profile shows comments left with a Lemon (text and date only), still never the lemon count", async () => {
+  const withComments = { id: "helper-1", username: "HelperOne", photo_url: null, skills: [], wom_count: 4, profile_tags: [] };
+  const calls = [];
+  const client = {
+    from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: withComments, error: null }) }) }) }),
+    rpc: async (name, args) => {
+      calls.push([name, args]);
+      if (name === "get_public_lemon_comments") return { data: [{ comment: "Arrived two hours late", created_at: "2026-10-05T10:00:00Z" }, { comment: "Left a mess" , created_at: "2026-10-01T10:00:00Z" }], error: null };
+      return { data: [{ gigs_worked_count: 2, wom_count: 4, wom_percentage: 80 }], error: null };
+    },
+  };
+  const app = await component("src/app/profile/[username]/page.tsx", "PublicProfileView", { client });
+  app.render({ username: "HelperOne" }); await flush();
+  const tree = app.render({ username: "HelperOne" });
+  const section = nodes(tree, (node) => node.props["aria-label"] === "Lemon comments")[0];
+  assert.ok(section, "the comments are shown");
+  assert.match(textOf(section), /Arrived two hours late/);
+  assert.match(textOf(section), /Left a mess/);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls.filter(([name]) => name === "get_public_lemon_comments"))), [["get_public_lemon_comments", { p_profile_id: "helper-1" }]]);
+  assert.equal(nodes(tree, (node) => String(node.props.children).includes("lemon_count")).length, 0, "the count itself is still never shown");
+});
+
+test("Public profile has no comments section when there are none, or when the lookup returns nothing usable", async () => {
+  const profileRow = { id: "helper-1", username: "HelperOne", photo_url: null, skills: [], wom_count: 4, profile_tags: [] };
+  for (const comments of [[], null, [{ gigs_worked_count: 2 }]]) {
+    const client = {
+      from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: profileRow, error: null }) }) }) }),
+      rpc: async (name) => name === "get_public_lemon_comments" ? { data: comments, error: null } : { data: [{ gigs_worked_count: 2, wom_count: 4, wom_percentage: 80 }], error: null },
+    };
+    const app = await component("src/app/profile/[username]/page.tsx", "PublicProfileView", { client });
+    app.render({ username: "HelperOne" }); await flush();
+    assert.equal(nodes(app.render({ username: "HelperOne" }), (node) => node.props["aria-label"] === "Lemon comments").length, 0);
+  }
+});
+
 test("Browse chips select one existing category and All Services restores results", async () => {
   const gigs = ["Cleaning", "Other"].map((service_type) => ({ id: service_type, service_type, title: service_type, amount: 10 }));
   const client = { from: () => ({ select: () => ({ eq: () => ({ order: async () => ({ data: gigs, error: null }) }) }) }) };

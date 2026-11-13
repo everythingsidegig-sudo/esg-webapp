@@ -260,3 +260,14 @@ test("create_gig() accepts a negotiable price for any gig, and is otherwise unch
   assert.match(removed, /fixed-price gigs only/);
   assert.equal(removed.split("\n").length, 3, "only the old three-line price check was removed");
 });
+
+// Migration 0038: the only thing exposed about a Lemon comment is its text and date.
+test("get_public_lemon_comments returns only lemon comment text and date: no author, gig or count", async () => {
+  const sql = await readFile(new URL("../supabase/migrations/20240101000038_public_lemon_comments.sql", import.meta.url), "utf8");
+  const fn = sql.match(/create function public\.get_public_lemon_comments[\s\S]+?\$\$;/)[0];
+  assert.match(fn, /returns table\(comment text, created_at timestamptz\)/);
+  assert.match(fn, /f\.type = 'lemon' and f\.comment is not null/);
+  assert.doesNotMatch(fn, /from_id|gig_id|lemon_count/, "never reveals who wrote it, which gig, or the count");
+  assert.match(sql, /grant execute on function public\.get_public_lemon_comments\(uuid\) to authenticated;/);
+  assert.doesNotMatch(sql, /to anon/, "signed-in members only");
+});

@@ -27,6 +27,8 @@ function PublicProfileView({ username }: { username: string }) {
   // Lemon count (the other half of this ratio) is private and never leaves
   // get_public_stats() -- only the pre-computed percentage does. ESG-FDBK-001.
   const [womPercentage, setWomPercentage] = useState<number | null>(null);
+  // Comments left with a Lemon, text and date only (no author, no gig). The Lemon COUNT stays private.
+  const [lemonComments, setLemonComments] = useState<{ comment: string; created_at: string }[]>([]);
   // ESG-SAFE-001/002: Block only (Report and Call 911 are out of scope).
   const [blocking, setBlocking] = useState(false);
   const [blockError, setBlockError] = useState<string | null>(null);
@@ -59,6 +61,10 @@ function PublicProfileView({ username }: { username: string }) {
         const { data: stats } = await supabase.rpc("get_public_stats", { p_profile_id: data.id });
         setGigsWorked(stats?.[0]?.gigs_worked_count ?? 0);
         setWomPercentage(stats?.[0]?.wom_percentage ?? null);
+        // Best effort: a failure here must not hide the rest of the profile.
+        const { data: comments } = await supabase.rpc("get_public_lemon_comments", { p_profile_id: data.id });
+        setLemonComments(((comments ?? []) as { comment?: unknown; created_at?: unknown }[])
+          .filter((row): row is { comment: string; created_at: string } => typeof row.comment === "string" && typeof row.created_at === "string"));
       });
   }, [supabase, username, authLoading, user]);
 
@@ -112,6 +118,20 @@ function PublicProfileView({ username }: { username: string }) {
           <div className="text-xs text-neutral-500">Gigs Worked</div>
         </div>
       </div>
+
+      {lemonComments.length > 0 && (
+        <section aria-label="Lemon comments" className="space-y-2">
+          <h3 className="text-sm font-medium text-neutral-500">Lemon comments</h3>
+          <ul className="space-y-2">
+            {lemonComments.map((item, index) => (
+              <li key={`${item.created_at}-${index}`} className="rounded-lg border border-neutral-200 bg-white p-3">
+                <p className="whitespace-pre-wrap break-words text-sm text-neutral-800">{item.comment}</p>
+                <p className="mt-1 text-xs text-neutral-400">{new Date(item.created_at).toLocaleDateString()}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {profile.skills.length > 0 && (
         <div>
