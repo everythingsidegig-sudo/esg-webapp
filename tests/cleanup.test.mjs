@@ -6014,6 +6014,52 @@ test("My Gigs: Direct Requests are a deck, one waiting request at a time, with a
   assert.deepEqual(JSON.parse(JSON.stringify(calls.filter(([name]) => name === "respond_direct_request"))), [["respond_direct_request", { p_request_id: "dr-1", p_interested: true }]]);
 });
 
+test("My Gigs: Not now sends the waiting request to the back of the deck without answering it", async () => {
+  const calls = [];
+  const mk = (id, title, at) => ({ id, gig_id: `g-${id}`, poster_id: "poster-9", provider_id: user.id, state: "pending", created_at: at,
+    gig: myGig(`g-${id}`, { poster_id: "poster-9", title, status: "saved_non_public" }) });
+  const rows = [mk("dr-1", "Move a couch", "2026-01-03T00:00:00Z"), mk("dr-2", "Paint a fence", "2026-01-02T00:00:00Z"), mk("dr-3", "Rake leaves", "2026-01-01T00:00:00Z")];
+  const db = fakeDb((query) => {
+    if (query.table === "gigs") return { data: [], error: null };
+    if (query.table === "claims") return { data: [], error: null };
+    if (query.table === "direct_requests" && query.eq.provider_id) return { data: rows.slice(0, query.__limit ?? 3), error: null };
+    if (query.table === "public_profiles") return { data: [{ id: "poster-9", username: "poster9" }].filter((p) => query.in.id.includes(p.id)), error: null };
+    throw new Error(`unhandled query for table "${query.table}"`);
+  });
+  db.rpc = async (name, args) => { calls.push([name, args]); return { error: null }; };
+  const app = await component("src/app/my-gigs/page.tsx", "MyGigsInner", {
+    client: db, mocks: { "next/navigation": { useSearchParams: () => new URLSearchParams({ tab: "helping" }) } },
+  });
+  app.render(); await flush(); app.render(); await flush();
+  const shown = () => textOf(nodes(sectionNamed(app.render(), "Direct Requests"), (node) => node.type === "swipe-card")[0]);
+  const notNow = () => button(sectionNamed(app.render(), "Direct Requests"), "Not now");
+  assert.match(shown(), /Move a couch/);
+  notNow().props.onClick();
+  assert.match(shown(), /Paint a fence/, "the next request comes up");
+  notNow().props.onClick();
+  assert.match(shown(), /Rake leaves/);
+  notNow().props.onClick();
+  assert.match(shown(), /Move a couch/, "set-aside requests come back round, in the order they were set aside");
+  assert.match(textOf(sectionNamed(app.render(), "Direct Requests")), /Request 1 of 3 waiting/, "nothing was answered or dropped");
+  assert.deepEqual(calls.filter(([name]) => name === "respond_direct_request"), [], "Not now never answers anything");
+});
+
+test("My Gigs: Not now is only offered when there is another waiting request to look at", async () => {
+  const gig = myGig("g-recv", { poster_id: "poster-9", title: "Move a couch", status: "saved_non_public" });
+  const rows = [{ id: "dr-1", gig_id: "g-recv", poster_id: "poster-9", provider_id: user.id, state: "pending", created_at: "2026-01-01T00:00:00Z", gig }];
+  const db = fakeDb((query) => {
+    if (query.table === "gigs" || query.table === "claims") return { data: [], error: null };
+    if (query.table === "direct_requests" && query.eq.provider_id) return { data: rows, error: null };
+    if (query.table === "public_profiles") return { data: [{ id: "poster-9", username: "poster9" }].filter((p) => query.in.id.includes(p.id)), error: null };
+    throw new Error(`unhandled query for table "${query.table}"`);
+  });
+  const app = await component("src/app/my-gigs/page.tsx", "MyGigsInner", {
+    client: db, mocks: { "next/navigation": { useSearchParams: () => new URLSearchParams({ tab: "helping" }) } },
+  });
+  app.render(); await flush(); app.render(); await flush();
+  assert.equal(button(sectionNamed(app.render(), "Direct Requests"), "Not now"), undefined, "a single waiting request has nothing to move behind");
+});
+
 test("My Gigs: a received direct request's Decline button calls respond_direct_request with p_interested: false", async () => {
   const calls = [];
   const gig = myGig("g-recv", { poster_id: "poster-9", title: "Move a couch", status: "saved_non_public" });

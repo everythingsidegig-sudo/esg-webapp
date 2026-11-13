@@ -115,7 +115,7 @@ function posterCard({ gig, proposals, helper, requestedTo }: PosterRow, savedNon
   );
 }
 
-function receivedRequestCard({ request, gig, posterName }: ReceivedRequestRow, busy: string | null, onRespond: (requestId: string, interested: boolean) => void) {
+function receivedRequestCard({ request, gig, posterName }: ReceivedRequestRow, busy: string | null, onRespond: (requestId: string, interested: boolean) => void, onLater?: (requestId: string) => void) {
   return (
     // Swipe right = Interested, left = Decline (only while it is pending and not mid-request). The
     // buttons below do the same thing, so swiping is a shortcut and never the only way.
@@ -139,6 +139,10 @@ function receivedRequestCard({ request, gig, posterName }: ReceivedRequestRow, b
         <div className="flex gap-2 px-4 pb-4">
           <button type="button" disabled={busy === request.id} onClick={() => onRespond(request.id, false)}
             className="flex-1 rounded-lg border border-neutral-300 bg-white py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-60">Decline</button>
+          {onLater && (
+            <button type="button" disabled={busy === request.id} onClick={() => onLater(request.id)}
+              className="flex-1 rounded-lg border border-neutral-300 bg-white py-2 text-sm font-medium text-neutral-500 hover:bg-neutral-50 disabled:opacity-60">Not now</button>
+          )}
           <button type="button" disabled={busy === request.id} onClick={() => onRespond(request.id, true)}
             className="flex-1 rounded-lg bg-emerald-600 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60">Interested</button>
         </div>
@@ -193,6 +197,9 @@ function MyGigsInner() {
   const [receivedRequests, setReceivedRequests] = useState<ReceivedRequestRow[]>([]);
   const [requestBusy, setRequestBusy] = useState<string | null>(null);
   const [requestError, setRequestError] = useState<string | null>(null);
+  // "Not now" sends a waiting request to the back of the deck without answering it. Only remembered
+  // while this page is open: it is a way to look at the next one, not a saved decision.
+  const [setAside, setSetAside] = useState<string[]>([]);
 
   useEffect(() => {
     if (!user) return;
@@ -355,12 +362,15 @@ function MyGigsInner() {
                       the next one slides up. Answered requests stay listed underneath as plain cards. */}
                   {(() => {
                     const answer = (requestId: string, interested: boolean) => void respondRequest(requestId, interested);
-                    const waiting = receivedRequests.filter((row) => row.request.state === "pending");
+                    const pending = receivedRequests.filter((row) => row.request.state === "pending");
+                    const waiting = [...pending.filter((row) => !setAside.includes(row.request.id)),
+                      ...setAside.flatMap((id) => pending.filter((row) => row.request.id === id))];
+                    const later = (requestId: string) => setSetAside((current) => [...current.filter((id) => id !== requestId), requestId]);
                     const answered = receivedRequests.filter((row) => row.request.state !== "pending");
                     return <>
                       {waiting.length > 0 && <>
                         <p className="text-center text-sm text-neutral-500">Request 1 of {waiting.length} waiting for your answer</p>
-                        {receivedRequestCard(waiting[0], requestBusy, answer)}
+                        {receivedRequestCard(waiting[0], requestBusy, answer, waiting.length > 1 ? later : undefined)}
                       </>}
                       {answered.length > 0 && <>
                         {waiting.length > 0 && <h3 className="pt-2 text-xs font-semibold uppercase tracking-wide text-neutral-400">Answered</h3>}
