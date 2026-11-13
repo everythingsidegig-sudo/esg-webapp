@@ -5983,6 +5983,37 @@ test("My Gigs: a pending direct request can be swiped (right = Interested, left 
   assert.equal(button(pending, "Interested") !== undefined && button(pending, "Decline") !== undefined, true, "the buttons stay as the non-gesture way to answer");
 });
 
+test("My Gigs: Direct Requests are a deck, one waiting request at a time, with answered ones listed underneath", async () => {
+  const calls = [];
+  const mk = (id, title, state, at) => ({ id, gig_id: `g-${id}`, poster_id: "poster-9", provider_id: user.id, state, created_at: at,
+    gig: myGig(`g-${id}`, { poster_id: "poster-9", title, status: "saved_non_public" }) });
+  const rows = [mk("dr-1", "Move a couch", "pending", "2026-01-03T00:00:00Z"), mk("dr-2", "Paint a fence", "pending", "2026-01-02T00:00:00Z"), mk("dr-3", "Rake leaves", "declined", "2026-01-01T00:00:00Z")];
+  const db = fakeDb((query) => {
+    if (query.table === "gigs") return { data: [], error: null };
+    if (query.table === "claims") return { data: [], error: null };
+    if (query.table === "direct_requests" && query.eq.provider_id) return { data: rows, error: null };
+    if (query.table === "public_profiles") return { data: [{ id: "poster-9", username: "poster9" }].filter((p) => query.in.id.includes(p.id)), error: null };
+    throw new Error(`unhandled query for table "${query.table}"`);
+  });
+  db.rpc = async (name, args) => { calls.push([name, args]); return { error: null }; };
+  const app = await component("src/app/my-gigs/page.tsx", "MyGigsInner", {
+    client: db, mocks: { "next/navigation": { useSearchParams: () => new URLSearchParams({ tab: "helping" }) } },
+  });
+  app.render(); await flush(); app.render(); await flush();
+  const section = sectionNamed(app.render(), "Direct Requests");
+  assert.match(textOf(section), /Request 1 of 2 waiting for your answer/);
+  const cards = nodes(section, (node) => node.type === "swipe-card");
+  assert.equal(cards.length, 2, "one waiting request plus the answered one");
+  assert.equal(cards[0].props.enabled, true);
+  assert.match(textOf(cards[0]), /Move a couch/);
+  assert.doesNotMatch(textOf(section.props.children), /Paint a fence/, "the second waiting request is not shown until the first is answered");
+  assert.equal(cards[1].props.enabled, false);
+  assert.match(textOf(cards[1]), /Rake leaves/);
+  assert.match(textOf(section), /Answered/);
+  cards[0].props.onSwipeRight();
+  assert.deepEqual(JSON.parse(JSON.stringify(calls.filter(([name]) => name === "respond_direct_request"))), [["respond_direct_request", { p_request_id: "dr-1", p_interested: true }]]);
+});
+
 test("My Gigs: a received direct request's Decline button calls respond_direct_request with p_interested: false", async () => {
   const calls = [];
   const gig = myGig("g-recv", { poster_id: "poster-9", title: "Move a couch", status: "saved_non_public" });

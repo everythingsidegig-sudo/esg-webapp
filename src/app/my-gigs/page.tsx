@@ -351,7 +351,23 @@ function MyGigsInner() {
               {receivedRequests.length > 0 && (
                 <section aria-label="Direct Requests" className="space-y-2">
                   <h2 className="text-sm font-semibold text-neutral-500">Direct Requests ({receivedRequests.length})</h2>
-                  {receivedRequests.map((row) => receivedRequestCard(row, requestBusy, (requestId, interested) => void respondRequest(requestId, interested)))}
+                  {/* A deck, like the helper-finding screen: one waiting request at a time, swipe or tap to answer, and
+                      the next one slides up. Answered requests stay listed underneath as plain cards. */}
+                  {(() => {
+                    const answer = (requestId: string, interested: boolean) => void respondRequest(requestId, interested);
+                    const waiting = receivedRequests.filter((row) => row.request.state === "pending");
+                    const answered = receivedRequests.filter((row) => row.request.state !== "pending");
+                    return <>
+                      {waiting.length > 0 && <>
+                        <p className="text-center text-sm text-neutral-500">Request 1 of {waiting.length} waiting for your answer</p>
+                        {receivedRequestCard(waiting[0], requestBusy, answer)}
+                      </>}
+                      {answered.length > 0 && <>
+                        {waiting.length > 0 && <h3 className="pt-2 text-xs font-semibold uppercase tracking-wide text-neutral-400">Answered</h3>}
+                        {answered.map((row) => receivedRequestCard(row, requestBusy, answer))}
+                      </>}
+                    </>;
+                  })()}
                 </section>
               )}
               {HELPER_SECTIONS.map(({ key, label }) => {
