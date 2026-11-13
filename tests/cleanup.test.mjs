@@ -111,6 +111,7 @@ async function component(path, name, overrides = {}) {
     "@/components/StatusBadge": { default: "badge" },
     "@/components/TagChip": { default: "tag-chip" },
     "@/components/ProfilePhoto": { default: "profile-photo" },
+    "@/components/SwipeCard": { default: "swipe-card" },
     "@/components/AcceptConfirm": { default: "accept-confirm" },
     "@/components/FullGigView": { default: "full-gig-view" },
     "@/components/GigTile": { default: "gig-tile" },
@@ -5904,6 +5905,66 @@ test("My Gigs: a received direct request shows under Direct Requests, and Intere
   button(section, "Interested").props.onClick();
   await flush();
   assert.deepEqual(JSON.parse(JSON.stringify(calls.filter(([name]) => name === "respond_direct_request"))), [["respond_direct_request", { p_request_id: "dr-9", p_interested: true }]]);
+});
+
+test("SwipeCard: right commits the positive answer, left the negative, and a short, vertical or disabled swipe does nothing", async () => {
+  const calls = [];
+  const app = await component("src/components/SwipeCard.tsx", "SwipeCard", {});
+  const props = (fields = {}) => ({ enabled: true, onSwipeRight: () => calls.push("right"), onSwipeLeft: () => calls.push("left"), rightLabel: "Interested", leftLabel: "Decline", className: "card", children: "body", ...fields });
+  const render = (fields) => app.render(props(fields));
+  drag(render, 120); assert.deepEqual(calls, ["right"]);
+  drag(render, -120); assert.deepEqual(calls, ["right", "left"]);
+  drag(render, 30); drag(render, -30); drag(render, 120, 200);
+  assert.deepEqual(calls, ["right", "left"], "short or mostly-vertical drags do not commit");
+  drag((fields) => render({ enabled: false, ...fields }), 120); drag((fields) => render({ enabled: false, ...fields }), -120);
+  assert.deepEqual(calls, ["right", "left"], "turned off: no gesture at all");
+  render().props.onPointerDown({ clientX: 0, clientY: 0, pointerId: 1, target: {} });
+  render().props.onPointerMove({ clientX: 60, clientY: 0 });
+  assert.equal(textOf(render()), "Interested" + "body", "the card says what the swipe will do while it is being dragged");
+});
+
+test("SwipeCard: a drag cancels the click that follows it, a plain tap does not", async () => {
+  const app = await component("src/components/SwipeCard.tsx", "SwipeCard", {});
+  const render = () => app.render({ enabled: true, onSwipeRight() {}, onSwipeLeft() {}, rightLabel: "Interested", leftLabel: "Decline", children: "body" });
+  const click = () => { const event = { prevented: false, preventDefault() { this.prevented = true; }, stopPropagation() {} }; render().props.onClickCapture(event); return event.prevented; };
+  render().props.onPointerDown({ clientX: 0, clientY: 0, pointerId: 1, target: {} });
+  render().props.onPointerUp();
+  assert.equal(click(), false, "a tap opens the link");
+  drag(render, 120);
+  assert.equal(click(), true, "the click after a swipe is swallowed");
+  assert.equal(click(), false, "and only that one");
+});
+
+test("My Gigs: a pending direct request can be swiped (right = Interested, left = Decline); an answered one cannot", async () => {
+  const calls = [];
+  const gig = myGig("g-recv", { poster_id: "poster-9", title: "Move a couch", status: "saved_non_public" });
+  const rows = [
+    { id: "dr-1", gig_id: "g-recv", poster_id: "poster-9", provider_id: user.id, state: "pending", created_at: "2026-01-01T00:00:00Z", gig },
+    { id: "dr-2", gig_id: "g-recv", poster_id: "poster-9", provider_id: user.id, state: "interested", created_at: "2026-01-02T00:00:00Z", gig },
+  ];
+  const db = fakeDb((query) => {
+    if (query.table === "gigs") return { data: [], error: null };
+    if (query.table === "claims") return { data: [], error: null };
+    if (query.table === "direct_requests" && query.eq.provider_id) return { data: rows, error: null };
+    if (query.table === "public_profiles") return { data: [{ id: "poster-9", username: "poster9" }].filter((p) => query.in.id.includes(p.id)), error: null };
+    throw new Error(`unhandled query for table "${query.table}"`);
+  });
+  db.rpc = async (name, args) => { calls.push([name, args]); return { error: null }; };
+  const app = await component("src/app/my-gigs/page.tsx", "MyGigsInner", {
+    client: db, mocks: { "next/navigation": { useSearchParams: () => new URLSearchParams({ tab: "helping" }) } },
+  });
+  app.render(); await flush(); app.render(); await flush();
+  const cards = nodes(sectionNamed(app.render(), "Direct Requests"), (node) => node.type === "swipe-card");
+  assert.equal(cards.length, 2);
+  const [pending, answered] = cards;
+  assert.equal(pending.props.enabled, true);
+  assert.equal(answered.props.enabled, false, "already answered: no gesture");
+  pending.props.onSwipeRight(); pending.props.onSwipeLeft();
+  assert.deepEqual(JSON.parse(JSON.stringify(calls.filter(([name]) => name === "respond_direct_request"))), [
+    ["respond_direct_request", { p_request_id: "dr-1", p_interested: true }],
+    ["respond_direct_request", { p_request_id: "dr-1", p_interested: false }],
+  ]);
+  assert.equal(button(pending, "Interested") !== undefined && button(pending, "Decline") !== undefined, true, "the buttons stay as the non-gesture way to answer");
 });
 
 test("My Gigs: a received direct request's Decline button calls respond_direct_request with p_interested: false", async () => {

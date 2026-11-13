@@ -7,6 +7,7 @@ import AuthGuard from "@/components/AuthGuard";
 import { useAuth } from "@/lib/auth-context";
 import { createClient } from "@/lib/supabase/client";
 import StatusBadge from "@/components/StatusBadge";
+import SwipeCard from "@/components/SwipeCard";
 import TagChip from "@/components/TagChip";
 import { gigTagNames } from "@/lib/tags";
 import {
@@ -116,7 +117,11 @@ function posterCard({ gig, proposals, helper, requestedTo }: PosterRow, savedNon
 
 function receivedRequestCard({ request, gig, posterName }: ReceivedRequestRow, busy: string | null, onRespond: (requestId: string, interested: boolean) => void) {
   return (
-    <div key={request.id} className="rounded-xl border border-neutral-200 bg-white shadow-sm">
+    // Swipe right = Interested, left = Decline (only while it is pending and not mid-request). The
+    // buttons below do the same thing, so swiping is a shortcut and never the only way.
+    <SwipeCard key={request.id} enabled={request.state === "pending" && busy !== request.id}
+      onSwipeRight={() => onRespond(request.id, true)} onSwipeLeft={() => onRespond(request.id, false)}
+      rightLabel="Interested" leftLabel="Decline" className="rounded-xl border border-neutral-200 bg-white shadow-sm">
       <Link href={`/gigs/${gig.id}`} className="block p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -138,7 +143,7 @@ function receivedRequestCard({ request, gig, posterName }: ReceivedRequestRow, b
             className="flex-1 rounded-lg bg-emerald-600 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60">Interested</button>
         </div>
       )}
-    </div>
+    </SwipeCard>
   );
 }
 
