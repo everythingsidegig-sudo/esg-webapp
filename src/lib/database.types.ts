@@ -144,6 +144,15 @@ export interface GigPrivateLocation {
   created_at: string;
 }
 
+// A helper's proof / supporting photo for a finished gig (private bucket "proof-photos").
+export interface GigProofPhoto {
+  id: string;
+  gig_id: string;
+  uploader_id: string;
+  storage_path: string;
+  created_at: string;
+}
+
 export interface ChatMessage {
   id: string;
   gig_id: string;
@@ -203,6 +212,7 @@ export interface Database {
       price_proposals: { Row: PriceProposal; Insert: Partial<PriceProposal>; Update: Partial<PriceProposal> };
       blocks: { Row: Block; Insert: Partial<Block>; Update: Partial<Block> };
       direct_requests: { Row: DirectRequest; Insert: Partial<DirectRequest>; Update: Partial<DirectRequest> };
+      gig_proof_photos: { Row: GigProofPhoto; Insert: Partial<GigProofPhoto>; Update: Partial<GigProofPhoto> };
     };
     Functions: {
       ensure_profile: { Args: Record<string, never>; Returns: Profile };

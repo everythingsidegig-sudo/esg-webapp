@@ -13,6 +13,7 @@ import * as helperRequestLib from "../src/lib/helper-request.ts";
 import * as profileSaveLib from "../src/lib/profile-save.ts";
 import * as negotiationLib from "../src/lib/negotiation.ts";
 import * as repostLib from "../src/lib/repost.ts";
+import * as proofPhotosLib from "../src/lib/proof-photos.ts";
 import * as startFlowLib from "../src/lib/start-flow.ts";
 import * as swipeLib from "../src/lib/swipe.ts";
 import { safeNext } from "../src/lib/journey.ts";
@@ -112,6 +113,8 @@ async function component(path, name, overrides = {}) {
     "@/components/TagChip": { default: "tag-chip" },
     "@/components/ProfilePhoto": { default: "profile-photo" },
     "@/components/SwipeCard": { default: "swipe-card" },
+    "@/components/ProofPhotos": { default: "proof-photos" },
+    "@/lib/proof-photos": proofPhotosLib,
     "@/components/AcceptConfirm": { default: "accept-confirm" },
     "@/components/FullGigView": { default: "full-gig-view" },
     "@/components/GigTile": { default: "gig-tile" },
@@ -1964,9 +1967,10 @@ test("Chat opening marks the other party's messages read and tells the header ba
 });
 
 // Gig hub ------------------------------------------------------------------
-function gigHubDb({ gig, claims = [], myClaim = null, address = null, addressQueries = [] }) {
+function gigHubDb({ gig, claims = [], myClaim = null, myCompletion = null, address = null, addressQueries = [] }) {
   return fakeDb((query, single) => {
     if (query.table === "gigs") return { data: gig, error: null };
+    if (query.table === "gig_completions") return { data: myCompletion ? { outcome: myCompletion } : null, error: null };
     if (query.table === "gig_private_locations") { addressQueries.push(query.eq.gig_id); return { data: address ? { address_text: address } : null, error: null }; }
     if (query.table === "public_profiles") return { data: [{ id: "poster-1", username: "customer1" }, { id: "helper-1", username: "helper1" }].filter((row) => query.in.id.includes(row.id)), error: null };
     if (query.table === "claims" && query.eq.provider_id) return { data: myClaim, error: null };
@@ -2024,6 +2028,17 @@ test("Gig hub: price negotiation in the chat is only open for a negotiable gig, 
     assert.equal((await chatProps({ price_type: "negotiable" }, asUser)).negotiation.open, true, `negotiable, as ${asUser}`);
   }
   assert.equal((await chatProps({ price_type: "negotiable", start_requested_at: "2026-10-01T10:00:00Z" }, "poster-1")).negotiation.open, false, "still closes once the helper asks to start");
+});
+
+test("Gig hub: the helper can add proof photos only after marking the gig complete; the poster only sees them", async () => {
+  const photos = async (fields, db, asUser) => nodes((await openGig({ status: "in_progress", selected_provider_id: "helper-1", ...fields }, db, asUser)).tree, (node) => node.type === "proof-photos")[0];
+  assert.equal((await photos({}, { myCompletion: "complete" }, "helper-1")).props.canAdd, true, "helper, marked complete");
+  assert.equal((await photos({}, {}, "helper-1")).props.canAdd, false, "helper, not marked yet");
+  assert.equal((await photos({}, { myCompletion: "incomplete" }, "helper-1")).props.canAdd, false, "helper marked it incomplete");
+  const poster = await photos({ poster_id: "poster-1" }, { myCompletion: "complete" }, "poster-1");
+  assert.equal(poster.props.canAdd, false, "the poster never uploads");
+  assert.equal(poster.props.helperName, "helper1");
+  assert.equal(await photos({ status: "active", start_requested_at: null }, { myCompletion: "complete" }, "helper-1"), undefined, "nothing before the gig starts");
 });
 
 test("Gig hub (owner, helper selected): shows the helper and the gig's messages section", async () => {
@@ -5989,4 +6004,93 @@ test("My Gigs: a received direct request's Decline button calls respond_direct_r
   button(section, "Decline").props.onClick();
   await flush();
   assert.deepEqual(JSON.parse(JSON.stringify(calls.filter(([name]) => name === "respond_direct_request"))), [["respond_direct_request", { p_request_id: "dr-9", p_interested: false }]]);
+});
+
+// ---- Proof photos (migration 0035) ----
+test("proof-photos helpers: who can add, what file is acceptable, and the folder layout the database checks", () => {
+  const { canAddProofPhotos, proofPhotoError, proofPhotoPath, MAX_PROOF_PHOTOS } = proofPhotosLib;
+  const gig = (fields) => ({ status: "in_progress", selected_provider_id: "h", ...fields });
+  assert.equal(canAddProofPhotos(gig(), "h", "complete"), true);
+  for (const status of ["awaiting_payment", "completed", "incomplete"]) assert.equal(canAddProofPhotos(gig({ status }), "h", "complete"), true, status);
+  for (const status of ["draft", "active", "cancelled", "disputed"]) assert.equal(canAddProofPhotos(gig({ status }), "h", "complete"), false, status);
+  assert.equal(canAddProofPhotos(gig(), "h", null), false);
+  assert.equal(canAddProofPhotos(gig(), "h", "incomplete"), false);
+  assert.equal(canAddProofPhotos(gig(), "poster", "complete"), false);
+  assert.equal(canAddProofPhotos(gig(), null, "complete"), false);
+  assert.equal(proofPhotoError({ type: "image/jpeg", size: 1000 }, 0), null);
+  assert.equal(proofPhotoError({ type: "image/webp", size: 5 * 1024 * 1024 }, MAX_PROOF_PHOTOS - 1), null);
+  assert.match(proofPhotoError({ type: "application/pdf", size: 1000 }, 0), /JPG, PNG or WebP/);
+  assert.match(proofPhotoError({ type: "image/png", size: 5 * 1024 * 1024 + 1 }, 0), /smaller than 5 MB/);
+  assert.match(proofPhotoError({ type: "image/png", size: 1000 }, MAX_PROOF_PHOTOS), /up to 5/);
+  assert.equal(proofPhotoPath("gig-1", "user-1", "file-1"), "gig-1/user-1/file-1");
+});
+
+async function openProofPhotos({ rows = [], userId = "me", canAdd = true, rpcError = null, uploadError = null } = {}) {
+  const calls = [];
+  const client = {
+    from: () => { const q = { select: () => q, eq: () => q, order: () => Promise.resolve({ data: rows, error: null }) }; return q; },
+    storage: { from: (bucket) => ({
+      createSignedUrls: async (paths) => ({ data: paths.map((path) => ({ path, signedUrl: `https://signed.example/${path}` })) }),
+      upload: async (path, file, options) => { calls.push(["upload", bucket, path, options.contentType]); return { error: uploadError }; },
+      remove: async (paths) => { calls.push(["remove", bucket, paths]); return { error: null }; },
+    }) },
+    rpc: async (name, args) => { calls.push([name, JSON.parse(JSON.stringify(args))]); return { error: rpcError }; },
+  };
+  const app = await component("src/components/ProofPhotos.tsx", "ProofPhotos", { client, globals: { crypto: { randomUUID: () => "file-1" } } });
+  const props = { gigId: "g1", userId, canAdd, helperName: "helper1" };
+  app.render(props); await flush();
+  return { app, props, calls, tree: () => app.render(props) };
+}
+const proofRow = (id, uploader = "me") => ({ id, gig_id: "g1", uploader_id: uploader, storage_path: `g1/${uploader}/${id}`, created_at: "2026-11-01T00:00:00Z" });
+
+test("ProofPhotos: the poster sees the helper's photos through signed links and cannot add or remove any", async () => {
+  const { tree } = await openProofPhotos({ rows: [proofRow("p1", "helper-1"), proofRow("p2", "helper-1")], userId: "poster-1", canAdd: false });
+  assert.match(textOf(tree()), /Photos from @helper1/);
+  const images = nodes(tree(), (node) => node.type === "img").map((node) => node.props.src);
+  assert.deepEqual(images, ["https://signed.example/g1/helper-1/p1", "https://signed.example/g1/helper-1/p2"]);
+  assert.equal(nodes(tree(), (node) => node.type === "input").length, 0, "no upload control");
+  assert.equal(nodes(tree(), (node) => node.type === "button").length, 0, "no remove control");
+});
+
+test("ProofPhotos: with nothing to show and nothing to add, nothing is rendered", async () => {
+  const { tree } = await openProofPhotos({ rows: [], canAdd: false });
+  assert.equal(tree(), null);
+});
+
+test("ProofPhotos: the helper uploads a photo into their own folder, then records it", async () => {
+  const { tree, calls } = await openProofPhotos({ rows: [] });
+  assert.match(textOf(tree()), /Proof photos/);
+  const input = nodes(tree(), (node) => node.type === "input")[0];
+  assert.equal(input.props.accept, "image/jpeg,image/png,image/webp");
+  await input.props.onChange({ target: { files: [{ type: "image/jpeg", size: 1000 }], value: "x" } });
+  await flush();
+  assert.deepEqual(calls, [["upload", "proof-photos", "g1/me/file-1", "image/jpeg"], ["add_proof_photo", { p_gig_id: "g1", p_path: "g1/me/file-1" }]]);
+});
+
+test("ProofPhotos: a wrong type or size is refused before anything is uploaded", async () => {
+  const { tree, calls } = await openProofPhotos({ rows: [] });
+  await nodes(tree(), (node) => node.type === "input")[0].props.onChange({ target: { files: [{ type: "application/pdf", size: 1000 }], value: "x" } });
+  await flush();
+  assert.deepEqual(calls, []);
+  assert.match(textOf(nodes(tree(), (node) => node.props.role === "alert")[0]), /JPG, PNG or WebP/);
+});
+
+test("ProofPhotos: if the record is refused, the uploaded file is removed again and the reason is shown", async () => {
+  const { tree, calls } = await openProofPhotos({ rows: [], rpcError: { code: "22023", message: "Mark the gig complete before adding photos." } });
+  await nodes(tree(), (node) => node.type === "input")[0].props.onChange({ target: { files: [{ type: "image/png", size: 1000 }], value: "x" } });
+  await flush();
+  assert.deepEqual(calls.map((call) => call[0]), ["upload", "add_proof_photo", "remove"], "no orphaned file");
+  assert.equal(nodes(tree(), (node) => node.props.role === "alert").length, 1);
+});
+
+test("ProofPhotos: the helper can remove their own photo, and the upload control goes away at the limit", async () => {
+  const { tree, calls } = await openProofPhotos({ rows: [proofRow("p1"), proofRow("p2", "helper-1")] });
+  const remove = nodes(tree(), (node) => node.type === "button" && textOf(node) === "Remove");
+  assert.equal(remove.length, 1, "only their own photo has a Remove control");
+  await remove[0].props.onClick();
+  await flush();
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [["remove_proof_photo", { p_photo_id: "p1" }], ["remove", "proof-photos", ["g1/me/p1"]]]);
+
+  const full = await openProofPhotos({ rows: ["a", "b", "c", "d", "e"].map((id) => proofRow(id)) });
+  assert.equal(nodes(full.tree(), (node) => node.type === "input").length, 0, "five photos is the limit");
 });

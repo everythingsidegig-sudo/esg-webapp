@@ -13,6 +13,8 @@ import { canReopenPublicly, canRepost, repostHref, repostPrivateHref } from "@/l
 import { START_MAX_WAITS, canWithdrawBeforeStart, delayAvailable, helperRemoved, helperWithdrew, removeAvailable, silence, startView, timeUntil, waitAvailable } from "@/lib/start-flow";
 import StatusBadge from "@/components/StatusBadge";
 import ChatPanel from "@/components/ChatPanel";
+import ProofPhotos from "@/components/ProofPhotos";
+import { canAddProofPhotos } from "@/lib/proof-photos";
 import TagChip from "@/components/TagChip";
 import { gigTagNames } from "@/lib/tags";
 import type { Claim, ClaimState, CompletionOutcome, ExitReason, FeedbackType, GigWithTags, IncompleteChoice, PublicProfile } from "@/lib/database.types";
@@ -608,6 +610,12 @@ function GigDetails({ id }: { id: string }) {
                 </div>
               )}
             </div>
+          )}
+
+          {/* Proof photos: the helper adds them once they mark the gig complete; the poster sees them. */}
+          {(gig.status === "in_progress" || gig.status === "awaiting_payment" || gig.status === "completed" || gig.status === "incomplete") && (
+            <ProofPhotos gigId={id} userId={user!.id} canAdd={canAddProofPhotos(gig, user?.id, myCompletion)}
+              helperName={isPoster && gig.selected_provider_id ? people[gig.selected_provider_id] : undefined} />
           )}
 
           {isSelectedProvider && gig.status === "in_progress" && !gig.incomplete_choice_phase && !myCompletion && (
