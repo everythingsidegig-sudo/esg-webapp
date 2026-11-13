@@ -87,7 +87,9 @@ function PublicProfileView({ username }: { username: string }) {
         )}
         <div className="min-w-0 flex-1 truncate text-lg font-semibold">@{profile.username}</div>
         {/* Another member's profile only: a private request to this helper (never shown on your own). */}
-        {user && profile.id !== user.id && (
+        {/* Only when the profile was opened from Find a Helper: from a gig in Find Gigs the viewer is
+            the helper, so "Post a Gig" for the poster makes no sense there. */}
+        {user && profile.id !== user.id && fromFinder && (
           <Link href={postRequestHref(profile.username, requestableCategories(profile.skills, SERVICE_TYPES).includes(category ?? "") ? category : null)}
             aria-label={`Post a Gig for @${profile.username}`} title="Send this helper a private request"
             className="flex min-h-11 shrink-0 items-center rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700">

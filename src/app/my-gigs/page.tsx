@@ -116,20 +116,22 @@ function posterCard({ gig, proposals, helper, requestedTo }: PosterRow, savedNon
 
 function receivedRequestCard({ request, gig, posterName }: ReceivedRequestRow, busy: string | null, onRespond: (requestId: string, interested: boolean) => void) {
   return (
-    <div key={request.id} className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="truncate font-medium">{gig.title}</div>
-          <div className="mt-0.5 text-sm text-neutral-500">{gigMeta(gig)}</div>
+    <div key={request.id} className="rounded-xl border border-neutral-200 bg-white shadow-sm">
+      <Link href={`/gigs/${gig.id}`} className="block p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="truncate font-medium">{gig.title}</div>
+            <div className="mt-0.5 text-sm text-neutral-500">{gigMeta(gig)}</div>
+          </div>
+          <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${TONES[request.state === "pending" ? "pending" : request.state === "declined" ? "bad" : "neutral"]}`}>
+            {REQUEST_STATE_LABEL[request.state]}
+          </span>
         </div>
-        <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${TONES[request.state === "pending" ? "pending" : request.state === "declined" ? "bad" : "neutral"]}`}>
-          {REQUEST_STATE_LABEL[request.state]}
-        </span>
-      </div>
-      {posterName && <p className="mt-2 text-sm text-neutral-600">Sent by @{posterName}</p>}
-      <p className="mt-1 text-sm text-neutral-600">Offered: {formatMoney(gig.amount)} · {gig.price_type === "negotiable" ? "Negotiable" : "Fixed price"}</p>
+        {posterName && <p className="mt-2 text-sm text-neutral-600">Sent by @{posterName}</p>}
+        <p className="mt-1 text-sm text-neutral-600">Offered: {formatMoney(gig.amount)} · {gig.price_type === "negotiable" ? "Negotiable" : "Fixed price"}</p>
+      </Link>
       {request.state === "pending" && (
-        <div className="mt-3 flex gap-2">
+        <div className="flex gap-2 px-4 pb-4">
           <button type="button" disabled={busy === request.id} onClick={() => onRespond(request.id, false)}
             className="flex-1 rounded-lg border border-neutral-300 bg-white py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-60">Decline</button>
           <button type="button" disabled={busy === request.id} onClick={() => onRespond(request.id, true)}

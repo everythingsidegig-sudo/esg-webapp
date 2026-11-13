@@ -374,7 +374,7 @@ function PostGigForm() {
         </fieldset>
       )}
       <label className="block">Gig Title<input required maxLength={120} value={title} onChange={(e) => setTitle(e.target.value)} className={input} /></label>
-      <label className="block">Brief Description<textarea required maxLength={50} rows={3} value={description} onChange={(e) => setDescription(e.target.value)} className={input} /></label>
+      <label className="block">Brief Description<textarea required maxLength={100} rows={3} value={description} onChange={(e) => setDescription(e.target.value)} className={input} /></label>
       <label className="block">Photo (optional)<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => { setPhoto(e.target.files?.[0] ?? null); setUploadedPhoto(null); }} /></label>
       {uploadedPhoto && !photo && repost.state === "ready" && <p className="text-sm text-neutral-500">The original photo will be reused. Choose a file to replace it.</p>}
       <label className="block">Budget ({CURRENCY})<input type="number" min="0.01" step="0.01" required value={amount} onChange={(e) => setAmount(e.target.value)} className={input} /></label>

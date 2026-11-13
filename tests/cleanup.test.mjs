@@ -4604,14 +4604,20 @@ test("Gig page: the Message helper link and the proposal's View profile link cen
 });
 
 // ---- Chat panel presentation ----
-async function openChat({ rows = [], readOnly = false, proposals = [], negotiation, rpcError = null, onPriceChanged, proposalsError = null } = {}) {
+async function openChat({ rows = [], readOnly = false, proposals = [], negotiation, rpcError = null, onPriceChanged, proposalsError = null, insertError = null } = {}) {
   const inserts = [], rpcs = [], current = { proposals: proposals.map((proposal) => ({ ...proposal })) };
   const table = (data, error = null) => {
     const query = {
       select() { return query; }, eq() { return query; },
       order() { return { then: (ok) => Promise.resolve(error ? { data: null, error } : { data: data() }).then(ok) }; },
       update() { const chain = { eq() { return chain; }, neq() { return chain; }, is() { return Promise.resolve({ error: null }); } }; return chain; },
-      insert: async (payload) => { inserts.push(JSON.parse(JSON.stringify(payload))); return { error: null }; },
+      // Like supabase-js: awaitable on its own, or chained with .select().single() to get the new row back.
+      insert: (payload) => {
+        inserts.push(JSON.parse(JSON.stringify(payload)));
+        const row = { ...payload, id: `new-${inserts.length}`, created_at: new Date().toISOString(), read_at: null };
+        const result = insertError ? { data: null, error: insertError } : { data: row, error: null };
+        return { select() { return { single: async () => result }; }, then: (ok, bad) => Promise.resolve({ error: result.error }).then(ok, bad) };
+      },
     };
     return query;
   };
@@ -4683,6 +4689,27 @@ test("Chat: the composer is a form; Send is disabled until there is text, Enter 
   assert.equal(prevented, true, "the page never reloads");
   assert.deepEqual(inserts, [{ gig_id: "g1", sender_id: "me", body: "On my way" }]);
   assert.equal(nodes(form(), (node) => node.type === "input")[0].props.value, "", "the box clears after a successful send");
+});
+
+test("Chat: a sent message appears immediately, without waiting for the realtime feed", async () => {
+  const { app, props } = await openChat();
+  const form = () => nodes(app.render(props), (node) => node.type === "form")[0];
+  nodes(form(), (node) => node.type === "input")[0].props.onChange({ target: { value: "Hello there" } });
+  await form().props.onSubmit({ preventDefault() {} });
+  await flush();
+  assert.match(textOf(app.render(props)), /Hello there/);
+});
+
+test("Chat: a failed send keeps the typed text and says so instead of failing silently", async () => {
+  const { app, props } = await openChat({ insertError: { message: "boom" } });
+  const form = () => nodes(app.render(props), (node) => node.type === "form")[0];
+  nodes(form(), (node) => node.type === "input")[0].props.onChange({ target: { value: "Are you there?" } });
+  await form().props.onSubmit({ preventDefault() {} });
+  await flush();
+  const tree = app.render(props);
+  assert.equal(nodes(tree, (node) => node.type === "input")[0].props.value, "Are you there?", "the draft is kept for a retry");
+  assert.match(nodes(tree, (node) => node.props.role === "alert").map(textOf).join(" "), /didn't send/);
+  assert.doesNotMatch(textOf(nodes(tree, (node) => node.props.role === "log")[0]), /Are you there/);
 });
 
 test("Chat: a closed gig shows the read-only notice instead of a composer", async () => {
