@@ -198,3 +198,10 @@ test("search: names that start with the query come before ones that merely conta
   assert.equal(JSON.stringify(CATALOG), before);
   assert.equal(CATEGORY_BY_ID.size, 23);
 });
+
+test("every catalog category has a grid icon", async () => {
+  const { categoryIcon } = await import("../src/lib/service-selection.ts");
+  const { CATALOG } = await import("../src/lib/service-catalog.ts");
+  for (const category of CATALOG) assert.notEqual(categoryIcon(category.id), "", category.name);
+  assert.equal(categoryIcon("c99"), "", "an unknown id just shows no icon");
+});

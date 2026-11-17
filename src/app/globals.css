@@ -1,10 +1,10 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f7f8f7;
+  --background: #faf9fc;
   --foreground: #171717;
-  --esg-green: #047857;
-  --esg-green-dark: #065f46;
+  --esg-brand: #6d28d9;
+  --esg-brand-dark: #5b21b6;
   --app-bar-height: 3.75rem;
 }
 
@@ -12,7 +12,33 @@
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
+  --font-display: var(--font-display);
   --font-mono: var(--font-geist-mono);
+}
+
+/* ESG palette: "Plum & Sunrise". Plum is the brand (buttons, links, active states); amber is the warm
+   accent for highlights. Success stays green and errors stay red, so status colours keep their meaning. */
+@theme {
+  --color-brand-50: #f6f2ff;
+  --color-brand-100: #ece4ff;
+  --color-brand-200: #d9c9ff;
+  --color-brand-300: #bda0fb;
+  --color-brand-400: #a174f4;
+  --color-brand-500: #8647e8;
+  --color-brand-600: #7430d6;
+  --color-brand-700: #6d28d9;
+  --color-brand-800: #5b21b6;
+  --color-brand-900: #3f1a7a;
+  --color-accent-50: #fff8eb;
+  --color-accent-100: #ffeccc;
+  --color-accent-400: #ffb02e;
+  --color-accent-500: #f59e0b;
+  --color-accent-700: #b45309;
+}
+
+h1, h2 {
+  font-family: var(--font-display), var(--font-geist-sans), Arial, sans-serif;
+  letter-spacing: -0.01em;
 }
 
 body {
@@ -71,7 +97,7 @@ label,
   height: 1.25rem;
   width: 1.25rem;
   flex-shrink: 0;
-  accent-color: var(--esg-green);
+  accent-color: var(--esg-brand);
 }
 
 /*
@@ -93,7 +119,7 @@ button:disabled {
   min-height: 100dvh;
   flex-direction: column;
   background:
-    radial-gradient(circle at top, rgb(236 253 245 / 0.7), transparent 24rem),
+    radial-gradient(circle at top, rgb(237 228 255 / 0.75), transparent 24rem),
     var(--background);
 }
 
@@ -115,7 +141,7 @@ button:disabled {
   border: 1px solid rgb(229 231 235);
   border-radius: 1.5rem;
   background: rgb(255 255 255 / 0.94);
-  box-shadow: 0 18px 50px rgb(15 23 42 / 0.08);
+  box-shadow: 0 18px 50px rgb(63 26 122 / 0.09);
 }
 
 .touch-control {
@@ -136,8 +162,8 @@ button:disabled {
 }
 
 .app-input:focus {
-  border-color: var(--esg-green);
-  box-shadow: 0 0 0 3px rgb(16 185 129 / 0.14);
+  border-color: var(--esg-brand);
+  box-shadow: 0 0 0 3px rgb(116 48 214 / 0.16);
 }
 
 @media (min-width: 48rem) {

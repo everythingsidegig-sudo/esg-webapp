@@ -33,7 +33,7 @@ export default function MyOfferedServices() {
     <section aria-label="Your services" className="w-full max-w-md space-y-3 rounded-xl border border-neutral-200 bg-white p-4 text-left shadow-sm">
       <div className="flex items-center justify-between gap-2">
         <h2 className="font-semibold">Services you offer</h2>
-        <Link href="/services" className="touch-link text-sm font-medium text-emerald-700">{rows.length > 0 ? "Edit" : "Choose services"}</Link>
+        <Link href="/services" className="touch-link text-sm font-medium text-brand-700">{rows.length > 0 ? "Edit" : "Choose services"}</Link>
       </div>
       {rows.length > 0
         ? <OfferedServices rows={rows} />

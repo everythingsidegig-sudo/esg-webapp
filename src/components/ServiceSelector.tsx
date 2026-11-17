@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { CATALOG, CATEGORY_BY_ID, SERVICE_BY_ID } from "@/lib/service-catalog";
 import {
-  BRANCHES, BRANCH_LABEL, MAX_CUSTOM_LENGTH, allState, countForCategory, countForService, customError, pathLabel, sameSelection, searchCatalog,
+  BRANCHES, BRANCH_LABEL, MAX_CUSTOM_LENGTH, allState, categoryIcon, countForCategory, countForService, customError, pathLabel, sameSelection, searchCatalog,
   selectionProblems, setAll, setCustomChecked, setCustomText, summarize, toggleSubservice, totalSelected,
   type Branch, type SearchHit, type SelectionState,
 } from "@/lib/service-selection";
@@ -98,7 +98,7 @@ export default function ServiceSelector({ initial, revisions, mode, onSave, onFi
 
   const tab = (target: Branch) => (
     <button key={target} role="tab" type="button" aria-selected={branch === target} onClick={() => { setBranch(target); setMessage(null); }}
-      className={`min-h-11 flex-1 rounded-lg px-2 py-1.5 text-center text-sm font-semibold transition-colors ${branch === target ? "bg-white text-emerald-700 shadow-sm" : "text-neutral-500 hover:text-neutral-900"}`}>
+      className={`min-h-11 flex-1 rounded-lg px-2 py-1.5 text-center text-sm font-semibold transition-colors ${branch === target ? "bg-white text-brand-700 shadow-sm" : "text-neutral-500 hover:text-neutral-900"}`}>
       {BRANCH_LABEL[target]}
       <span className="block text-xs font-normal">{totalSelected(drafts[target])} selected{dirty[target] ? " · unsaved" : ""}</span>
     </button>
@@ -108,7 +108,7 @@ export default function ServiceSelector({ initial, revisions, mode, onSave, onFi
     <div role="tablist" aria-label="Service lists" className="flex gap-1 rounded-xl bg-neutral-100 p-1">{BRANCHES.map(tab)}</div>
   );
   const status = message && (
-    <p role={message.kind === "error" ? "alert" : "status"} className={`text-sm ${message.kind === "error" ? "text-red-600" : "text-emerald-700"}`}>{message.text}</p>
+    <p role={message.kind === "error" ? "alert" : "status"} className={`text-sm ${message.kind === "error" ? "text-red-600" : "text-brand-700"}`}>{message.text}</p>
   );
 
   // ---- Review & finish ----
@@ -123,7 +123,7 @@ export default function ServiceSelector({ initial, revisions, mode, onSave, onFi
             <section key={target} aria-label={BRANCH_LABEL[target]} className="space-y-2 rounded-xl border border-neutral-200 bg-white p-4">
               <div className="flex items-center justify-between gap-2">
                 <h3 className="font-medium">{BRANCH_LABEL[target]}{dirty[target] ? " (unsaved)" : ""}</h3>
-                <button type="button" onClick={() => { setBranch(target); setView("browse"); }} className="touch-link text-sm font-medium text-emerald-700">Edit</button>
+                <button type="button" onClick={() => { setBranch(target); setView("browse"); }} className="touch-link text-sm font-medium text-brand-700">Edit</button>
               </div>
               {summary.length === 0 ? <p className="text-sm text-neutral-500">Nothing selected.</p> : summary.map(({ category, services }) => (
                 <div key={category.id}>
@@ -131,7 +131,7 @@ export default function ServiceSelector({ initial, revisions, mode, onSave, onFi
                     <h4 className="text-sm font-semibold text-neutral-700">{category.name}</h4>
                     <button type="button" aria-label={`Edit ${category.name} in ${BRANCH_LABEL[target]}`}
                       onClick={() => { setBranch(target); setPaths((current) => ({ ...current, [target]: { categoryId: category.id, serviceId: null } })); setView("browse"); }}
-                      className="text-xs font-medium text-emerald-700">Edit</button>
+                      className="text-xs font-medium text-brand-700">Edit</button>
                   </div>
                   <ul className="ml-3 mt-1 space-y-1 text-sm text-neutral-700">
                     {services.map(({ service, subservices, other }) => (
@@ -152,11 +152,11 @@ export default function ServiceSelector({ initial, revisions, mode, onSave, onFi
         {status}
         <div className="space-y-2">
           <button type="button" disabled={saving} onClick={() => void finish()}
-            className="flex min-h-11 w-full items-center justify-center rounded-lg bg-emerald-600 px-4 py-2.5 font-medium text-white hover:bg-emerald-700 disabled:opacity-60">
+            className="flex min-h-11 w-full items-center justify-center rounded-lg bg-brand-600 px-4 py-2.5 font-medium text-white hover:bg-brand-700 disabled:opacity-60">
             {saving ? "Saving…" : mode === "onboarding" ? "Save & Complete Registration" : "Save changes"}
           </button>
           {message?.kind === "error" && !saving && (
-            <button type="button" onClick={() => void finish()} className="touch-link block w-full text-center text-sm font-medium text-emerald-700">Retry</button>
+            <button type="button" onClick={() => void finish()} className="touch-link block w-full text-center text-sm font-medium text-brand-700">Retry</button>
           )}
           <button type="button" onClick={() => setView("browse")} className="flex min-h-11 w-full items-center justify-center rounded-lg border border-neutral-300 bg-white px-4 py-2.5 font-medium text-neutral-700 hover:bg-neutral-50">Keep editing</button>
           {mode === "onboarding" && <button type="button" onClick={skip} className="touch-link block w-full text-center text-sm font-medium text-neutral-500">Skip for now</button>}
@@ -174,10 +174,10 @@ export default function ServiceSelector({ initial, revisions, mode, onSave, onFi
 
   const crumbs = (
     <nav aria-label="Breadcrumb" className="flex flex-wrap items-center gap-1 text-sm">
-      <button type="button" onClick={() => go(rootPath)} className="touch-link font-medium text-emerald-700">Catalog</button>
+      <button type="button" onClick={() => go(rootPath)} className="touch-link font-medium text-brand-700">Catalog</button>
       {category && <>
         <span aria-hidden="true" className="text-neutral-400">&gt;</span>
-        <button type="button" onClick={() => go({ categoryId: category.id, serviceId: null })} className={`touch-link ${found ? "font-medium text-emerald-700" : "text-neutral-700"}`}>{category.name}</button>
+        <button type="button" onClick={() => go({ categoryId: category.id, serviceId: null })} className={`touch-link ${found ? "font-medium text-brand-700" : "text-neutral-700"}`}>{category.name}</button>
       </>}
       {found && <>
         <span aria-hidden="true" className="text-neutral-400">&gt;</span>
@@ -187,7 +187,7 @@ export default function ServiceSelector({ initial, revisions, mode, onSave, onFi
   );
 
   const row = "flex min-h-11 w-full items-center justify-between gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2 text-left hover:bg-neutral-50";
-  const count = (n: number) => (n > 0 ? <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">✓ {n} selected</span> : null);
+  const count = (n: number) => (n > 0 ? <span className="shrink-0 rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700">✓ {n} selected</span> : null);
 
   let body;
   if (trimmed) {
@@ -195,8 +195,8 @@ export default function ServiceSelector({ initial, revisions, mode, onSave, onFi
       <div className="space-y-2 rounded-lg border border-neutral-200 bg-white p-4 text-sm">
         <p className="font-medium">No matching services</p>
         <div className="flex gap-3">
-          <button type="button" onClick={() => setQuery("")} className="touch-link font-medium text-emerald-700">Clear search</button>
-          <button type="button" onClick={() => { setQuery(""); go(rootPath); }} className="touch-link font-medium text-emerald-700">Back to the catalog</button>
+          <button type="button" onClick={() => setQuery("")} className="touch-link font-medium text-brand-700">Clear search</button>
+          <button type="button" onClick={() => { setQuery(""); go(rootPath); }} className="touch-link font-medium text-brand-700">Back to the catalog</button>
         </div>
       </div>
     ) : (
@@ -208,12 +208,14 @@ export default function ServiceSelector({ initial, revisions, mode, onSave, onFi
     );
   } else if (!category) {
     body = (
-      <ul aria-label="Categories" className="space-y-1.5">
+      <ul aria-label="Categories" className="grid grid-cols-2 gap-2">
         {CATALOG.map((item) => (
           <li key={item.id}>
-            <button type="button" onClick={() => go({ categoryId: item.id, serviceId: null })} className={row}>
-              <span className="font-medium">{item.name}</span>
-              <span className="flex items-center gap-2">{count(countForCategory(draft, item.id))}<span aria-hidden="true">›</span></span>
+            <button type="button" onClick={() => go({ categoryId: item.id, serviceId: null })}
+              className="flex h-full min-h-24 w-full flex-col items-start justify-between gap-2 rounded-2xl border border-neutral-200 bg-white p-3 text-left shadow-sm transition hover:border-brand-300 hover:shadow-md">
+              <span aria-hidden="true" className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50 text-xl">{categoryIcon(item.id)}</span>
+              <span className="text-sm font-medium leading-snug">{item.name}</span>
+              <span className="flex items-center gap-1 text-xs text-brand-700">{count(countForCategory(draft, item.id))}</span>
             </button>
           </li>
         ))}
@@ -249,7 +251,7 @@ export default function ServiceSelector({ initial, revisions, mode, onSave, onFi
           All
         </label>
         {service.subservices.map((sub) => (
-          <label key={sub.id} className={`${box} ${highlight === sub.id ? "border-emerald-500 bg-emerald-50" : "border-neutral-200 bg-white"}`}>
+          <label key={sub.id} className={`${box} ${highlight === sub.id ? "border-brand-500 bg-brand-50" : "border-neutral-200 bg-white"}`}>
             <input type="checkbox" checked={draft.subservices.includes(sub.id)} onChange={() => edit((state) => toggleSubservice(state, sub.id))} className="h-5 w-5" />
             {sub.name}
           </label>
@@ -281,11 +283,11 @@ export default function ServiceSelector({ initial, revisions, mode, onSave, onFi
       {status}
       <div className="space-y-2 border-t border-neutral-200 pt-3">
         <button type="button" disabled={saving || !dirty[branch]} onClick={() => void saveBranch(branch)}
-          className="flex min-h-11 w-full items-center justify-center rounded-lg bg-emerald-600 px-4 py-2.5 font-medium text-white hover:bg-emerald-700 disabled:opacity-60">
+          className="flex min-h-11 w-full items-center justify-center rounded-lg bg-brand-600 px-4 py-2.5 font-medium text-white hover:bg-brand-700 disabled:opacity-60">
           {saving ? "Saving…" : `Save to ${BRANCH_LABEL[branch]}`}
         </button>
         {message?.kind === "error" && !saving && (
-          <button type="button" onClick={() => void saveBranch(branch)} className="touch-link block w-full text-center text-sm font-medium text-emerald-700">Retry</button>
+          <button type="button" onClick={() => void saveBranch(branch)} className="touch-link block w-full text-center text-sm font-medium text-brand-700">Retry</button>
         )}
         <button type="button" onClick={() => { setView("review"); setMessage(null); }} className="flex min-h-11 w-full items-center justify-center rounded-lg border border-neutral-300 bg-white px-4 py-2.5 font-medium text-neutral-700 hover:bg-neutral-50">
           Review &amp; finish

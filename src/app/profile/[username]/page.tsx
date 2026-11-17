@@ -90,7 +90,7 @@ function PublicProfileView({ username }: { username: string }) {
   return (
     <div className="mx-auto max-w-lg space-y-5">
       {fromFinder && (
-        <Link href={findHelperHref(category, SERVICE_TYPES)} className="touch-link text-sm font-medium text-emerald-700">← Back to Find a Helper</Link>
+        <Link href={findHelperHref(category, SERVICE_TYPES)} className="touch-link text-sm font-medium text-brand-700">← Back to Find a Helper</Link>
       )}
       <div className="flex items-center gap-4">
         <ProfilePhoto url={profile.photo_url} username={profile.username} sizeClass="h-16 w-16" />
@@ -101,7 +101,7 @@ function PublicProfileView({ username }: { username: string }) {
         {user && profile.id !== user.id && fromFinder && (
           <Link href={postRequestHref(profile.username, requestableCategories(profile.skills, SERVICE_TYPES).includes(category ?? "") ? category : null)}
             aria-label={`Post a Gig for @${profile.username}`} title="Send this helper a private request"
-            className="flex min-h-11 shrink-0 items-center rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700">
+            className="flex min-h-11 shrink-0 items-center rounded-lg bg-brand-600 px-4 text-sm font-semibold text-white shadow-sm hover:bg-brand-700">
             Post a Gig
           </Link>
         )}
@@ -162,7 +162,7 @@ function PublicProfileView({ username }: { username: string }) {
             if (tags.length === 0) return null;
             return (
               <div key={skill}>
-                <div className="text-xs font-medium uppercase tracking-wide text-emerald-700">{skill}</div>
+                <div className="text-xs font-medium uppercase tracking-wide text-brand-700">{skill}</div>
                 <div className="mt-1 flex flex-wrap gap-1.5">
                   {tags.map((tag) => <TagChip key={tag.id}>{tag.name}</TagChip>)}
                 </div>

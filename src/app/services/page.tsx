@@ -58,7 +58,7 @@ function ServicesInner() {
 
   if (error) {
     return <div className="mx-auto max-w-lg space-y-3"><p role="alert" className="text-red-600">{error}</p>
-      <button type="button" onClick={() => { setError(null); setReload((value) => value + 1); }} className="touch-link font-medium text-emerald-700">Retry</button></div>;
+      <button type="button" onClick={() => { setError(null); setReload((value) => value + 1); }} className="touch-link font-medium text-brand-700">Retry</button></div>;
   }
   if (!loaded) return <p className="text-neutral-500">Loading your services…</p>;
   return (

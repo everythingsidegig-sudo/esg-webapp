@@ -66,13 +66,13 @@ export default function GigTile({
         // dragged, so it stays squarely in view throughout the swipe instead of trailing off
         // toward whichever edge it was anchored to.
         <div className={`pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 bg-white px-4 py-1.5 text-base font-bold uppercase tracking-wide shadow-md ${
-          feedback === "accept" ? "border-emerald-500 text-emerald-600" : "border-red-500 text-red-600"
+          feedback === "accept" ? "border-brand-500 text-brand-600" : "border-red-500 text-red-600"
         }`}>
           {feedback === "accept" ? "Accept" : "Reject"}
         </div>
       )}
       <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium uppercase tracking-wide text-emerald-700">{gig.service_type}</span>
+        <span className="text-xs font-medium uppercase tracking-wide text-brand-700">{gig.service_type}</span>
         <div className="flex items-center gap-2">
           <span className="font-semibold">{formatMoney(gig.amount)}</span>
           {gig.photo_url && <span aria-hidden="true" title="Has photos">📷</span>}
@@ -91,7 +91,7 @@ export default function GigTile({
       <div className="mt-3 flex gap-2">
         <button type="button" onClick={(e) => { e?.stopPropagation(); onReject(); }} className="flex-1 rounded-lg border border-neutral-300 bg-white py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50">Reject</button>
         <button type="button" onClick={(e) => { e?.stopPropagation(); onView(); }} className="flex-1 rounded-lg border border-neutral-300 bg-white py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50">View</button>
-        <button type="button" onClick={(e) => { e?.stopPropagation(); onRequestAccept(); }} className="flex-1 rounded-lg bg-emerald-600 py-2 text-sm font-medium text-white hover:bg-emerald-700">Accept</button>
+        <button type="button" onClick={(e) => { e?.stopPropagation(); onRequestAccept(); }} className="flex-1 rounded-lg bg-brand-600 py-2 text-sm font-medium text-white hover:bg-brand-700">Accept</button>
       </div>
     </div>
   );

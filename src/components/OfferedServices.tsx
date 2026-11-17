@@ -18,7 +18,7 @@ export default function OfferedServices({ rows }: { rows: OfferedRow[] }) {
       <h3 className="text-sm font-medium text-neutral-500">Services offered</h3>
       {groups.map(({ category, services }) => (
         <div key={category.id}>
-          <div className="text-xs font-medium uppercase tracking-wide text-emerald-700">{category.name}</div>
+          <div className="text-xs font-medium uppercase tracking-wide text-brand-700">{category.name}</div>
           <ul className="mt-1 space-y-1">
             {services.map(({ service, subservices, other }) => (
               <li key={service.id} className="text-sm text-neutral-800">

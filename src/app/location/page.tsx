@@ -188,17 +188,17 @@ function LocationEntryInner({ next }: { next: string | null }) {
   if (confirmed) return (
     <section className="app-screen app-card space-y-6 p-5 sm:p-7">
       <div className="space-y-2">
-        <p className="text-sm font-semibold text-emerald-700">You&apos;re all set</p>
+        <p className="text-sm font-semibold text-brand-700">You&apos;re all set</p>
         <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">What would you like to do?</h1>
         <p className="text-sm leading-6 text-neutral-500">Choose a journey for {zipArea ?? locationText.trim()}.</p>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
-        <Link href="/need-help" className="flex min-h-36 flex-col items-start justify-center rounded-2xl border border-neutral-200 bg-white p-5 text-left shadow-sm transition hover:border-emerald-200 hover:shadow-md">
+        <Link href="/need-help" className="flex min-h-36 flex-col items-start justify-center rounded-2xl border border-neutral-200 bg-white p-5 text-left shadow-sm transition hover:border-brand-200 hover:shadow-md">
           <div className="text-3xl">🙋</div>
           <div className="mt-3 font-bold">I Need Help</div>
           <div className="mt-1 text-sm leading-5 text-neutral-500">Post a gig or find a helper.</div>
         </Link>
-        <button type="button" onClick={browseGigs} aria-label="Help & Earn Money" className="flex min-h-36 flex-col items-start justify-center rounded-2xl border border-neutral-200 bg-white p-5 text-left shadow-sm transition hover:border-emerald-200 hover:shadow-md">
+        <button type="button" onClick={browseGigs} aria-label="Help & Earn Money" className="flex min-h-36 flex-col items-start justify-center rounded-2xl border border-neutral-200 bg-white p-5 text-left shadow-sm transition hover:border-brand-200 hover:shadow-md">
           <div className="text-3xl">💪</div>
           <div className="mt-3 font-bold">Help &amp; Earn Money</div>
           <div className="mt-1 text-sm leading-5 text-neutral-500">Browse gigs nearby.</div>
@@ -210,7 +210,7 @@ function LocationEntryInner({ next }: { next: string | null }) {
   return (
     <section className="app-screen app-card p-5 sm:p-7">
       <div className="mb-7 space-y-2">
-        <p className="text-sm font-semibold text-emerald-700">Set your area</p>
+        <p className="text-sm font-semibold text-brand-700">Set your area</p>
         <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Where should we look?</h1>
         <p className="text-sm leading-6 text-neutral-500">Choose an area to find nearby gigs and helpers.</p>
       </div>
@@ -218,7 +218,7 @@ function LocationEntryInner({ next }: { next: string | null }) {
       <button
         onClick={useMyLocation}
         disabled={locating}
-        className="touch-control w-full bg-emerald-700 px-4 font-semibold text-white shadow-sm transition hover:bg-emerald-800 disabled:cursor-wait disabled:opacity-60"
+        className="touch-control w-full bg-brand-700 px-4 font-semibold text-white shadow-sm transition hover:bg-brand-800 disabled:cursor-wait disabled:opacity-60"
       >
         {locating ? "Finding your location…" : "📍 Use My Location"}
       </button>
@@ -274,7 +274,7 @@ function LocationEntryInner({ next }: { next: string | null }) {
       <button
         onClick={continueJourney}
         disabled={locating || lookingUpZip || (postcodeCandidates(locationText).length > 0 && !coords)}
-        className="touch-control mt-7 w-full border border-emerald-700 bg-white px-4 font-semibold text-emerald-700 transition hover:bg-emerald-50 disabled:cursor-wait disabled:opacity-60"
+        className="touch-control mt-7 w-full border border-brand-700 bg-white px-4 font-semibold text-brand-700 transition hover:bg-brand-50 disabled:cursor-wait disabled:opacity-60"
       >
         Continue
       </button>

@@ -376,7 +376,7 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
           : <div className="flex h-16 w-16 items-center justify-center rounded-full bg-neutral-200 text-xl">👤</div>}
         <div>
           <h1 className="text-lg font-semibold">@{profile.username}</h1>
-          <label className="inline-flex min-h-11 cursor-pointer items-center text-sm text-emerald-700">Change photo
+          <label className="inline-flex min-h-11 cursor-pointer items-center text-sm text-brand-700">Change photo
             <input type="file" accept="image/jpeg,image/png,image/webp" disabled={saving} className="hidden" onChange={(e) => { if (e.target.files?.[0]) void uploadPhoto(e.target.files[0]); }} />
           </label>
         </div>
@@ -392,7 +392,7 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
     <section aria-label="Your services" className="space-y-1 rounded-lg border border-neutral-200 bg-white p-4">
       <h2 className="text-sm font-medium">Your services</h2>
       <p className="text-sm text-neutral-500">Choose the services you offer to make money and the ones you might need help with. They are saved separately, and only what you offer appears on your public profile and in helper search.</p>
-      <Link href="/services" className="touch-link inline-block text-sm font-medium text-emerald-700">Choose or edit your services</Link>
+      <Link href="/services" className="touch-link inline-block text-sm font-medium text-brand-700">Choose or edit your services</Link>
     </section>
     <form onSubmit={saveProfile} className="space-y-3 rounded-lg border border-neutral-200 bg-white p-4">
       <fieldset disabled={saving} className="space-y-3">
@@ -409,18 +409,18 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
               ))}
               {chosenSpecializations.length === 0 && <span className="text-sm text-neutral-500">None added yet.</span>}
               <button type="button" onClick={() => setSheetScope(ALL_SKILLS)} aria-label="Add specializations"
-                className="inline-flex min-h-9 items-center rounded-full border border-dashed border-emerald-600 px-3 text-sm font-medium text-emerald-700 hover:bg-emerald-50">+ Add</button>
+                className="inline-flex min-h-9 items-center rounded-full border border-dashed border-brand-600 px-3 text-sm font-medium text-brand-700 hover:bg-brand-50">+ Add</button>
             </div>
           </fieldset>
         )}
         <CategoryList title="Services I might need" selected={services} setSelected={setServices} otherText={servicesOtherText} setOtherText={setServicesOtherText} />
         <button type="submit" disabled={!dirty} className={`flex w-full items-center justify-center whitespace-nowrap rounded-lg px-4 py-2.5 font-medium transition-colors disabled:cursor-not-allowed ${dirty
-          ? "bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-60"
+          ? "bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-60"
           : "bg-neutral-200 text-neutral-500"}`}>{saving ? "Updating…" : "Update profile"}</button>
         <p className="text-center text-xs text-neutral-500">{dirty ? "You have unsaved changes." : "No changes yet."}</p>
       </fieldset>
     </form>
-    {message && <p role="status" className="text-sm text-emerald-700">{message}</p>}
+    {message && <p role="status" className="text-sm text-brand-700">{message}</p>}
     {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
 
     <div className="space-y-3 rounded-lg border border-neutral-200 bg-white p-4">
@@ -432,7 +432,7 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2.5">
             <p className="text-sm text-neutral-700">{helperLocationText ? `📍 ${helperLocationText}` : "No location set"}</p>
             <button type="button" onClick={() => setHelperLocationExpanded(true)}
-              className="shrink-0 text-sm font-medium text-emerald-700 hover:underline">
+              className="shrink-0 text-sm font-medium text-brand-700 hover:underline">
               {helperLocationText ? "Update location" : "Set location"}
             </button>
           </div>
@@ -458,17 +458,17 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
                 ))}
               </ul>
             )}
-            <button type="button" onClick={useMyHelperLocation} className="text-sm text-emerald-700">{locatingHelper ? "Locating…" : "Use my current location"}</button>
+            <button type="button" onClick={useMyHelperLocation} className="text-sm text-brand-700">{locatingHelper ? "Locating…" : "Use my current location"}</button>
             <button type="button" onClick={() => void saveHelperLocation()} disabled={!helperLocationDirty}
               className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed ${helperLocationDirty
-                ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                ? "bg-brand-600 text-white hover:bg-brand-700"
                 : "bg-neutral-200 text-neutral-500"}`}>
               {savingLocation ? "Saving…" : "Save location"}
             </button>
             <p className="text-xs text-neutral-500">Clear the area and save to remove it and stop appearing in location-based search.</p>
           </fieldset>
         )}
-        {locationMessage && <p role="status" className="text-sm text-emerald-700">{locationMessage}</p>}
+        {locationMessage && <p role="status" className="text-sm text-brand-700">{locationMessage}</p>}
         {locationError && <p role="alert" className="text-sm text-red-600">{locationError}</p>}
       </div>
 
@@ -498,12 +498,12 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
         onClose={() => setSheetScope(null)}
         footer={<div className="flex items-center justify-between gap-3">
           <p className="text-sm text-neutral-500">{chosenSpecializations.filter(({ skill }) => sheetSkills.includes(skill)).length} selected</p>
-          <button type="button" onClick={() => setSheetScope(null)} className="rounded-lg bg-emerald-600 px-6 py-2.5 font-medium text-white hover:bg-emerald-700">Done</button>
+          <button type="button" onClick={() => setSheetScope(null)} className="rounded-lg bg-brand-600 px-6 py-2.5 font-medium text-white hover:bg-brand-700">Done</button>
         </div>}>
         {sheetSkills.map((skill) => {
           const selectedIds = specializationTags[skill] ?? [];
           return <div key={skill} role="group" aria-label={`${skill} specializations`} className="pb-2">
-            <p className="px-3 pt-2 text-xs font-semibold uppercase tracking-wide text-emerald-700">{skill}</p>
+            <p className="px-3 pt-2 text-xs font-semibold uppercase tracking-wide text-brand-700">{skill}</p>
             {(tagCatalog[skill] ?? []).map((tag) => {
               const selected = selectedIds.includes(tag.id);
               const atLimit = !selected && selectedIds.length >= MAX_PROFILE_TAGS;
@@ -511,7 +511,7 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
                 onClick={() => toggleSpecializationTag(skill, tag.id)}
                 className="flex min-h-12 w-full items-center justify-between gap-3 rounded-lg px-3 text-left text-sm text-neutral-900 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-50">
                 <span>{tag.name}</span>
-                <span aria-hidden="true" className={`flex h-6 w-6 items-center justify-center rounded-md border text-sm ${selected ? "border-emerald-600 bg-emerald-600 text-white" : "border-neutral-300 text-transparent"}`}>✓</span>
+                <span aria-hidden="true" className={`flex h-6 w-6 items-center justify-center rounded-md border text-sm ${selected ? "border-brand-600 bg-brand-600 text-white" : "border-neutral-300 text-transparent"}`}>✓</span>
               </button>;
             })}
           </div>;
@@ -532,7 +532,7 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
           </ul>
           <div className="flex justify-end gap-3">
             <button type="button" onClick={closeDeleteDialog} className="rounded-lg border border-neutral-300 px-4 py-2.5 font-medium text-neutral-700">Cancel</button>
-            <button type="button" onClick={() => { closeDeleteDialog(); router.push("/my-gigs"); }} className="rounded-lg bg-emerald-600 px-4 py-2.5 font-medium text-white hover:bg-emerald-700">View Gigs</button>
+            <button type="button" onClick={() => { closeDeleteDialog(); router.push("/my-gigs"); }} className="rounded-lg bg-brand-600 px-4 py-2.5 font-medium text-white hover:bg-brand-700">View Gigs</button>
           </div>
         </div>
       </div>

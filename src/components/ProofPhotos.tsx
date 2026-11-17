@@ -102,7 +102,7 @@ export default function ProofPhotos({ gigId, userId, canAdd, helperName }: {
         </ul>
       )}
       {canAdd && mine < MAX_PROOF_PHOTOS && (
-        <label className="flex min-h-11 w-full cursor-pointer items-center justify-center rounded-lg border border-emerald-600 px-4 py-2.5 text-center font-medium text-emerald-700 hover:bg-emerald-50">
+        <label className="flex min-h-11 w-full cursor-pointer items-center justify-center rounded-lg border border-brand-600 px-4 py-2.5 text-center font-medium text-brand-700 hover:bg-brand-50">
           {busy ? "Uploading…" : "Add a photo"}
           <input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy} className="sr-only" aria-label="Add a photo"
             onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void add(file); }} />

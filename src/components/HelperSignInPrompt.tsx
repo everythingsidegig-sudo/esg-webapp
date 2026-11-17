@@ -24,10 +24,10 @@ export default function HelperSignInPrompt({ username, destination, browseHref =
       <p className="text-sm text-neutral-600">
         Helper profiles are for ESG members. Sign in or create a free account to view @{username}&apos;s profile.
       </p>
-      <Link href={`/auth/sign-in?next=${encodeURIComponent(destination)}`} onClick={() => { rememberAreaForAuth(); }} className={`${action} bg-emerald-600 text-white hover:bg-emerald-700`}>
+      <Link href={`/auth/sign-in?next=${encodeURIComponent(destination)}`} onClick={() => { rememberAreaForAuth(); }} className={`${action} bg-brand-600 text-white hover:bg-brand-700`}>
         Log in
       </Link>
-      <Link href="/auth/sign-up" onClick={() => { rememberAuthDestination(destination); rememberAreaForAuth(); }} className={`${action} border border-emerald-600 text-emerald-700 hover:bg-emerald-50`}>
+      <Link href="/auth/sign-up" onClick={() => { rememberAuthDestination(destination); rememberAreaForAuth(); }} className={`${action} border border-brand-600 text-brand-700 hover:bg-brand-50`}>
         Create account
       </Link>
       {onContinueBrowsing

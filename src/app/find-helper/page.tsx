@@ -265,7 +265,7 @@ export default function FindHelper() {
         <section aria-label="Helpers offering this service" className="space-y-2">
           <div className="flex items-start justify-between gap-2">
             <h2 className="text-sm font-semibold text-neutral-500">Helpers offering {pathLabel(serviceFilter)}</h2>
-            <button type="button" onClick={() => { setServiceFilter(null); setServiceHelpers([]); }} className="touch-link shrink-0 text-sm font-medium text-emerald-700">Clear</button>
+            <button type="button" onClick={() => { setServiceFilter(null); setServiceHelpers([]); }} className="touch-link shrink-0 text-sm font-medium text-brand-700">Clear</button>
           </div>
           {serviceLoading && <p className="text-neutral-500">Loading helpers…</p>}
           {serviceError && <p role="alert">{serviceError}</p>}
@@ -313,7 +313,7 @@ export default function FindHelper() {
             ))}
             {chosenTags.length === 0 && <span className="text-sm text-neutral-500">Any specialization.</span>}
             <button type="button" onClick={() => setSheetOpen(true)} aria-label="Add specializations"
-              className="inline-flex min-h-9 items-center rounded-full border border-dashed border-emerald-600 px-3 text-sm font-medium text-emerald-700 hover:bg-emerald-50">+ Add</button>
+              className="inline-flex min-h-9 items-center rounded-full border border-dashed border-brand-600 px-3 text-sm font-medium text-brand-700 hover:bg-brand-50">+ Add</button>
           </div>
         </fieldset>
       )}
@@ -353,14 +353,14 @@ export default function FindHelper() {
         <OptionSheet title={SPECIALIZATION_PROMPTS[category] ?? `What kind of ${category.toLowerCase()}?`} onClose={() => setSheetOpen(false)}
           footer={<div className="flex items-center justify-between gap-3">
             <p className="text-sm text-neutral-500">{chosenTags.length} selected</p>
-            <button type="button" onClick={() => setSheetOpen(false)} className="rounded-lg bg-emerald-600 px-6 py-2.5 font-medium text-white hover:bg-emerald-700">Done</button>
+            <button type="button" onClick={() => setSheetOpen(false)} className="rounded-lg bg-brand-600 px-6 py-2.5 font-medium text-white hover:bg-brand-700">Done</button>
           </div>}>
           {categoryTags.map((tag) => {
             const selected = selectedTagIds.includes(tag.id);
             return <button key={tag.id} type="button" role="checkbox" aria-checked={selected} onClick={() => toggleTag(tag.id)}
               className="flex min-h-12 w-full items-center justify-between gap-3 rounded-lg px-3 text-left text-sm text-neutral-900 hover:bg-neutral-50">
               <span>{tag.name}</span>
-              <span aria-hidden="true" className={`flex h-6 w-6 items-center justify-center rounded-md border text-sm ${selected ? "border-emerald-600 bg-emerald-600 text-white" : "border-neutral-300 text-transparent"}`}>✓</span>
+              <span aria-hidden="true" className={`flex h-6 w-6 items-center justify-center rounded-md border text-sm ${selected ? "border-brand-600 bg-brand-600 text-white" : "border-neutral-300 text-transparent"}`}>✓</span>
             </button>;
           })}
         </OptionSheet>

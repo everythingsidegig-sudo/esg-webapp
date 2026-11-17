@@ -96,7 +96,7 @@ function MessagesInner() {
                 </div>
               </div>
               {unread > 0 && (
-                <span role="img" aria-label={`${unread} unread`} className="flex h-6 min-w-6 shrink-0 items-center justify-center rounded-full bg-emerald-600 px-1.5 text-xs font-medium text-white">{unread}</span>
+                <span role="img" aria-label={`${unread} unread`} className="flex h-6 min-w-6 shrink-0 items-center justify-center rounded-full bg-brand-600 px-1.5 text-xs font-medium text-white">{unread}</span>
               )}
             </Link>
           </li>

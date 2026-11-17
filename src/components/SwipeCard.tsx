@@ -61,7 +61,7 @@ export default function SwipeCard({
     >
       {feedback && (
         <div aria-hidden="true" className={`pointer-events-none absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 bg-white px-4 py-1.5 text-base font-bold uppercase tracking-wide shadow-md ${
-          feedback === "right" ? "border-emerald-500 text-emerald-600" : "border-red-500 text-red-600"
+          feedback === "right" ? "border-brand-500 text-brand-600" : "border-red-500 text-red-600"
         }`}>
           {feedback === "right" ? rightLabel : leftLabel}
         </div>

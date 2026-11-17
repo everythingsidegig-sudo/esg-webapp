@@ -281,7 +281,7 @@ function BrowseInner() {
       {lastRejected && !toast && (
         <div role="status" className="fixed inset-x-4 bottom-4 z-50 mx-auto flex max-w-md items-center justify-between gap-3 rounded-lg bg-neutral-900 px-4 py-3 text-sm text-white shadow-lg">
           <span>Skipped.</span>
-          <button type="button" onClick={undoReject} className="font-semibold text-emerald-300 hover:underline">Undo</button>
+          <button type="button" onClick={undoReject} className="font-semibold text-brand-300 hover:underline">Undo</button>
         </div>
       )}
     </div>

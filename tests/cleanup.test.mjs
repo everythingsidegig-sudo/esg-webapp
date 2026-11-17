@@ -118,6 +118,7 @@ async function component(path, name, overrides = {}) {
     "@/components/MyOfferedServices": { default: "my-offered-services" },
     "@/components/SwipeCard": { default: "swipe-card" },
     "@/components/ProofPhotos": { default: "proof-photos" },
+    "@/components/GigProgress": { default: "gig-progress" },
     "@/lib/proof-photos": proofPhotosLib,
     "@/lib/service-catalog": serviceCatalogLib,
     "@/lib/service-selection": serviceSelectionLib,
@@ -3995,7 +3996,7 @@ test("Another member's profile has a clearly visible Post a Gig action, targetin
   assert.equal(post.length, 1);
   assert.equal(post[0].props.href, "/post?helper=HelperOne&category=Cleaning", "names the helper (private request) and the service searched for");
   assert.equal(post[0].props["aria-label"], "Post a Gig for @HelperOne");
-  assert.match(post[0].props.className, /bg-emerald-600/, "a primary, filled action");
+  assert.match(post[0].props.className, /bg-brand-600/, "a primary, filled action");
   assert.match(post[0].props.className, /min-h-11/, "a touch-sized target");
   // Top-right: the same row as the name, after it.
   const row = nodes(tree, (node) => node.type === "div" && Array.isArray(node.props.children) && node.props.children.includes?.(post[0]))[0];
@@ -4739,7 +4740,7 @@ test("Chat: bubbles are grouped per sender, dated, timed, and only your last rea
   const chips = nodes(log, (node) => node.type === "span" && /rounded-full/.test(node.props.className ?? "")).map(textOf);
   assert.deepEqual(chips, ["Yesterday", "Today"], "a date chip starts each day");
   assert.equal(chatBubbles(tree).length, 4);
-  const mine = chatBubbles(tree).filter((node) => /bg-emerald-600/.test(node.props.className));
+  const mine = chatBubbles(tree).filter((node) => /bg-brand-600/.test(node.props.className));
   assert.equal(mine.length, 2);
   assert.doesNotMatch(mine[0].props.className, /rounded-br-md/, "inside a group only the last bubble gets the corner tail");
   assert.match(mine[1].props.className, /rounded-br-md/);
@@ -4915,7 +4916,7 @@ test("Chat negotiation: answered proposals show their outcome, and a late one sa
   assert.match(textOf(proposalCards(late.tree)[0]), /can no longer be changed/);
   assert.equal(buttonLabelled(proposalCards(late.tree)[0], /^(Accept|Decline)/), undefined, "once start was requested the pending proposal cannot be answered");
   const accepted = proposalCards((await openChat({ proposals: [prop({ state: "accepted", responded_at: nowIso(1) })], negotiation: open })).tree)[0];
-  assert.match(accepted.props.className, /border-emerald-300/, "an accepted price is highlighted");
+  assert.match(accepted.props.className, /border-brand-300/, "an accepted price is highlighted");
 });
 
 test("Chat negotiation: Propose a new price opens a small form, checks the amount, and sends it through propose_price", async () => {
@@ -6451,7 +6452,7 @@ test("Services screen: search suggestions show the full path, selecting one open
   tree = sel.render();
   assert.equal(searchBox(tree).props.value, "", "the search is cleared on opening a result");
   assert.match(textOf(nodes(tree, (node) => node.props["aria-label"] === "Breadcrumb")[0]), /Technology & Electronics.*App & Software Testing/);
-  assert.match(checkboxLabel(tree, "Mobile App Testing (iOS / Android)").props.className, /bg-emerald-50/, "the target is highlighted");
+  assert.match(checkboxLabel(tree, "Mobile App Testing (iOS / Android)").props.className, /bg-brand-50/, "the target is highlighted");
   assert.equal(checkboxes(tree).filter((box) => box.props.checked).length, 0, "searching selected nothing and changed nothing");
 });
 
@@ -6692,4 +6693,21 @@ test("Home: a signed-in member sees the services they offer (OFFER only) with a 
   empty.auth.user = { id: "u1" };
   empty.render(); await flush();
   assert.equal(nodes(empty.render(), (node) => node.props.children === "Choose services").length, 1);
+});
+
+test("Gig progress: the four stages are reached in order, and a gig that is not on its way shows no strip", async () => {
+  const { progressReached, PROGRESS_STEPS } = await import("../src/lib/gig-progress.ts");
+  assert.deepEqual([...PROGRESS_STEPS], ["Posted", "Matched", "Started", "Done"]);
+  const gig = (status, selected_provider_id = null) => ({ status, selected_provider_id });
+  assert.equal(progressReached(gig("active")), 1);
+  assert.equal(progressReached(gig("active", "h1")), 2);
+  assert.equal(progressReached(gig("in_progress", "h1")), 3);
+  assert.equal(progressReached(gig("awaiting_payment", "h1")), 4);
+  assert.equal(progressReached(gig("completed", "h1")), 4);
+  for (const status of ["draft", "saved_non_public", "cancelled", "incomplete", "disputed"]) assert.equal(progressReached(gig(status)), 0, status);
+  const app = await component("src/components/GigProgress.tsx", "GigProgress", { mocks: { "@/lib/gig-progress": { PROGRESS_STEPS, progressReached } } });
+  const tree = app.render({ gig: gig("in_progress", "h1") });
+  assert.equal(nodes(tree, (node) => node.type === "li").length, 4);
+  assert.equal(nodes(tree, (node) => node.type === "li" && node.props["aria-current"] === "step").length, 1, "one current step");
+  assert.equal(app.render({ gig: gig("draft") }), null);
 });

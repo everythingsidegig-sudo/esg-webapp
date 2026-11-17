@@ -316,8 +316,8 @@ function PostGigForm() {
     return <div className="mx-auto max-w-lg space-y-4">
       <h1 className="text-xl font-semibold">Post a Gig</h1>
       <p role="alert" className="rounded-lg bg-red-50 px-3 py-2.5 text-sm text-red-700">{lookup.message}</p>
-      <Link href="/find-helper" className="touch-link block text-sm font-medium text-emerald-700">← Back to Find a Helper</Link>
-      <Link href="/post" className="touch-link block text-sm font-medium text-emerald-700">Post a public gig instead</Link>
+      <Link href="/find-helper" className="touch-link block text-sm font-medium text-brand-700">← Back to Find a Helper</Link>
+      <Link href="/post" className="touch-link block text-sm font-medium text-brand-700">Post a public gig instead</Link>
     </div>;
   }
   if (lookup.state === "loading") return <p className="text-neutral-500">Loading the helper…</p>;
@@ -325,21 +325,21 @@ function PostGigForm() {
     return <div className="mx-auto max-w-lg space-y-4">
       <h1 className="text-xl font-semibold">Repost a gig</h1>
       <p role="alert" className="rounded-lg bg-red-50 px-3 py-2.5 text-sm text-red-700">{repost.message}</p>
-      <Link href="/my-gigs" className="touch-link block text-sm font-medium text-emerald-700">← Back to My Gigs</Link>
-      <Link href="/post" className="touch-link block text-sm font-medium text-emerald-700">Post a new gig from scratch</Link>
+      <Link href="/my-gigs" className="touch-link block text-sm font-medium text-brand-700">← Back to My Gigs</Link>
+      <Link href="/post" className="touch-link block text-sm font-medium text-brand-700">Post a new gig from scratch</Link>
     </div>;
   }
   if (repost.state === "loading") return <p className="text-neutral-500">Loading the gig…</p>;
   return <div className="mx-auto max-w-lg space-y-4">
     <h1 className="text-xl font-semibold">{requestedHelper ? `Post a Gig for @${requestedHelper.username}` : "Post a Gig"}</h1>
     {requestedHelper && (
-      <div role="note" className="space-y-1 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm text-emerald-900">
+      <div role="note" className="space-y-1 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2.5 text-sm text-brand-900">
         <p><strong>Private request.</strong> Only @{requestedHelper.username} will see it, and it isn&apos;t posted publicly or shown in Browse.</p>
         {!retained && <Link href="/post" className="touch-link font-medium underline">Post a public gig instead</Link>}
       </div>
     )}
     {repost.state === "ready" && (
-      <div role="note" className="space-y-1 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm text-emerald-900">
+      <div role="note" className="space-y-1 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2.5 text-sm text-brand-900">
         <p><strong>Reposting &ldquo;{repost.title}&rdquo; as a new gig.</strong> The details are copied below. Choose a new date and check everything before you post. The original gig stays as it is.</p>
         {!requestedHelper && <p>The repost is a regular gig that every helper can see.</p>}
       </div>
@@ -400,7 +400,7 @@ function PostGigForm() {
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-neutral-300 bg-white px-3 py-2.5">
           <p className="text-sm text-neutral-700">📍 {locationText}</p>
           <button type="button" onClick={() => setLocationExpanded(true)}
-            className="shrink-0 text-sm font-medium text-emerald-700 hover:underline">
+            className="shrink-0 text-sm font-medium text-brand-700 hover:underline">
             Update location
           </button>
         </div>
@@ -428,7 +428,7 @@ function PostGigForm() {
               ))}
             </ul>
           )}
-          <button type="button" onClick={useMyLocation} className="text-sm font-medium text-emerald-700">{locating ? "Locating…" : "📍 Use my current location"}</button>
+          <button type="button" onClick={useMyLocation} className="text-sm font-medium text-brand-700">{locating ? "Locating…" : "📍 Use my current location"}</button>
           {locationNotice && <p role="status" className="text-sm text-neutral-600">{locationNotice}</p>}
           {coordinates.lat != null && coordinates.lng != null && (
             <div className="space-y-2">
@@ -448,11 +448,11 @@ function PostGigForm() {
       {/* Find Help Profile Swiping v1.0: only for an ordinary public gig -- a private request to
           one named helper (/post?helper=<username>) already has its own addressed flow. */}
       {!retained && !requestedHelper && (
-        <button onClick={() => void submit("find_helpers")} disabled={submitting} className="flex-1 rounded-lg border border-emerald-600 py-2.5 text-emerald-700 disabled:opacity-60">
+        <button onClick={() => void submit("find_helpers")} disabled={submitting} className="flex-1 rounded-lg border border-brand-600 py-2.5 text-brand-700 disabled:opacity-60">
           {submitting ? "Saving…" : "Save & Find Helpers Nearby"}
         </button>
       )}
-      <button onClick={() => void submit("publish")} disabled={submitting} className="flex-1 rounded-lg bg-emerald-600 py-2.5 text-white disabled:opacity-60">{submitting ? (requestedHelper ? "Sending…" : "Posting…") : retained ? "Retry previous request" : requestedHelper ? "Send request" : "Post Gig"}</button>
+      <button onClick={() => void submit("publish")} disabled={submitting} className="flex-1 rounded-lg bg-brand-600 py-2.5 text-white disabled:opacity-60">{submitting ? (requestedHelper ? "Sending…" : "Posting…") : retained ? "Retry previous request" : requestedHelper ? "Send request" : "Post Gig"}</button>
     </div>
   </div>;
 }

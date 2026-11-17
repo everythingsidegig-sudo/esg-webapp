@@ -74,7 +74,7 @@ function posterCard({ gig, proposals, helper, requestedTo }: PosterRow, savedNon
         {helper && section !== "open" && <p className="mt-2 text-sm text-neutral-600">Helper: @{helper}{agreedLine(gig) ? ` · ${agreedLine(gig)}` : ""}</p>}
         {gig.helper_withdrawn_at && <p className="mt-2 text-sm text-amber-700">Your helper withdrew. You can post it again for everyone.</p>}
         {gig.helper_removed_at && <p className="mt-2 text-sm text-amber-700">You removed your helper. You can post it again for everyone.</p>}
-        {gig.requested_helper_id && !gig.selected_provider_id && !gig.helper_withdrawn_at && !gig.helper_removed_at && <p className="mt-2 text-sm text-emerald-800">🔒 Private request{requestedTo ? ` to @${requestedTo}` : ""}</p>}
+        {gig.requested_helper_id && !gig.selected_provider_id && !gig.helper_withdrawn_at && !gig.helper_removed_at && <p className="mt-2 text-sm text-brand-800">🔒 Private request{requestedTo ? ` to @${requestedTo}` : ""}</p>}
         {tagChips(gig)}
       </Link>
       {section === "saved_non_public" && (
@@ -90,14 +90,14 @@ function posterCard({ gig, proposals, helper, requestedTo }: PosterRow, savedNon
                   {(request.state === "pending" || request.state === "interested") && (
                     <button type="button" disabled={savedNonPublic.busy === request.id}
                       onClick={() => savedNonPublic.onAccept(request.id)}
-                      className="shrink-0 rounded-lg bg-emerald-600 px-3 py-1 text-xs font-medium text-white disabled:opacity-60">Accept</button>
+                      className="shrink-0 rounded-lg bg-brand-600 px-3 py-1 text-xs font-medium text-white disabled:opacity-60">Accept</button>
                   )}
                 </li>
               ))}
             </ul>
           )}
           <div className="flex gap-3 pt-1">
-            <Link href={`/post/find-helpers?gig=${gig.id}`} className="touch-link text-sm font-medium text-emerald-700">Resume Finding Helpers</Link>
+            <Link href={`/post/find-helpers?gig=${gig.id}`} className="touch-link text-sm font-medium text-brand-700">Resume Finding Helpers</Link>
             <button type="button" disabled={savedNonPublic.busy === gig.id} onClick={() => savedNonPublic.onCancel(gig.id)}
               className="text-sm font-medium text-red-700 disabled:opacity-60">Cancel</button>
           </div>
@@ -106,10 +106,10 @@ function posterCard({ gig, proposals, helper, requestedTo }: PosterRow, savedNon
       <div className="flex items-center justify-between gap-3 border-t border-neutral-100 px-4">
         {section === "open"
           ? proposals > 0
-            ? <Link href={`/gigs/${gig.id}#proposals`} className="touch-link text-sm font-semibold text-emerald-700">{proposalCountLabel(proposals)}</Link>
+            ? <Link href={`/gigs/${gig.id}#proposals`} className="touch-link text-sm font-semibold text-brand-700">{proposalCountLabel(proposals)}</Link>
             : <span className="text-sm text-neutral-500">No proposals yet</span>
           : <span />}
-        <Link href={`/gigs/${gig.id}`} className="touch-link text-sm font-medium text-emerald-700">View gig</Link>
+        <Link href={`/gigs/${gig.id}`} className="touch-link text-sm font-medium text-brand-700">View gig</Link>
       </div>
     </div>
   );
@@ -144,7 +144,7 @@ function receivedRequestCard({ request, gig, posterName }: ReceivedRequestRow, b
               className="flex-1 rounded-lg border border-neutral-300 bg-white py-2 text-sm font-medium text-neutral-500 hover:bg-neutral-50 disabled:opacity-60">Not now</button>
           )}
           <button type="button" disabled={busy === request.id} onClick={() => onRespond(request.id, true)}
-            className="flex-1 rounded-lg bg-emerald-600 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60">Interested</button>
+            className="flex-1 rounded-lg bg-brand-600 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60">Interested</button>
         </div>
       )}
     </SwipeCard>
@@ -167,11 +167,11 @@ function helperCard({ gig, claimState, offer, customer }: HelperRow, userId: str
         {customer && <p className="mt-2 text-sm text-neutral-600">{section === "requests" ? "Request from" : "Customer:"} @{customer}</p>}
         {section === "requests" && <p className="mt-1 text-sm text-neutral-600">Offered: {formatMoney(gig.amount)} · {gig.price_type === "negotiable" ? "Negotiable" : "Fixed price"}</p>}
         {offer != null && claimState === "pending" && <p className="mt-1 text-sm text-neutral-600">Your offer: {formatMoney(offer)}</p>}
-        {gig.selected_provider_id === userId && agreedLine(gig) && <p className="mt-1 text-sm font-medium text-emerald-700">{agreedLine(gig)}</p>}
+        {gig.selected_provider_id === userId && agreedLine(gig) && <p className="mt-1 text-sm font-medium text-brand-700">{agreedLine(gig)}</p>}
         {tagChips(gig)}
       </Link>
       <div className="flex justify-end border-t border-neutral-100 px-4">
-        <Link href={`/gigs/${gig.id}`} className="touch-link text-sm font-medium text-emerald-700">View gig</Link>
+        <Link href={`/gigs/${gig.id}`} className="touch-link text-sm font-medium text-brand-700">View gig</Link>
       </div>
     </div>
   );
@@ -326,13 +326,13 @@ function MyGigsInner() {
     else { setHelpingLoading(true); setHelpingError(null); setHelpingReload((value) => value + 1); }
   }
 
-  const tabClass = (active: boolean) => `min-h-11 flex-1 rounded-lg px-3 text-sm font-semibold transition-colors ${active ? "bg-white text-emerald-700 shadow-sm" : "text-neutral-500 hover:text-neutral-900"}`;
+  const tabClass = (active: boolean) => `min-h-11 flex-1 rounded-lg px-3 text-sm font-semibold transition-colors ${active ? "bg-white text-brand-700 shadow-sm" : "text-neutral-500 hover:text-neutral-900"}`;
   const createdGig = created ? posted.find((row) => row.gig.id === created) : undefined;
 
   return (
     <div className="mx-auto max-w-2xl space-y-5">
       <h1 className="text-xl font-semibold">My Gigs</h1>
-      {createdGig && <p role="status" className="text-emerald-700">Gig successfully {createdGig.gig.status === "draft" ? "saved as a draft" : "posted"}. It appears below under I Need Help.</p>}
+      {createdGig && <p role="status" className="text-brand-700">Gig successfully {createdGig.gig.status === "draft" ? "saved as a draft" : "posted"}. It appears below under I Need Help.</p>}
       <div role="tablist" aria-label="My Gigs" className="flex gap-1 rounded-xl bg-neutral-100 p-1">
         <button role="tab" aria-selected={tab === "posted"} onClick={() => setTab("posted")} className={tabClass(tab === "posted")}>I Need Help</button>
         <button role="tab" aria-selected={tab === "helping"} onClick={() => setTab("helping")} className={tabClass(tab === "helping")}>I&apos;m Helping</button>
@@ -342,7 +342,7 @@ function MyGigsInner() {
       <div role="tabpanel" className="space-y-6">
         {loading ? <p className="text-neutral-500">Loading gigs…</p> : error ? null : tab === "posted" ? (
           posted.length === 0
-            ? <p className="text-neutral-500">You haven&apos;t posted a gig yet. <Link href="/post" className="touch-link font-medium text-emerald-700">Post a gig</Link></p>
+            ? <p className="text-neutral-500">You haven&apos;t posted a gig yet. <Link href="/post" className="touch-link font-medium text-brand-700">Post a gig</Link></p>
             : POSTER_SECTIONS.map(({ key, label }) => {
               const rows = posted.filter((row) => posterSection(row.gig) === key);
               if (rows.length === 0) return null;
@@ -353,7 +353,7 @@ function MyGigsInner() {
             })
         ) : (
           helping.length === 0 && receivedRequests.length === 0
-            ? <p className="text-neutral-500">You haven&apos;t sent any offers or received any requests yet. <Link href="/browse" className="touch-link font-medium text-emerald-700">Explore gigs</Link></p>
+            ? <p className="text-neutral-500">You haven&apos;t sent any offers or received any requests yet. <Link href="/browse" className="touch-link font-medium text-brand-700">Explore gigs</Link></p>
             : <>
               {receivedRequests.length > 0 && (
                 <section aria-label="Direct Requests" className="space-y-2">
