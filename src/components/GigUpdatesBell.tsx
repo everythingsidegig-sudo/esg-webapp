@@ -63,7 +63,7 @@ export default function GigUpdatesBell() {
 
   // Close the list on a click/tap anywhere outside it and on Escape.
   useEffect(() => {
-    if (!open) return;
+    if (!open || typeof document === "undefined") return;
     function onPointerDown(e: PointerEvent) {
       if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
     }
