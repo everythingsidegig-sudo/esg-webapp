@@ -2466,13 +2466,13 @@ test("Location is confirmed before either journey choice appears", async () => {
   assert.equal(locations[0].text, "Test city");
 });
 
-test("I Need Help offers Post a Gig and Find a Helper as real links, reachable with no session at all", async () => {
+test("I Need Help offers Post a Gig as a real link (Find a Helper was removed), reachable with no session at all", async () => {
   const app = await component("src/app/need-help/page.tsx", "NeedHelp");
   app.auth.user = null; app.auth.profile = null;
   const tree = app.render();
   const links = nodes(tree, (node) => node.type === "a");
-  assert.deepEqual(links.map((link) => link.props.href), ["/post", "/find-helper"]);
-  assert.equal(nodes(tree, (node) => node.props.children === "Find a Helper").length, 1);
+  assert.deepEqual(links.map((link) => link.props.href), ["/post"]);
+  assert.equal(nodes(tree, (node) => node.props.children === "Find a Helper").length, 0);
   assert.equal(nodes(tree, (node) => node.props.children === "Coming soon").length, 0);
   assert.equal(nodes(tree, (node) => node.props["aria-disabled"] === "true").length, 0);
 });
