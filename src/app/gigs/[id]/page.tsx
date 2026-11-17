@@ -40,6 +40,7 @@ function GigDetails({ id }: { id: string }) {
   const [myCompletion, setMyCompletion] = useState<CompletionOutcome | null>(null);
   const [myIncompleteChoice, setMyIncompleteChoice] = useState<IncompleteChoice | null>(null);
   const [myFeedback, setMyFeedback] = useState<FeedbackType | null>(null);
+  const [confirmingDelay, setConfirmingDelay] = useState(false);
   const [myFeedbackComment, setMyFeedbackComment] = useState<string | null>(null);
   const [feedbackComment, setFeedbackComment] = useState("");
   const [paymentInput, setPaymentInput] = useState("");
@@ -485,15 +486,46 @@ function GigDetails({ id }: { id: string }) {
                 ACCEPT START — LET&apos;S GO
               </button>
               {view === "poster-review" && delayAvailable(gig) && delaysLeft(gig) > 0 && (
-                <button
-                  disabled={busy}
-                  onClick={() => { if (window.confirm(delaysLeft(gig) === 1
-                    ? "Delay the start? This is your last delay. After it you must accept the start: if you remove your helper, or don't answer within 24 hours and they withdraw, you will receive a lemon."
-                    : "Delay the start? Your helper will be asked to wait, and can choose to withdraw.")) void run(() => supabase.rpc("delay_start", { p_gig_id: id })); }}
-                  className="flex min-h-11 w-full items-center justify-center rounded-lg border border-neutral-300 bg-white px-4 py-2.5 font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-60"
-                >
-                  Delay start
-                </button>
+                <>
+                  {/* The warning is on the page itself (not a browser pop-up, which can be blocked or hidden). */}
+                  <p role="note" className="text-sm text-neutral-600">
+                    {delaysLeft(gig) === 1
+                      ? "This is your last delay. After it you must accept the start: if you remove your helper, or don't answer within 24 hours and they withdraw, you will receive a lemon."
+                      : "You can delay the start twice. Your helper is asked to wait and can choose to withdraw."}
+                  </p>
+                  {!confirmingDelay ? (
+                    <button
+                      disabled={busy}
+                      onClick={() => setConfirmingDelay(true)}
+                      className="flex min-h-11 w-full items-center justify-center rounded-lg border border-neutral-300 bg-white px-4 py-2.5 font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-60"
+                    >
+                      Delay start
+                    </button>
+                  ) : (
+                    <div role="alertdialog" aria-label="Confirm delay" className="space-y-2 rounded-lg border border-yellow-300 bg-yellow-50 p-3">
+                      <p className="text-sm font-medium text-yellow-900">
+                        {delaysLeft(gig) === 1
+                          ? "Delay the start for the last time? You will have to accept it afterwards, and if you remove your helper or stay quiet for 24 hours and they withdraw, you will receive a lemon."
+                          : "Delay the start? Your helper will be asked to wait, and can choose to withdraw."}
+                      </p>
+                      <div className="flex gap-2">
+                        <button
+                          disabled={busy}
+                          onClick={() => { setConfirmingDelay(false); void run(() => supabase.rpc("delay_start", { p_gig_id: id })); }}
+                          className="min-h-11 flex-1 rounded-lg bg-yellow-600 px-4 py-2.5 font-medium text-white disabled:opacity-60"
+                        >
+                          Yes, delay the start
+                        </button>
+                        <button
+                          onClick={() => setConfirmingDelay(false)}
+                          className="min-h-11 flex-1 rounded-lg border border-neutral-300 bg-white px-4 py-2.5 font-medium text-neutral-700"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}

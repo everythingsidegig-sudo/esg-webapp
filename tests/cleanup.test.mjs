@@ -5245,14 +5245,20 @@ test("start-flow: at most two delays, the helper can ask again only after the fi
   assert.equal(finalDelay({ start_delayed_at: delayedAt, start_delay_count: 2 }, at + 24 * 3600000).overdue, true);
 });
 
-test("Poster: the last delay warns about the lemon, and once both delays are used there is no Delay start", async () => {
+test("Poster: the delay warning is on the page, the last delay warns about the lemon, and once both delays are used there is no Delay start", async () => {
   const first = await openRequest({ asUser: "poster-1", gig: startGig({ start_delay_count: 0 }) });
+  assert.match(textOf(first.tree), /You can delay the start twice/);
+  assert.doesNotMatch(textOf(first.tree), /last delay/);
   await buttonText(first.tree, "Delay start").props.onClick();
-  assert.doesNotMatch(first.confirms[0], /last delay/, "the first delay is an ordinary confirmation");
+  assert.deepEqual(first.rpcs, [], "the first click only asks for confirmation");
+  assert.deepEqual(first.confirms, [], "no browser pop-up is used");
+  assert.match(textOf(first.again()), /Delay the start\? Your helper will be asked to wait/);
   const second = await openRequest({ asUser: "poster-1", gig: startGig({ start_delay_count: 1 }) });
+  assert.match(textOf(second.tree), /This is your last delay.*lemon/);
   await buttonText(second.tree, "Delay start").props.onClick();
-  assert.match(second.confirms[0], /last delay/);
-  assert.match(second.confirms[0], /lemon/);
+  const askedAgain = second.again();
+  assert.match(textOf(askedAgain), /for the last time.*lemon/);
+  await buttonText(askedAgain, "Yes, delay the start").props.onClick();
   assert.deepEqual(second.rpcs, [["delay_start", { p_gig_id: "gig-1" }]]);
   const used = await openRequest({ asUser: "poster-1", gig: startGig({ start_delay_count: 2 }) });
   assert.equal(buttonText(used.tree, "Delay start"), undefined, "both delays used");
@@ -5301,12 +5307,17 @@ test("Poster: a start request can be accepted or delayed (after a confirmation),
   assert.ok(delay, "Delay start sits next to Accept");
   assert.match(delay.props.className, /min-h-11/);
   await delay.props.onClick();
+  assert.deepEqual(review.rpcs, [], "asks first");
+  const confirming = review.again();
+  assert.match(textOf(confirming), /helper will be asked to wait.*withdraw/);
+  await buttonText(confirming, "Yes, delay the start").props.onClick();
   assert.deepEqual(review.rpcs, [["delay_start", { p_gig_id: "gig-1" }]]);
-  assert.match(review.confirms[0], /helper will be asked to wait.*withdraw/);
 
-  const declined = await openRequest({ asUser: "poster-1", gig: startGig(), confirm: false });
+  const declined = await openRequest({ asUser: "poster-1", gig: startGig() });
   await buttonText(declined.tree, "Delay start").props.onClick();
-  assert.deepEqual(declined.rpcs, [], "cancelling the dialog sends nothing");
+  await buttonText(declined.again(), "Cancel").props.onClick();
+  assert.deepEqual(declined.rpcs, [], "cancelling sends nothing");
+  assert.ok(buttonText(declined.again(), "Delay start"), "back to the plain button");
 
   const delayed = await openRequest({ asUser: "poster-1", gig: startGig({ start_delayed_at: "2026-10-02T11:00:00Z" }) });
   assert.match(textOf(delayed.tree), /You delayed the start\. @helper1 can wait or withdraw/);
