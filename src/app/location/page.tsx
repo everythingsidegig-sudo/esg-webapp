@@ -196,7 +196,7 @@ function LocationEntryInner({ next }: { next: string | null }) {
         <Link href="/need-help" className="flex min-h-36 flex-col items-start justify-center rounded-2xl border border-neutral-200 bg-white p-5 text-left shadow-sm transition hover:border-emerald-200 hover:shadow-md">
           <div className="text-3xl">🙋</div>
           <div className="mt-3 font-bold">I Need Help</div>
-          <div className="mt-1 text-sm leading-5 text-neutral-500">Post a gig or find a helper.</div>
+          <div className="mt-1 text-sm leading-5 text-neutral-500">Post a gig and let people nearby offer to help.</div>
         </Link>
         <button type="button" onClick={browseGigs} aria-label="Help & Earn Money" className="flex min-h-36 flex-col items-start justify-center rounded-2xl border border-neutral-200 bg-white p-5 text-left shadow-sm transition hover:border-emerald-200 hover:shadow-md">
           <div className="text-3xl">💪</div>
