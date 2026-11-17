@@ -42,7 +42,7 @@ function HomeInner() {
         >
           <div className="mb-3 text-4xl" aria-hidden="true">🙋</div>
           <div className="font-semibold">I Need Help</div>
-          <div className="mt-1 text-sm text-neutral-500">Post a gig and let people nearby offer to help.</div>
+          <div className="mt-1 text-sm text-neutral-500">Post a gig or find a helper nearby.</div>
         </Link>
         <Link
           href="/browse"
