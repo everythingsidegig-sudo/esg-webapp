@@ -115,6 +115,7 @@ async function component(path, name, overrides = {}) {
     "@/components/TagChip": { default: "tag-chip" },
     "@/components/ProfilePhoto": { default: "profile-photo" },
     "@/components/OfferedServices": { default: "offered-services" },
+    "@/components/MyOfferedServices": { default: "my-offered-services" },
     "@/components/SwipeCard": { default: "swipe-card" },
     "@/components/ProofPhotos": { default: "proof-photos" },
     "@/lib/proof-photos": proofPhotosLib,
@@ -6670,4 +6671,25 @@ test("Find a Helper: a failed lookup says so, Clear removes the service filter, 
   nodes(search.app.render(), (node) => node.type === "selection-chip" && node.props.children === "Cleaning")[0].props.onClick();
   await flush(); search.app.render();
   assert.equal(nodes(search.app.render(), (node) => node.props["aria-label"] === "Helpers offering this service").length, 0, "the service filter is gone once a category is chosen");
+});
+
+test("Home: a signed-in member sees the services they offer (OFFER only) with a link to change them; signed out shows nothing", async () => {
+  const queries = [];
+  const rows = [{ service_id: "c12s05", subservice_id: "c12s05u01", custom_text: null }];
+  const client = fakeDb((query) => { queries.push(query); return { data: rows, error: null }; });
+  const app = await component("src/components/MyOfferedServices.tsx", "MyOfferedServices", { client });
+  app.auth.user = null;
+  assert.equal(app.render(), null, "signed out");
+  app.auth.user = { id: "u1" };
+  app.render(); await flush();
+  assert.equal(queries[0].table, "user_service_selections");
+  assert.deepEqual({ ...queries[0].eq }, { user_id: "u1", selection_type: "OFFER" }, "never the Need Help list");
+  const tree = app.render();
+  assert.ok(nodes(tree, (node) => node.type === "a" && node.props.href === "/services"));
+  assert.equal(nodes(tree, (node) => node.props.children === "Edit").length, 1);
+  rows.length = 0;
+  const empty = await component("src/components/MyOfferedServices.tsx", "MyOfferedServices", { client });
+  empty.auth.user = { id: "u1" };
+  empty.render(); await flush();
+  assert.equal(nodes(empty.render(), (node) => node.props.children === "Choose services").length, 1);
 });
