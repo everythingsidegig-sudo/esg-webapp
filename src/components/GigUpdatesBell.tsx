@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/lib/auth-context";
@@ -26,6 +26,7 @@ export default function GigUpdatesBell() {
   const { user } = useAuth();
   const supabase = createClient();
   const router = useRouter();
+  const rootRef = useRef<HTMLDivElement>(null);
   const [items, setItems] = useState<Notification[]>([]);
   const [open, setOpen] = useState(false);
 
@@ -60,6 +61,23 @@ export default function GigUpdatesBell() {
     };
   }, [user, supabase]);
 
+  // Close the list on a click/tap anywhere outside it and on Escape.
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(e: PointerEvent) {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
   if (!user) return null;
 
   const unreadCount = items.filter((n) => !n.read).length;
@@ -74,7 +92,7 @@ export default function GigUpdatesBell() {
   }
 
   return (
-    <div className="relative">
+    <div className="relative" ref={rootRef}>
       <button
         onClick={() => setOpen((o) => !o)}
         className="relative flex h-11 w-11 items-center justify-center rounded-full text-xl hover:bg-neutral-100"
