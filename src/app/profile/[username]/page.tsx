@@ -4,6 +4,8 @@ import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import HelperSignInPrompt from "@/components/HelperSignInPrompt";
+import OfferedServices, { type OfferedRow } from "@/components/OfferedServices";
+import ProfilePhoto from "@/components/ProfilePhoto";
 import TagChip from "@/components/TagChip";
 import { useAuth } from "@/lib/auth-context";
 import { findHelperHref, helperProfileHref, rpcActionError } from "@/lib/journey";
@@ -26,6 +28,10 @@ function PublicProfileView({ username }: { username: string }) {
   // Lemon count (the other half of this ratio) is private and never leaves
   // get_public_stats() -- only the pre-computed percentage does. ESG-FDBK-001.
   const [womPercentage, setWomPercentage] = useState<number | null>(null);
+  // Comments left with a Lemon, text and date only (no author, no gig). The Lemon COUNT stays private.
+  const [lemonComments, setLemonComments] = useState<{ comment: string; created_at: string }[]>([]);
+  // What they offer (OFFER selections only -- the Services I Need Help list is never public).
+  const [offered, setOffered] = useState<OfferedRow[]>([]);
   // ESG-SAFE-001/002: Block only (Report and Call 911 are out of scope).
   const [blocking, setBlocking] = useState(false);
   const [blockError, setBlockError] = useState<string | null>(null);
@@ -58,6 +64,13 @@ function PublicProfileView({ username }: { username: string }) {
         const { data: stats } = await supabase.rpc("get_public_stats", { p_profile_id: data.id });
         setGigsWorked(stats?.[0]?.gigs_worked_count ?? 0);
         setWomPercentage(stats?.[0]?.wom_percentage ?? null);
+        // Best effort: a failure here must not hide the rest of the profile.
+        const { data: offeredRows } = await supabase.rpc("get_public_offered_services", { p_profile_id: data.id });
+        setOffered(((offeredRows ?? []) as { service_id?: unknown; subservice_id?: unknown; custom_text?: unknown }[])
+          .filter((row): row is OfferedRow => typeof row.service_id === "string" && (row.subservice_id === null || typeof row.subservice_id === "string") && (row.custom_text === null || typeof row.custom_text === "string")));
+        const { data: comments } = await supabase.rpc("get_public_lemon_comments", { p_profile_id: data.id });
+        setLemonComments(((comments ?? []) as { comment?: unknown; created_at?: unknown }[])
+          .filter((row): row is { comment: string; created_at: string } => typeof row.comment === "string" && typeof row.created_at === "string"));
       });
   }, [supabase, username, authLoading, user]);
 
@@ -80,14 +93,12 @@ function PublicProfileView({ username }: { username: string }) {
         <Link href={findHelperHref(category, SERVICE_TYPES)} className="touch-link text-sm font-medium text-emerald-700">← Back to Find a Helper</Link>
       )}
       <div className="flex items-center gap-4">
-        {profile.photo_url ? (
-          <img src={profile.photo_url} alt="" className="h-16 w-16 shrink-0 rounded-full object-cover" />
-        ) : (
-          <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-neutral-200 text-xl">👤</div>
-        )}
+        <ProfilePhoto url={profile.photo_url} username={profile.username} sizeClass="h-16 w-16" />
         <div className="min-w-0 flex-1 truncate text-lg font-semibold">@{profile.username}</div>
         {/* Another member's profile only: a private request to this helper (never shown on your own). */}
-        {user && profile.id !== user.id && (
+        {/* Only when the profile was opened from Find a Helper: from a gig in Find Gigs the viewer is
+            the helper, so "Post a Gig" for the poster makes no sense there. */}
+        {user && profile.id !== user.id && fromFinder && (
           <Link href={postRequestHref(profile.username, requestableCategories(profile.skills, SERVICE_TYPES).includes(category ?? "") ? category : null)}
             aria-label={`Post a Gig for @${profile.username}`} title="Send this helper a private request"
             className="flex min-h-11 shrink-0 items-center rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700">
@@ -114,6 +125,20 @@ function PublicProfileView({ username }: { username: string }) {
         </div>
       </div>
 
+      {lemonComments.length > 0 && (
+        <section aria-label="Lemon comments" className="space-y-2">
+          <h3 className="text-sm font-medium text-neutral-500">Lemon comments</h3>
+          <ul className="space-y-2">
+            {lemonComments.map((item, index) => (
+              <li key={`${item.created_at}-${index}`} className="rounded-lg border border-neutral-200 bg-white p-3">
+                <p className="whitespace-pre-wrap break-words text-sm text-neutral-800">{item.comment}</p>
+                <p className="mt-1 text-xs text-neutral-400">{new Date(item.created_at).toLocaleDateString()}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {profile.skills.length > 0 && (
         <div>
           <h3 className="mb-1 text-sm font-medium text-neutral-500">Skills</h3>
@@ -126,6 +151,8 @@ function PublicProfileView({ username }: { username: string }) {
           </div>
         </div>
       )}
+
+      <OfferedServices rows={offered} />
 
       {profile.skills.some((s) => profileTagsForCategory(profile, s).length > 0) && (
         <div className="space-y-2">

@@ -11,7 +11,21 @@ export function canRepost(gig: { poster_id: string; status: GigStatus }, userId:
   return !!userId && gig.poster_id === userId && REPOSTABLE_STATUSES.includes(gig.status);
 }
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// A gig whose helper left (withdrew or was removed) can go straight back on the public list, as the
+// same gig, if its date is still ahead. A past or missing date has to be re-entered, so that case
+// stays with the repost form. Mirrors reopen_gig_publicly (migration 0033), which enforces it.
+export function canReopenPublicly(
+  gig: { poster_id: string; status: GigStatus; scheduled_at: string | null; selected_provider_id?: string | null; helper_removed_at?: string | null; helper_withdrawn_at?: string | null },
+  userId: string | null | undefined,
+  now: number,
+): boolean {
+  if (!userId || gig.poster_id !== userId || gig.status !== "cancelled" || gig.selected_provider_id) return false;
+  if (!gig.helper_removed_at && !gig.helper_withdrawn_at) return false;
+  const at = gig.scheduled_at ? Date.parse(gig.scheduled_at) : NaN;
+  return Number.isFinite(at) && at > now;
+}
+
+const UUID =/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // The gig id in /post?repost=<id>. Anything else is ignored, never passed to a query.
 export function repostParam(value: string | null | undefined): string | null {

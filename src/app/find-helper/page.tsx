@@ -14,6 +14,7 @@ import { createClient } from "@/lib/supabase/client";
 import type { PublicProfile, PublicProfileWithTags, Tag } from "@/lib/database.types";
 import { SERVICE_TYPES, SPECIALIZATION_PROMPTS } from "@/lib/services";
 import { loadTagCatalog, profileTagsForCategory, withProfileTags } from "@/lib/tags";
+import { pathLabel, searchCatalog, type SearchHit } from "@/lib/service-selection";
 import { hasPromptedForLocation, haversineKm, loadJourneyLocation, markLocationPrompted } from "@/lib/location";
 import RadiusSlider from "@/components/RadiusSlider";
 
@@ -22,8 +23,11 @@ const DEFAULT_RADIUS_KM = 10;
 // A signed-out visitor can see the list but not the profile behind a card: the click is
 // intercepted to show the sign-in prompt. The link itself still points at the profile route,
 // which the server (src/proxy.ts) protects, so a new tab, middle click or typed URL is covered too.
-function HelperCard({ profile, category, distanceKm, gated = false, onGate }: {
+function HelperCard({ profile, category, distanceKm, gated = false, onGate, plainLink = false }: {
   profile: PublicProfileWithTags; category: string; distanceKm?: number; gated?: boolean; onGate?: (username: string) => void;
+  // A result from "Search by service": the profile opens without the category-search context, because
+  // the private-request flow still works from the old categories on a helper's profile.
+  plainLink?: boolean;
 }) {
   const tags = profileTagsForCategory(profile, category);
   // Every service the helper has chosen to offer, the one searched for first. Nothing is capped
@@ -32,7 +36,7 @@ function HelperCard({ profile, category, distanceKm, gated = false, onGate }: {
   const services = [...offered.filter((skill) => skill === category), ...offered.filter((skill) => skill !== category)];
   return (
     <Link
-      href={helperProfileHref(profile.username, category) ?? "/find-helper"}
+      href={helperProfileHref(profile.username, plainLink ? null : category) ?? "/find-helper"}
       onClick={(event) => { if (gated) { event.preventDefault(); onGate?.(profile.username); } }}
       className="flex items-center gap-3 rounded-xl border border-neutral-200 bg-white p-4 shadow-sm hover:shadow-md"
     >
@@ -98,6 +102,34 @@ export default function FindHelper() {
   const { user, loading: authLoading } = useAuth();
   const gated = !authLoading && !user;
   const [gate, setGate] = useState<string | null>(null);
+  // "Search by service": the new catalog (Category > Service > Subservice). Helpers are matched on what they
+  // OFFER, by id, through find_providers_by_service(); a member's "Services I Need Help" list never matches.
+  const [serviceQuery, setServiceQuery] = useState("");
+  const [serviceFilter, setServiceFilter] = useState<SearchHit | null>(null);
+  const [serviceHelpers, setServiceHelpers] = useState<PublicProfileWithTags[]>([]);
+  const [serviceLoading, setServiceLoading] = useState(false);
+  const [serviceError, setServiceError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!serviceFilter) return;
+    let active = true;
+    // Loading from the database on a new filter, not deriving state from props.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setServiceLoading(true);
+    setServiceError(null);
+    Promise.resolve(supabase.rpc("find_providers_by_service", { p_level: serviceFilter.level, p_id: serviceFilter.id }))
+      .then(async ({ data, error }) => {
+        if (error) throw error;
+        const ids = ((data as { provider_id?: unknown }[] | null) ?? []).map((row) => row.provider_id).filter((id): id is string => typeof id === "string" && id !== user?.id);
+        if (ids.length === 0) return [] as PublicProfileWithTags[];
+        const { data: profiles, error: profileError } = await supabase.from("public_profiles").select("*").in("id", ids);
+        if (profileError) throw profileError;
+        return withProfileTags(supabase, (profiles as PublicProfile[] | null) ?? []);
+      })
+      .then((rows) => { if (active) { setServiceHelpers(rows); setServiceLoading(false); } },
+        () => { if (active) { setServiceError("Couldn't load helpers. Please refresh and try again."); setServiceHelpers([]); setServiceLoading(false); } });
+    return () => { active = false; };
+  }, [supabase, serviceFilter, user]);
 
   useEffect(() => {
     loadTagCatalog(supabase).then(setTagCatalog).catch(() => {});
@@ -165,6 +197,8 @@ export default function FindHelper() {
     // sign-in lands on the same search (the history entry is replaced, not added).
     try { window.history.replaceState(null, "", `/find-helper?category=${encodeURIComponent(next)}`); } catch { /* no window (tests) */ }
     setCategory(next);
+    setServiceFilter(null);
+    setServiceQuery("");
     setSelectedTagIds([]);
     setSheetOpen(false);
     setLoading(true);
@@ -184,6 +218,17 @@ export default function FindHelper() {
     return { matching, others };
   }, [helpers, selectedTagIds, category]);
 
+  function chooseService(hit: SearchHit) {
+    try { window.history.replaceState(null, "", "/find-helper"); } catch { /* no window (tests) */ }
+    setCategory(null);
+    setSelectedTagIds([]);
+    setServiceQuery("");
+    setServiceHelpers([]);
+    setServiceFilter(hit);
+  }
+  const serviceHits = serviceQuery.trim() ? searchCatalog(serviceQuery, 8) : [];
+  const serviceByDistance = useMemo(() => withDistance(serviceHelpers, radiusKm, searcherLocation), [serviceHelpers, radiusKm, searcherLocation]);
+
   const matchingByDistance = useMemo(() => withDistance(matching, radiusKm, searcherLocation), [matching, radiusKm, searcherLocation]);
   const othersByDistance = useMemo(() => withDistance(others, radiusKm, searcherLocation), [others, radiusKm, searcherLocation]);
 
@@ -201,6 +246,35 @@ export default function FindHelper() {
         </label>
         {radiusKm !== null && <RadiusSlider valueKm={radiusKm} onChange={setRadiusKm} id="find-helper-radius" />}
       </div>
+
+      <div className="min-w-0 w-full space-y-2">
+        <label htmlFor="find-helper-service" className="text-sm font-medium">Search by service</label>
+        <input id="find-helper-service" type="search" placeholder="e.g. Mobile App Testing, dog walking, tile" value={serviceQuery}
+          onChange={(event) => setServiceQuery(event.target.value)} className="min-h-11 w-full rounded-lg border border-neutral-300 px-3 py-2" />
+        {serviceQuery.trim() && (serviceHits.length === 0
+          ? <p className="text-sm text-neutral-500">No matching services.</p>
+          : <ul aria-label="Matching services" className="space-y-1">
+            {serviceHits.map((hit) => (
+              <li key={hit.id}><button type="button" onClick={() => chooseService(hit)}
+                className="flex min-h-11 w-full items-center rounded-lg border border-neutral-200 bg-white px-3 py-2 text-left text-sm hover:bg-neutral-50">{pathLabel(hit)}</button></li>
+            ))}
+          </ul>)}
+      </div>
+
+      {serviceFilter && (
+        <section aria-label="Helpers offering this service" className="space-y-2">
+          <div className="flex items-start justify-between gap-2">
+            <h2 className="text-sm font-semibold text-neutral-500">Helpers offering {pathLabel(serviceFilter)}</h2>
+            <button type="button" onClick={() => { setServiceFilter(null); setServiceHelpers([]); }} className="touch-link shrink-0 text-sm font-medium text-emerald-700">Clear</button>
+          </div>
+          {serviceLoading && <p className="text-neutral-500">Loading helpers…</p>}
+          {serviceError && <p role="alert">{serviceError}</p>}
+          {!serviceLoading && !serviceError && serviceByDistance.length === 0 && <p className="text-neutral-500">No helpers offer this yet.</p>}
+          <div className="grid gap-3">
+            {serviceByDistance.map(({ profile, distanceKm }) => <HelperCard key={profile.id} profile={profile} category="" distanceKm={distanceKm} gated={gated} onGate={setGate} plainLink />)}
+          </div>
+        </section>
+      )}
 
       <fieldset className="min-w-0 w-full">
         <legend className="text-sm font-medium">Choose a category</legend>
@@ -224,7 +298,7 @@ export default function FindHelper() {
         </div>
       </fieldset>
 
-      {!category && <p className="text-neutral-500">Choose a category to see nearby helpers.</p>}
+      {!category && !serviceFilter && <p className="text-neutral-500">Choose a category to see nearby helpers.</p>}
 
       {category && categoryTags.length > 0 && (
         <fieldset className="min-w-0 w-full">
@@ -270,9 +344,9 @@ export default function FindHelper() {
           </div>
         </div>
       )}
-      {gate && category && helperProfileHref(gate, category) && (
+      {gate && (category || serviceFilter) && helperProfileHref(gate, serviceFilter ? null : category) && (
         <OptionSheet title={`Sign in to view @${gate}`} onClose={() => setGate(null)}>
-          <HelperSignInPrompt username={gate} destination={helperProfileHref(gate, category)!} onContinueBrowsing={() => setGate(null)} />
+          <HelperSignInPrompt username={gate} destination={helperProfileHref(gate, serviceFilter ? null : category)!} onContinueBrowsing={() => setGate(null)} />
         </OptionSheet>
       )}
       {sheetOpen && category && categoryTags.length > 0 && (

@@ -3,6 +3,7 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import MyOfferedServices from "@/components/MyOfferedServices";
 import { hasPromptedForLocation, loadJourneyLocation, markLocationPrompted } from "@/lib/location";
 
 // Both landing options are public entry points. Authentication is requested
@@ -54,6 +55,7 @@ function HomeInner() {
           <div className="mt-1 text-sm text-neutral-500">Browse gigs nearby and start earning.</div>
         </Link>
       </div>
+      <MyOfferedServices />
     </div>
   );
 }

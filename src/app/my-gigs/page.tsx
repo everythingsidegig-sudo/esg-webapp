@@ -7,6 +7,7 @@ import AuthGuard from "@/components/AuthGuard";
 import { useAuth } from "@/lib/auth-context";
 import { createClient } from "@/lib/supabase/client";
 import StatusBadge from "@/components/StatusBadge";
+import SwipeCard from "@/components/SwipeCard";
 import TagChip from "@/components/TagChip";
 import { gigTagNames } from "@/lib/tags";
 import {
@@ -114,29 +115,39 @@ function posterCard({ gig, proposals, helper, requestedTo }: PosterRow, savedNon
   );
 }
 
-function receivedRequestCard({ request, gig, posterName }: ReceivedRequestRow, busy: string | null, onRespond: (requestId: string, interested: boolean) => void) {
+function receivedRequestCard({ request, gig, posterName }: ReceivedRequestRow, busy: string | null, onRespond: (requestId: string, interested: boolean) => void, onLater?: (requestId: string) => void) {
   return (
-    <div key={request.id} className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="truncate font-medium">{gig.title}</div>
-          <div className="mt-0.5 text-sm text-neutral-500">{gigMeta(gig)}</div>
+    // Swipe right = Interested, left = Decline (only while it is pending and not mid-request). The
+    // buttons below do the same thing, so swiping is a shortcut and never the only way.
+    <SwipeCard key={request.id} enabled={request.state === "pending" && busy !== request.id}
+      onSwipeRight={() => onRespond(request.id, true)} onSwipeLeft={() => onRespond(request.id, false)}
+      rightLabel="Interested" leftLabel="Decline" className="rounded-xl border border-neutral-200 bg-white shadow-sm">
+      <Link href={`/gigs/${gig.id}`} className="block p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="truncate font-medium">{gig.title}</div>
+            <div className="mt-0.5 text-sm text-neutral-500">{gigMeta(gig)}</div>
+          </div>
+          <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${TONES[request.state === "pending" ? "pending" : request.state === "declined" ? "bad" : "neutral"]}`}>
+            {REQUEST_STATE_LABEL[request.state]}
+          </span>
         </div>
-        <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${TONES[request.state === "pending" ? "pending" : request.state === "declined" ? "bad" : "neutral"]}`}>
-          {REQUEST_STATE_LABEL[request.state]}
-        </span>
-      </div>
-      {posterName && <p className="mt-2 text-sm text-neutral-600">Sent by @{posterName}</p>}
-      <p className="mt-1 text-sm text-neutral-600">Offered: {formatMoney(gig.amount)} · {gig.price_type === "negotiable" ? "Negotiable" : "Fixed price"}</p>
+        {posterName && <p className="mt-2 text-sm text-neutral-600">Sent by @{posterName}</p>}
+        <p className="mt-1 text-sm text-neutral-600">Offered: {formatMoney(gig.amount)} · {gig.price_type === "negotiable" ? "Negotiable" : "Fixed price"}</p>
+      </Link>
       {request.state === "pending" && (
-        <div className="mt-3 flex gap-2">
+        <div className="flex gap-2 px-4 pb-4">
           <button type="button" disabled={busy === request.id} onClick={() => onRespond(request.id, false)}
             className="flex-1 rounded-lg border border-neutral-300 bg-white py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-60">Decline</button>
+          {onLater && (
+            <button type="button" disabled={busy === request.id} onClick={() => onLater(request.id)}
+              className="flex-1 rounded-lg border border-neutral-300 bg-white py-2 text-sm font-medium text-neutral-500 hover:bg-neutral-50 disabled:opacity-60">Not now</button>
+          )}
           <button type="button" disabled={busy === request.id} onClick={() => onRespond(request.id, true)}
             className="flex-1 rounded-lg bg-emerald-600 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60">Interested</button>
         </div>
       )}
-    </div>
+    </SwipeCard>
   );
 }
 
@@ -186,6 +197,9 @@ function MyGigsInner() {
   const [receivedRequests, setReceivedRequests] = useState<ReceivedRequestRow[]>([]);
   const [requestBusy, setRequestBusy] = useState<string | null>(null);
   const [requestError, setRequestError] = useState<string | null>(null);
+  // "Not now" sends a waiting request to the back of the deck without answering it. Only remembered
+  // while this page is open: it is a way to look at the next one, not a saved decision.
+  const [setAside, setSetAside] = useState<string[]>([]);
 
   useEffect(() => {
     if (!user) return;
@@ -344,7 +358,26 @@ function MyGigsInner() {
               {receivedRequests.length > 0 && (
                 <section aria-label="Direct Requests" className="space-y-2">
                   <h2 className="text-sm font-semibold text-neutral-500">Direct Requests ({receivedRequests.length})</h2>
-                  {receivedRequests.map((row) => receivedRequestCard(row, requestBusy, (requestId, interested) => void respondRequest(requestId, interested)))}
+                  {/* A deck, like the helper-finding screen: one waiting request at a time, swipe or tap to answer, and
+                      the next one slides up. Answered requests stay listed underneath as plain cards. */}
+                  {(() => {
+                    const answer = (requestId: string, interested: boolean) => void respondRequest(requestId, interested);
+                    const pending = receivedRequests.filter((row) => row.request.state === "pending");
+                    const waiting = [...pending.filter((row) => !setAside.includes(row.request.id)),
+                      ...setAside.flatMap((id) => pending.filter((row) => row.request.id === id))];
+                    const later = (requestId: string) => setSetAside((current) => [...current.filter((id) => id !== requestId), requestId]);
+                    const answered = receivedRequests.filter((row) => row.request.state !== "pending");
+                    return <>
+                      {waiting.length > 0 && <>
+                        <p className="text-center text-sm text-neutral-500">Request 1 of {waiting.length} waiting for your answer</p>
+                        {receivedRequestCard(waiting[0], requestBusy, answer, waiting.length > 1 ? later : undefined)}
+                      </>}
+                      {answered.length > 0 && <>
+                        {waiting.length > 0 && <h3 className="pt-2 text-xs font-semibold uppercase tracking-wide text-neutral-400">Answered</h3>}
+                        {answered.map((row) => receivedRequestCard(row, requestBusy, answer))}
+                      </>}
+                    </>;
+                  })()}
                 </section>
               )}
               {HELPER_SECTIONS.map(({ key, label }) => {
