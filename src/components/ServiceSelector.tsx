@@ -214,7 +214,7 @@ export default function ServiceSelector({ initial, revisions, mode, onSave, onFi
           <li key={item.id}>
             <button type="button" onClick={() => go({ categoryId: item.id, serviceId: null })}
               className="flex h-full min-h-24 w-full flex-col items-start justify-between gap-2 rounded-2xl border border-neutral-200 bg-white p-3 text-left shadow-sm transition hover:border-brand-300 hover:shadow-md">
-              <span aria-hidden="true" className="flex h-10 w-10 items-center justify-center rounded-2xl bg-brand-50 text-xl">{categoryIcon(item.id)}</span>
+              <span aria-hidden="true" className="flex h-10 w-10 items-center justify-center rounded-2xl bg-brand-50 text-brand-700"><Icon name={categoryIcon(item.id) as IconName} className="h-6 w-6" /></span>
               <span className="text-sm font-medium leading-snug">{item.name}</span>
               <span className="flex items-center gap-1 text-xs text-brand-700">{count(countForCategory(draft, item.id))}</span>
             </button>

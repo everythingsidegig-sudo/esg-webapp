@@ -6778,3 +6778,13 @@ test("Sign-in reached from My Gigs or Profile keeps that bottom tab highlighted"
     assert.deepEqual(links.filter((link) => link.props["aria-current"] === "page").map((link) => link.props.href), selected ? [selected] : [], search || "no next");
   }
 });
+
+test("Services screen: every category tile shows its flat icon, not the icon's name as text", async () => {
+  const sel = await openSelector();
+  const tree = sel.render();
+  const list = nodes(tree, (node) => node.props["aria-label"] === "Categories")[0];
+  const icons = nodes(list, (node) => node.type === "icon");
+  assert.equal(icons.length, 23, "one icon per category");
+  assert.deepEqual(icons.map((node) => node.props.name), Array.from({ length: 23 }, (_, i) => `cat${String(i + 1).padStart(2, "0")}`));
+  assert.doesNotMatch(textOf(list), /cat\d\d/, "no icon name leaks into the visible text");
+});
