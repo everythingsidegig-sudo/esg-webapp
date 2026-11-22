@@ -39,9 +39,9 @@ export default function Nav() {
       </div>
     </header>
 
-    {/* Shown to everyone (the landing page and Explore are public; My Gigs and Profile ask for sign-in),
-        except on the sign-in / sign-up screens themselves. */}
-    {!pathname?.startsWith("/auth") && <nav aria-label="Primary" className="pointer-events-none fixed inset-x-0 bottom-0 z-30 px-3 pb-[env(safe-area-inset-bottom)]"><div className="pointer-events-auto mx-auto mb-3 grid max-w-md grid-cols-4 gap-1 rounded-3xl bg-brand-900 p-1.5 shadow-xl shadow-brand-900/30 ring-1 ring-white/10">
+    {/* Shown to everyone, on every screen (including sign-in and sign-up): the landing page and Explore are
+        public, and My Gigs and Profile send a signed-out visitor to sign in with the bar still in view. */}
+    <nav aria-label="Primary" className="pointer-events-none fixed inset-x-0 bottom-0 z-30 px-3 pb-[env(safe-area-inset-bottom)]"><div className="pointer-events-auto mx-auto mb-3 grid max-w-md grid-cols-4 gap-1 rounded-3xl bg-brand-900 p-1.5 shadow-xl shadow-brand-900/30 ring-1 ring-white/10">
       {destinations.map(({ label, href, icon }) => {
         const active = href === "/" ? pathname === "/" || pathname === "/location" : pathname === href || pathname.startsWith(`${href}/`);
         return <Link
@@ -54,6 +54,6 @@ export default function Nav() {
           <span>{label}</span>
         </Link>;
       })}
-    </div></nav>}
+    </div></nav>
   </>;
 }

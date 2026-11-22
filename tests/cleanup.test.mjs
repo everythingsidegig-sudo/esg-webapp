@@ -6754,7 +6754,7 @@ test("Defect 005: your own gig is greyed out and inert in Help & Earn; other peo
   assert.ok(nodes(theirTree, (node) => node.type === "button" && node.props.children === "Accept").length === 1);
 });
 
-test("Bottom navigation is on the public landing page too (signed out), but not on the sign-in screens", async () => {
+test("Bottom navigation is there for signed-out visitors too, including on the sign-in screen they land on from My Gigs or Profile", async () => {
   const mocks = (path) => ({ "@/components/GigUpdatesBell": { default: "notifications-bell" }, "next/navigation": { usePathname: () => path, useSearchParams: () => new URLSearchParams(), useRouter: () => ({ replace() {}, push() {} }) } });
   const home = await component("src/components/Nav.tsx", "Nav", { mocks: mocks("/") });
   home.auth.user = null; home.auth.profile = null;
@@ -6764,5 +6764,6 @@ test("Bottom navigation is on the public landing page too (signed out), but not 
   assert.equal(links[0].props["aria-current"], "page", "Home is the active tab on the landing page");
   const signIn = await component("src/components/Nav.tsx", "Nav", { mocks: mocks("/auth/sign-in") });
   signIn.auth.user = null; signIn.auth.profile = null;
-  assert.equal(nodes(signIn.render(), (node) => node.type === "nav").length, 0, "no bottom bar while signing in");
+  const signInLinks = nodes(nodes(signIn.render(), (node) => node.type === "nav")[0], (node) => node.type === "a");
+  assert.deepEqual(signInLinks.map((link) => link.props.href), ["/", "/browse", "/my-gigs", "/profile"], "the bar stays on the sign-in screen");
 });
