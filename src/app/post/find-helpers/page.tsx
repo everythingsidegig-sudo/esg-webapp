@@ -159,8 +159,8 @@ function FindHelpersInner() {
 
   if (!gigId || gigError) {
     return <div className="mx-auto max-w-lg space-y-4">
-      <h1 className="text-xl font-semibold">Find Helpers Nearby</h1>
-      <p role="alert" className="rounded-lg bg-red-50 px-3 py-2.5 text-sm text-red-700">{gigError ?? "No gig was specified."}</p>
+      <h1 className="text-2xl font-extrabold">Find Helpers Nearby</h1>
+      <p role="alert" className="rounded-xl bg-red-50 px-3 py-2.5 text-sm text-red-700">{gigError ?? "No gig was specified."}</p>
       <Link href="/my-gigs" className="touch-link block text-sm font-medium text-brand-700">← Back to My Gigs</Link>
     </div>;
   }
@@ -170,8 +170,8 @@ function FindHelpersInner() {
 
   return (
     <div className="mx-auto max-w-lg space-y-4">
-      <div className="sticky top-0 z-10 -mx-4 space-y-1 border-b border-neutral-200 bg-white/95 px-4 py-3 backdrop-blur sm:mx-0 sm:rounded-xl sm:border sm:px-4">
-        <h1 className="text-lg font-semibold">{gig.title}</h1>
+      <div className="sticky top-0 z-10 -mx-4 space-y-1 border-b border-neutral-200 bg-white/95 px-4 py-3 backdrop-blur sm:mx-0 sm:rounded-2xl sm:border sm:px-4">
+        <h1 className="text-2xl font-extrabold">{gig.title}</h1>
         <p className="text-sm text-neutral-600">{gig.service_type} · {formatMoney(gig.amount)} · {priceLabel(gig.price_type)} · {radiusKm} km radius</p>
       </div>
 
@@ -215,7 +215,7 @@ function FindHelpersInner() {
       )}
 
       {toast && (
-        <div role="status" className={`fixed inset-x-4 bottom-4 z-50 mx-auto max-w-md rounded-lg px-4 py-3 text-center text-sm font-medium text-white shadow-lg ${toastIsError ? "bg-red-600" : "bg-neutral-900"}`}>
+        <div role="status" className={`fixed inset-x-4 bottom-4 z-50 mx-auto max-w-md rounded-xl px-4 py-3 text-center text-sm font-medium text-white shadow-lg ${toastIsError ? "bg-red-600" : "bg-neutral-900"}`}>
           {toast}
         </div>
       )}

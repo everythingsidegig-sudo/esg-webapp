@@ -75,7 +75,7 @@ function MessagesInner() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-4">
-      <h1 className="text-xl font-semibold">Messages</h1>
+      <h1 className="text-2xl font-extrabold">Messages</h1>
       {error && <p role="alert" className="text-sm text-red-600">{error} <button onClick={() => { setError(null); setConversations(null); setReload((value) => value + 1); }} className="font-medium underline">Retry</button></p>}
       {!error && conversations === null && <p className="text-neutral-500">Loading messages…</p>}
       {conversations?.length === 0 && (
@@ -84,7 +84,7 @@ function MessagesInner() {
       <ul className="space-y-2">
         {conversations?.map(({ gig, last, unread, other }) => (
           <li key={gig.id}>
-            <Link href={`/gigs/${gig.id}#messages`} className="flex min-h-16 items-center gap-3 rounded-xl border border-neutral-200 bg-white p-3 shadow-sm hover:shadow-md">
+            <Link href={`/gigs/${gig.id}#messages`} className="flex min-h-16 items-center gap-3 rounded-2xl border border-neutral-200 bg-white p-3 shadow-sm hover:shadow-md">
               <div className="min-w-0 flex-1">
                 <div className="flex items-baseline justify-between gap-2">
                   <span className={`truncate ${unread > 0 ? "font-semibold" : "font-medium"}`}>{gig.title}</span>

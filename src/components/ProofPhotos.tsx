@@ -84,7 +84,7 @@ export default function ProofPhotos({ gigId, userId, canAdd, helperName }: {
   const mine = photos.filter((photo) => photo.uploader_id === userId).length;
 
   return (
-    <section aria-label="Proof photos" className="space-y-2 rounded-xl border border-neutral-200 bg-white p-4">
+    <section aria-label="Proof photos" className="space-y-2 rounded-2xl border border-neutral-200 bg-white p-4">
       <h2 className="font-medium">{canAdd ? "Proof photos" : `Photos from ${helperName ? `@${helperName}` : "your helper"}`}</h2>
       {canAdd && <p className="text-sm text-neutral-500">Add photos that show the finished work. Only you and the poster can see them. Up to {MAX_PROOF_PHOTOS}.</p>}
       {photos.length > 0 && (
@@ -92,8 +92,8 @@ export default function ProofPhotos({ gigId, userId, canAdd, helperName }: {
           {photos.map((photo) => (
             <li key={photo.id} className="space-y-1">
               {urls[photo.storage_path]
-                ? <a href={urls[photo.storage_path]} target="_blank" rel="noreferrer"><img src={urls[photo.storage_path]} alt="Proof of the finished work" className="aspect-square w-full rounded-lg object-cover" /></a>
-                : <div className="aspect-square w-full rounded-lg bg-neutral-100" />}
+                ? <a href={urls[photo.storage_path]} target="_blank" rel="noreferrer"><img src={urls[photo.storage_path]} alt="Proof of the finished work" className="aspect-square w-full rounded-xl object-cover" /></a>
+                : <div className="aspect-square w-full rounded-xl bg-neutral-100" />}
               {photo.uploader_id === userId && (
                 <button type="button" disabled={busy} onClick={() => void remove(photo)} className="text-xs font-medium text-red-700 disabled:opacity-60">Remove</button>
               )}
@@ -102,7 +102,7 @@ export default function ProofPhotos({ gigId, userId, canAdd, helperName }: {
         </ul>
       )}
       {canAdd && mine < MAX_PROOF_PHOTOS && (
-        <label className="flex min-h-11 w-full cursor-pointer items-center justify-center rounded-lg border border-brand-600 px-4 py-2.5 text-center font-medium text-brand-700 hover:bg-brand-50">
+        <label className="flex min-h-11 w-full cursor-pointer items-center justify-center rounded-xl border border-brand-600 px-4 py-2.5 text-center font-medium text-brand-700 hover:bg-brand-50">
           {busy ? "Uploading…" : "Add a photo"}
           <input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy} className="sr-only" aria-label="Add a photo"
             onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void add(file); }} />

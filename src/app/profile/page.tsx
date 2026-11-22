@@ -375,7 +375,7 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
         {profile.photo_url ? <img src={profile.photo_url} alt="Profile photo" className="h-16 w-16 rounded-full object-cover" />
           : <div className="flex h-16 w-16 items-center justify-center rounded-full bg-neutral-200 text-xl">👤</div>}
         <div>
-          <h1 className="text-lg font-semibold">@{profile.username}</h1>
+          <h1 className="text-2xl font-extrabold">@{profile.username}</h1>
           <label className="inline-flex min-h-11 cursor-pointer items-center text-sm text-brand-700">Change photo
             <input type="file" accept="image/jpeg,image/png,image/webp" disabled={saving} className="hidden" onChange={(e) => { if (e.target.files?.[0]) void uploadPhoto(e.target.files[0]); }} />
           </label>
@@ -385,16 +385,16 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
       <Link href="/settings" aria-label="Account Settings" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-xl text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900">⚙️</Link>
     </div>
     <div className="grid grid-cols-3 gap-3 text-center">
-      <div className="rounded-lg border border-neutral-200 bg-white p-3"><div className="text-lg font-semibold">{total ? `${Math.round(profile.wom_count / total * 100)}%` : "—"}</div><div className="text-xs text-neutral-500">WOM%</div></div>
-      <div className="rounded-lg border border-neutral-200 bg-white p-3"><div className="text-lg font-semibold">{profile.lemon_count}</div><div className="text-xs text-neutral-500">Lemons (private)</div></div>
-      <div className="rounded-lg border border-neutral-200 bg-white p-3"><div className="text-lg font-semibold">{formatMoney(profile.money_made)}</div><div className="text-xs text-neutral-500">Money Made (private)</div></div>
+      <div className="rounded-xl border border-neutral-200 bg-white p-3"><div className="text-lg font-semibold">{total ? `${Math.round(profile.wom_count / total * 100)}%` : "—"}</div><div className="text-xs text-neutral-500">WOM%</div></div>
+      <div className="rounded-xl border border-neutral-200 bg-white p-3"><div className="text-lg font-semibold">{profile.lemon_count}</div><div className="text-xs text-neutral-500">Lemons (private)</div></div>
+      <div className="rounded-xl border border-neutral-200 bg-white p-3"><div className="text-lg font-semibold">{formatMoney(profile.money_made)}</div><div className="text-xs text-neutral-500">Money Made (private)</div></div>
     </div>
-    <section aria-label="Your services" className="space-y-1 rounded-lg border border-neutral-200 bg-white p-4">
+    <section aria-label="Your services" className="space-y-1 rounded-xl border border-neutral-200 bg-white p-4">
       <h2 className="text-sm font-medium">Your services</h2>
       <p className="text-sm text-neutral-500">Choose the services you offer to make money and the ones you might need help with. They are saved separately, and only what you offer appears on your public profile and in helper search.</p>
       <Link href="/services" className="touch-link inline-block text-sm font-medium text-brand-700">Choose or edit your services</Link>
     </section>
-    <form onSubmit={saveProfile} className="space-y-3 rounded-lg border border-neutral-200 bg-white p-4">
+    <form onSubmit={saveProfile} className="space-y-3 rounded-xl border border-neutral-200 bg-white p-4">
       <fieldset disabled={saving} className="space-y-3">
         <CategoryList title="Skills I can use to make money" selected={skills} setSelected={handleSkillsChange} otherText={skillsOtherText} setOtherText={setSkillsOtherText} />
         {specializationSkills.length > 0 && (
@@ -414,7 +414,7 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
           </fieldset>
         )}
         <CategoryList title="Services I might need" selected={services} setSelected={setServices} otherText={servicesOtherText} setOtherText={setServicesOtherText} />
-        <button type="submit" disabled={!dirty} className={`flex w-full items-center justify-center whitespace-nowrap rounded-lg px-4 py-2.5 font-medium transition-colors disabled:cursor-not-allowed ${dirty
+        <button type="submit" disabled={!dirty} className={`flex w-full items-center justify-center whitespace-nowrap rounded-xl px-4 py-2.5 font-medium transition-colors disabled:cursor-not-allowed ${dirty
           ? "bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-60"
           : "bg-neutral-200 text-neutral-500"}`}>{saving ? "Updating…" : "Update profile"}</button>
         <p className="text-center text-xs text-neutral-500">{dirty ? "You have unsaved changes." : "No changes yet."}</p>
@@ -423,13 +423,13 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
     {message && <p role="status" className="text-sm text-brand-700">{message}</p>}
     {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
 
-    <div className="space-y-3 rounded-lg border border-neutral-200 bg-white p-4">
+    <div className="space-y-3 rounded-xl border border-neutral-200 bg-white p-4">
         <h2 className="text-sm font-medium">Your area (optional)</h2>
         <p className="text-sm text-neutral-500">
           Set an approximate area to find gigs and helpers nearby, and so people can find you in Find a Helper. It&apos;s rounded before anyone sees it, and only ever used if you set it here. Leave it blank to stay out of location-based search.
         </p>
         {!helperLocationExpanded ? (
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-neutral-200 bg-white px-3 py-2.5">
             <p className="text-sm text-neutral-700">{helperLocationText ? `📍 ${helperLocationText}` : "No location set"}</p>
             <button type="button" onClick={() => setHelperLocationExpanded(true)}
               className="shrink-0 text-sm font-medium text-brand-700 hover:underline">
@@ -447,10 +447,10 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
                 </button>
               )}
             </div>
-            <input id="helper-location" maxLength={200} value={helperLocationText} onChange={(e) => { helperResolvedText.current = null; setHelperLocationText(e.target.value); setHelperCoords({ lat: null, lng: null }); }} className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2" placeholder="Neighborhood, ZIP or city" />
+            <input id="helper-location" maxLength={200} value={helperLocationText} onChange={(e) => { helperResolvedText.current = null; setHelperLocationText(e.target.value); setHelperCoords({ lat: null, lng: null }); }} className="mt-1 w-full rounded-xl border border-neutral-300 px-3 py-2" placeholder="Neighborhood, ZIP or city" />
             {helperSearching && <p role="status" className="text-sm text-neutral-500">Searching…</p>}
             {helperChoices.length > 0 && (
-              <ul aria-label="Matching areas" className="divide-y divide-neutral-100 overflow-hidden rounded-lg border border-neutral-200 bg-white">
+              <ul aria-label="Matching areas" className="divide-y divide-neutral-100 overflow-hidden rounded-xl border border-neutral-200 bg-white">
                 {helperChoices.map((match) => (
                   <li key={`${match.label}|${match.lat}|${match.lng}`}>
                     <button type="button" onClick={() => chooseHelperMatch(match)} className="min-h-11 w-full px-3 py-2 text-left text-sm hover:bg-neutral-50">{match.areaLabel}</button>
@@ -460,7 +460,7 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
             )}
             <button type="button" onClick={useMyHelperLocation} className="text-sm text-brand-700">{locatingHelper ? "Locating…" : "Use my current location"}</button>
             <button type="button" onClick={() => void saveHelperLocation()} disabled={!helperLocationDirty}
-              className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed ${helperLocationDirty
+              className={`rounded-xl px-4 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed ${helperLocationDirty
                 ? "bg-brand-600 text-white hover:bg-brand-700"
                 : "bg-neutral-200 text-neutral-500"}`}>
               {savingLocation ? "Saving…" : "Save location"}
@@ -473,10 +473,10 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
       </div>
 
     <div className="sm:hidden">
-      <LogoutButton className="flex w-full items-center justify-center rounded-lg border border-neutral-300 bg-white px-4 py-2.5 font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-60" />
+      <LogoutButton className="flex w-full items-center justify-center rounded-xl border border-neutral-300 bg-white px-4 py-2.5 font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-60" />
     </div>
 
-    <div className="space-y-3 rounded-lg border border-red-200 bg-red-50 p-4">
+    <div className="space-y-3 rounded-xl border border-red-200 bg-red-50 p-4">
       <h2 className="text-sm font-semibold text-red-700">Danger zone</h2>
       <div>
         <p className="text-sm font-medium text-neutral-900">Delete account</p>
@@ -486,7 +486,7 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
         type="button"
         disabled={deleteStage === "checking"}
         onClick={() => void openDeleteDialog()}
-        className="rounded-lg border border-red-600 bg-white px-4 py-2.5 font-medium text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+        className="rounded-xl border border-red-600 bg-white px-4 py-2.5 font-medium text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
       >
         {deleteStage === "checking" ? "Checking…" : "Delete account"}
       </button>
@@ -498,7 +498,7 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
         onClose={() => setSheetScope(null)}
         footer={<div className="flex items-center justify-between gap-3">
           <p className="text-sm text-neutral-500">{chosenSpecializations.filter(({ skill }) => sheetSkills.includes(skill)).length} selected</p>
-          <button type="button" onClick={() => setSheetScope(null)} className="rounded-lg bg-brand-600 px-6 py-2.5 font-medium text-white hover:bg-brand-700">Done</button>
+          <button type="button" onClick={() => setSheetScope(null)} className="rounded-xl bg-brand-600 px-6 py-2.5 font-medium text-white hover:bg-brand-700">Done</button>
         </div>}>
         {sheetSkills.map((skill) => {
           const selectedIds = specializationTags[skill] ?? [];
@@ -509,7 +509,7 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
               const atLimit = !selected && selectedIds.length >= MAX_PROFILE_TAGS;
               return <button key={tag.id} type="button" role="checkbox" aria-checked={selected} disabled={atLimit}
                 onClick={() => toggleSpecializationTag(skill, tag.id)}
-                className="flex min-h-12 w-full items-center justify-between gap-3 rounded-lg px-3 text-left text-sm text-neutral-900 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-50">
+                className="flex min-h-12 w-full items-center justify-between gap-3 rounded-xl px-3 text-left text-sm text-neutral-900 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-50">
                 <span>{tag.name}</span>
                 <span aria-hidden="true" className={`flex h-6 w-6 items-center justify-center rounded-md border text-sm ${selected ? "border-brand-600 bg-brand-600 text-white" : "border-neutral-300 text-transparent"}`}>✓</span>
               </button>;
@@ -521,7 +521,7 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
 
     {deleteStage === "blocked" && blockers && (
       <div role="dialog" aria-modal="true" aria-labelledby="blocked-heading" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-        <div className="w-full max-w-sm space-y-4 rounded-lg bg-white p-5">
+        <div className="w-full max-w-sm space-y-4 rounded-xl bg-white p-5">
           <div>
             <h2 id="blocked-heading" className="text-lg font-semibold text-neutral-900">You have Gigs that need attention</h2>
             <p className="mt-1 text-sm text-neutral-500">Before deleting your ESG account, you must resolve any active Gigs or open Disputes.</p>
@@ -531,8 +531,8 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
             <li>Open Disputes: {blockers.openDisputesCount}</li>
           </ul>
           <div className="flex justify-end gap-3">
-            <button type="button" onClick={closeDeleteDialog} className="rounded-lg border border-neutral-300 px-4 py-2.5 font-medium text-neutral-700">Cancel</button>
-            <button type="button" onClick={() => { closeDeleteDialog(); router.push("/my-gigs"); }} className="rounded-lg bg-brand-600 px-4 py-2.5 font-medium text-white hover:bg-brand-700">View Gigs</button>
+            <button type="button" onClick={closeDeleteDialog} className="rounded-xl border border-neutral-300 px-4 py-2.5 font-medium text-neutral-700">Cancel</button>
+            <button type="button" onClick={() => { closeDeleteDialog(); router.push("/my-gigs"); }} className="rounded-xl bg-brand-600 px-4 py-2.5 font-medium text-white hover:bg-brand-700">View Gigs</button>
           </div>
         </div>
       </div>
@@ -540,7 +540,7 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
 
     {deleteStage === "warning" && (
       <div role="dialog" aria-modal="true" aria-labelledby="delete-warning-heading" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-        <div className="w-full max-w-sm space-y-4 rounded-lg bg-white p-5">
+        <div className="w-full max-w-sm space-y-4 rounded-xl bg-white p-5">
           <div>
             <h2 id="delete-warning-heading" className="text-lg font-semibold text-neutral-900">Delete Account</h2>
             <p className="mt-1 text-sm text-neutral-500">
@@ -548,8 +548,8 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
             </p>
           </div>
           <div className="flex justify-end gap-3">
-            <button type="button" onClick={closeDeleteDialog} className="rounded-lg border border-neutral-300 px-4 py-2.5 font-medium text-neutral-700">Cancel</button>
-            <button type="button" onClick={() => setDeleteStage("confirm")} className="rounded-lg bg-red-600 px-4 py-2.5 font-medium text-white hover:bg-red-700">Continue to Delete</button>
+            <button type="button" onClick={closeDeleteDialog} className="rounded-xl border border-neutral-300 px-4 py-2.5 font-medium text-neutral-700">Cancel</button>
+            <button type="button" onClick={() => setDeleteStage("confirm")} className="rounded-xl bg-red-600 px-4 py-2.5 font-medium text-white hover:bg-red-700">Continue to Delete</button>
           </div>
         </div>
       </div>
@@ -557,7 +557,7 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
 
     {deleteStage === "confirm" && (
       <div role="dialog" aria-modal="true" aria-labelledby="delete-confirm-heading" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-        <div className="w-full max-w-sm space-y-4 rounded-lg bg-white p-5">
+        <div className="w-full max-w-sm space-y-4 rounded-xl bg-white p-5">
           <div>
             <h2 id="delete-confirm-heading" className="text-lg font-semibold text-neutral-900">Permanently Delete Account?</h2>
             <p className="mt-1 text-sm text-neutral-500">This action will delete your ESG account and you will lose access to your profile and ESG account features.</p>
@@ -569,19 +569,19 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
               disabled={deleting}
               value={reauthPassword}
               onChange={(e) => setReauthPassword(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60"
+              className="mt-1 w-full rounded-xl border border-neutral-300 px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60"
             />
           </label>
           {deleteError && <p role="alert" className="text-sm text-red-600">{deleteError}</p>}
           <div className="flex justify-end gap-3">
-            <button type="button" onClick={closeDeleteDialog} disabled={deleting} className="rounded-lg border border-neutral-300 px-4 py-2.5 font-medium text-neutral-700 disabled:cursor-not-allowed disabled:opacity-60">
+            <button type="button" onClick={closeDeleteDialog} disabled={deleting} className="rounded-xl border border-neutral-300 px-4 py-2.5 font-medium text-neutral-700 disabled:cursor-not-allowed disabled:opacity-60">
               Keep My Account
             </button>
             <button
               type="button"
               onClick={() => void confirmDeleteAccount()}
               disabled={!reauthPassword || deleting}
-              className="rounded-lg bg-red-600 px-4 py-2.5 font-medium text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-xl bg-red-600 px-4 py-2.5 font-medium text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {deleting ? "Deleting…" : "Delete My Account"}
             </button>

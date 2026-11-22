@@ -160,10 +160,10 @@ function SettingsInner() {
     <div className="mx-auto max-w-lg space-y-6">
       <div className="flex items-center gap-3">
         <Link href="/profile" aria-label="Back to Profile" className="flex h-11 w-11 items-center justify-center rounded-full text-xl text-neutral-500 hover:bg-neutral-100">←</Link>
-        <h1 className="text-xl font-semibold">Account Settings</h1>
+        <h1 className="text-2xl font-extrabold">Account Settings</h1>
       </div>
 
-      <section className="space-y-4 rounded-lg border border-neutral-200 bg-white p-4">
+      <section className="space-y-4 rounded-xl border border-neutral-200 bg-white p-4">
         <h2 className="text-sm font-semibold text-neutral-700">Account Information</h2>
 
         <div className="flex items-center gap-4">
@@ -187,11 +187,11 @@ function SettingsInner() {
           {emailEditing ? (
             <div className="mt-1 flex gap-2">
               <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} disabled={emailBusy}
-                className="flex-1 rounded-lg border border-neutral-300 px-3 py-2 disabled:opacity-60" />
-              <button type="button" disabled={emailBusy} onClick={() => void saveEmail()} className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-60">
+                className="flex-1 rounded-xl border border-neutral-300 px-3 py-2 disabled:opacity-60" />
+              <button type="button" disabled={emailBusy} onClick={() => void saveEmail()} className="rounded-xl bg-brand-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-60">
                 {emailBusy ? "Saving…" : "Save"}
               </button>
-              <button type="button" disabled={emailBusy} onClick={() => setEmailEditing(false)} className="rounded-lg border px-3 py-2 text-sm">Cancel</button>
+              <button type="button" disabled={emailBusy} onClick={() => setEmailEditing(false)} className="rounded-xl border px-3 py-2 text-sm">Cancel</button>
             </div>
           ) : (
             <div className="mt-1 flex items-center justify-between">
@@ -208,11 +208,11 @@ function SettingsInner() {
           {phoneEditing ? (
             <div className="mt-1 flex gap-2">
               <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} disabled={phoneBusy} placeholder="10-digit U.S. number"
-                className="flex-1 rounded-lg border border-neutral-300 px-3 py-2 disabled:opacity-60" />
-              <button type="button" disabled={phoneBusy} onClick={() => void savePhone()} className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-60">
+                className="flex-1 rounded-xl border border-neutral-300 px-3 py-2 disabled:opacity-60" />
+              <button type="button" disabled={phoneBusy} onClick={() => void savePhone()} className="rounded-xl bg-brand-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-60">
                 {phoneBusy ? "Saving…" : "Save"}
               </button>
-              <button type="button" disabled={phoneBusy} onClick={() => setPhoneEditing(false)} className="rounded-lg border px-3 py-2 text-sm">Cancel</button>
+              <button type="button" disabled={phoneBusy} onClick={() => setPhoneEditing(false)} className="rounded-xl border px-3 py-2 text-sm">Cancel</button>
             </div>
           ) : (
             <div className="mt-1 flex items-center justify-between">
@@ -225,19 +225,19 @@ function SettingsInner() {
         </div>
       </section>
 
-      <form onSubmit={changePassword} className="space-y-3 rounded-lg border border-neutral-200 bg-white p-4">
+      <form onSubmit={changePassword} className="space-y-3 rounded-xl border border-neutral-200 bg-white p-4">
         <h2 className="text-sm font-semibold text-neutral-700">Change Password</h2>
         <label className="block text-sm font-medium">New password
           <input type="password" autoComplete="new-password" required value={newPassword} onChange={(e) => setNewPassword(e.target.value)}
-            disabled={passwordBusy} className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 disabled:opacity-60" />
+            disabled={passwordBusy} className="mt-1 w-full rounded-xl border border-neutral-300 px-3 py-2 disabled:opacity-60" />
         </label>
         <label className="block text-sm font-medium">Confirm new password
           <input type="password" autoComplete="new-password" required value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)}
-            disabled={passwordBusy} className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 disabled:opacity-60" />
+            disabled={passwordBusy} className="mt-1 w-full rounded-xl border border-neutral-300 px-3 py-2 disabled:opacity-60" />
         </label>
         {passwordMessage && <p role="status" className="text-sm text-brand-700">{passwordMessage}</p>}
         {passwordError && <p role="alert" className="text-sm text-red-600">{passwordError}</p>}
-        <button type="submit" disabled={passwordBusy} className="w-full rounded-lg bg-brand-600 py-2.5 font-medium text-white disabled:opacity-60">
+        <button type="submit" disabled={passwordBusy} className="w-full rounded-xl bg-brand-600 py-2.5 font-medium text-white disabled:opacity-60">
           {passwordBusy ? "Updating…" : "Update Password"}
         </button>
       </form>

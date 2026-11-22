@@ -62,7 +62,7 @@ function posterCard({ gig, proposals, helper, requestedTo }: PosterRow, savedNon
 }) {
   const section = posterSection(gig);
   return (
-    <div key={gig.id} className="rounded-xl border border-neutral-200 bg-white shadow-sm">
+    <div key={gig.id} className="rounded-2xl border border-neutral-200 bg-white shadow-sm">
       <Link href={`/gigs/${gig.id}`} className="block p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -90,7 +90,7 @@ function posterCard({ gig, proposals, helper, requestedTo }: PosterRow, savedNon
                   {request.state === "interested" && (
                     <button type="button" disabled={savedNonPublic.busy === request.id}
                       onClick={() => savedNonPublic.onAccept(request.id)}
-                      className="shrink-0 rounded-lg bg-brand-600 px-3 py-1 text-xs font-medium text-white disabled:opacity-60">Accept</button>
+                      className="shrink-0 rounded-xl bg-brand-600 px-3 py-1 text-xs font-medium text-white disabled:opacity-60">Accept</button>
                   )}
                 </li>
               ))}
@@ -121,7 +121,7 @@ function receivedRequestCard({ request, gig, posterName }: ReceivedRequestRow, b
     // buttons below do the same thing, so swiping is a shortcut and never the only way.
     <SwipeCard key={request.id} enabled={request.state === "pending" && busy !== request.id}
       onSwipeRight={() => onRespond(request.id, true)} onSwipeLeft={() => onRespond(request.id, false)}
-      rightLabel="Interested" leftLabel="Decline" className="rounded-xl border border-neutral-200 bg-white shadow-sm">
+      rightLabel="Interested" leftLabel="Decline" className="rounded-2xl border border-neutral-200 bg-white shadow-sm">
       <Link href={`/gigs/${gig.id}`} className="block p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -138,13 +138,13 @@ function receivedRequestCard({ request, gig, posterName }: ReceivedRequestRow, b
       {request.state === "pending" && (
         <div className="flex gap-2 px-4 pb-4">
           <button type="button" disabled={busy === request.id} onClick={() => onRespond(request.id, false)}
-            className="flex-1 rounded-lg border border-neutral-300 bg-white py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-60">Decline</button>
+            className="flex-1 rounded-xl border border-neutral-300 bg-white py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-60">Decline</button>
           {onLater && (
             <button type="button" disabled={busy === request.id} onClick={() => onLater(request.id)}
-              className="flex-1 rounded-lg border border-neutral-300 bg-white py-2 text-sm font-medium text-neutral-500 hover:bg-neutral-50 disabled:opacity-60">Not now</button>
+              className="flex-1 rounded-xl border border-neutral-300 bg-white py-2 text-sm font-medium text-neutral-500 hover:bg-neutral-50 disabled:opacity-60">Not now</button>
           )}
           <button type="button" disabled={busy === request.id} onClick={() => onRespond(request.id, true)}
-            className="flex-1 rounded-lg bg-brand-600 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60">Interested</button>
+            className="flex-1 rounded-xl bg-brand-600 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60">Interested</button>
         </div>
       )}
     </SwipeCard>
@@ -155,7 +155,7 @@ function helperCard({ gig, claimState, offer, customer }: HelperRow, userId: str
   const section = helperSection(gig, claimState, userId);
   const badge = helperBadge(section, gig, claimState);
   return (
-    <div key={gig.id} className="rounded-xl border border-neutral-200 bg-white shadow-sm">
+    <div key={gig.id} className="rounded-2xl border border-neutral-200 bg-white shadow-sm">
       <Link href={`/gigs/${gig.id}`} className="block p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -326,14 +326,14 @@ function MyGigsInner() {
     else { setHelpingLoading(true); setHelpingError(null); setHelpingReload((value) => value + 1); }
   }
 
-  const tabClass = (active: boolean) => `min-h-11 flex-1 rounded-lg px-3 text-sm font-semibold transition-colors ${active ? "bg-white text-brand-700 shadow-sm" : "text-neutral-500 hover:text-neutral-900"}`;
+  const tabClass = (active: boolean) => `min-h-11 flex-1 rounded-xl px-3 text-sm font-semibold transition-colors ${active ? "bg-white text-brand-700 shadow-sm" : "text-neutral-500 hover:text-neutral-900"}`;
   const createdGig = created ? posted.find((row) => row.gig.id === created) : undefined;
 
   return (
     <div className="mx-auto max-w-2xl space-y-5">
-      <h1 className="text-xl font-semibold">My Gigs</h1>
+      <h1 className="text-2xl font-extrabold">My Gigs</h1>
       {createdGig && <p role="status" className="text-brand-700">Gig successfully {createdGig.gig.status === "draft" ? "saved as a draft" : "posted"}. It appears below under I Need Help.</p>}
-      <div role="tablist" aria-label="My Gigs" className="flex gap-1 rounded-xl bg-neutral-100 p-1">
+      <div role="tablist" aria-label="My Gigs" className="flex gap-1 rounded-2xl bg-neutral-100 p-1">
         <button role="tab" aria-selected={tab === "posted"} onClick={() => setTab("posted")} className={tabClass(tab === "posted")}>I Need Help</button>
         <button role="tab" aria-selected={tab === "helping"} onClick={() => setTab("helping")} className={tabClass(tab === "helping")}>I&apos;m Helping</button>
       </div>

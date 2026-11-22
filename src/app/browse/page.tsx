@@ -218,7 +218,7 @@ function BrowseInner() {
 
   return (
     <div className="space-y-5">
-      <h1 className="text-xl font-semibold">Gigs Nearby</h1>
+      <h1 className="text-2xl font-extrabold">Gigs Nearby</h1>
 
       <AreaPicker area={area} onChange={setArea} radiusKm={radiusKm} />
 
@@ -275,12 +275,12 @@ function BrowseInner() {
       )}
 
       {toast && (
-        <div role="status" className={`fixed inset-x-4 bottom-4 z-50 mx-auto max-w-md rounded-lg px-4 py-3 text-center text-sm font-medium text-white shadow-lg ${toastIsError ? "bg-red-600" : "bg-neutral-900"}`}>
+        <div role="status" className={`fixed inset-x-4 bottom-4 z-50 mx-auto max-w-md rounded-xl px-4 py-3 text-center text-sm font-medium text-white shadow-lg ${toastIsError ? "bg-red-600" : "bg-neutral-900"}`}>
           {toast}
         </div>
       )}
       {lastRejected && !toast && (
-        <div role="status" className="fixed inset-x-4 bottom-4 z-50 mx-auto flex max-w-md items-center justify-between gap-3 rounded-lg bg-neutral-900 px-4 py-3 text-sm text-white shadow-lg">
+        <div role="status" className="fixed inset-x-4 bottom-4 z-50 mx-auto flex max-w-md items-center justify-between gap-3 rounded-xl bg-neutral-900 px-4 py-3 text-sm text-white shadow-lg">
           <span>Skipped.</span>
           <button type="button" onClick={undoReject} className="font-semibold text-brand-300 hover:underline">Undo</button>
         </div>

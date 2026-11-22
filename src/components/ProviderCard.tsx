@@ -96,9 +96,9 @@ export default function ProviderCard({
         </div>
       )}
       <div className="mt-3 flex gap-2">
-        <button type="button" onClick={(e) => { e?.stopPropagation(); onSkip(); }} aria-label="Skip" className="flex-1 rounded-lg border border-neutral-300 bg-white py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50">Skip (✕)</button>
-        <button type="button" onClick={(e) => { e?.stopPropagation(); onView(); }} className="flex-1 rounded-lg border border-neutral-300 bg-white py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50">View Full Profile</button>
-        <button type="button" onClick={(e) => { e?.stopPropagation(); onSendGig(); }} className="flex-1 rounded-lg bg-brand-600 py-2 text-sm font-medium text-white hover:bg-brand-700">Send Gig</button>
+        <button type="button" onClick={(e) => { e?.stopPropagation(); onSkip(); }} aria-label="Skip" className="flex-1 rounded-xl border border-neutral-300 bg-white py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50">Skip (✕)</button>
+        <button type="button" onClick={(e) => { e?.stopPropagation(); onView(); }} className="flex-1 rounded-xl border border-neutral-300 bg-white py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50">View Full Profile</button>
+        <button type="button" onClick={(e) => { e?.stopPropagation(); onSendGig(); }} className="flex-1 rounded-xl bg-brand-600 py-2 text-sm font-medium text-white hover:bg-brand-700">Send Gig</button>
       </div>
     </div>
   );

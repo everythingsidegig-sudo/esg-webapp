@@ -31,7 +31,7 @@ export default function ProfilePhoto({ url, username, sizeClass, placeholderText
       {expanded && (
         <div role="dialog" aria-label={`@${username}'s photo`} className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
           onClick={() => setExpanded(false)}>
-          <img src={url} alt={`@${username}`} className="max-h-full max-w-full rounded-lg object-contain" />
+          <img src={url} alt={`@${username}`} className="max-h-full max-w-full rounded-xl object-contain" />
         </div>
       )}
     </>

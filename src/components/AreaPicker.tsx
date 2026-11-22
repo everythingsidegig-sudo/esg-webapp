@@ -115,7 +115,7 @@ export default function AreaPicker({ area, onChange, radiusKm }: { area: Area; o
   if (!expanded) {
     return (
       <section aria-label="Search area" className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
-        <div className="flex flex-1 flex-wrap items-center justify-between gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2.5">
+        <div className="flex flex-1 flex-wrap items-center justify-between gap-2 rounded-xl border border-neutral-200 bg-white px-3 py-2.5">
           <p role="status" className="flex flex-wrap items-center gap-x-2 text-sm text-neutral-700">
             <span>📍 {area.text}</span>
             {area.lat == null && <span className="text-neutral-500">(no map position, so distance can&apos;t be shown)</span>}
@@ -157,15 +157,15 @@ export default function AreaPicker({ area, onChange, radiusKm }: { area: Area; o
         <input value={query} onChange={(e) => { setQuery(e.target.value); setError(null); if (e.target.value.trim().length < 3) setMatches([]); }}
           maxLength={200} inputMode="search" autoComplete="postal-code" aria-label="ZIP code, postal code or area"
           placeholder="ZIP or postal code, neighborhood or city"
-          className="min-h-11 w-full rounded-lg border border-neutral-300 px-3 py-2 sm:flex-1" />
+          className="min-h-11 w-full rounded-xl border border-neutral-300 px-3 py-2 sm:flex-1" />
         <button type="button" onClick={useMyLocation} disabled={locating}
-          className="min-h-11 shrink-0 rounded-lg border border-brand-600 px-4 text-sm font-medium text-brand-700 hover:bg-brand-50 disabled:cursor-wait disabled:opacity-60">
+          className="min-h-11 shrink-0 rounded-xl border border-brand-600 px-4 text-sm font-medium text-brand-700 hover:bg-brand-50 disabled:cursor-wait disabled:opacity-60">
           {locating ? "Locating…" : "📍 Use my location"}
         </button>
       </div>
       {busy && <p role="status" className="text-sm text-neutral-500">Searching…</p>}
       {matches.length > 0 && (
-        <ul aria-label="Matching areas" className="divide-y divide-neutral-100 overflow-hidden rounded-lg border border-neutral-200 bg-white">
+        <ul aria-label="Matching areas" className="divide-y divide-neutral-100 overflow-hidden rounded-xl border border-neutral-200 bg-white">
           {matches.map((match) => (
             <li key={`${match.label}|${match.lat}|${match.lng}`}>
               <button type="button" onClick={() => choose({ text: match.areaLabel, lat: match.lat, lng: match.lng })}

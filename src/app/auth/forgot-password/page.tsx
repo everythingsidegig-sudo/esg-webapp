@@ -85,14 +85,14 @@ export default function ForgotPassword() {
   if (step === "code") {
     return (
       <form onSubmit={verify} className="mx-auto max-w-md space-y-4">
-        <h1 className="text-xl font-semibold">Check your email</h1>
+        <h1 className="text-2xl font-extrabold">Check your email</h1>
         {notice && <p role="status" className="text-sm text-neutral-600">{notice}</p>}
         <p className="text-sm text-neutral-500">Sent to {email.replace(/^(.{1,2}).*(@.*)$/, "$1***$2")}</p>
         <label className="block text-sm font-medium" htmlFor="recovery-code">8-digit code</label>
         <input id="recovery-code" inputMode="numeric" autoComplete="one-time-code" maxLength={8} required value={code}
-          onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} className="w-full rounded-lg border border-neutral-300 px-3 py-2 tracking-widest" />
+          onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} className="w-full rounded-xl border border-neutral-300 px-3 py-2 tracking-widest" />
         {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
-        <button type="submit" disabled={submitting} className="w-full rounded-lg bg-brand-600 py-2.5 font-medium text-white disabled:opacity-60">
+        <button type="submit" disabled={submitting} className="w-full rounded-xl bg-brand-600 py-2.5 font-medium text-white disabled:opacity-60">
           {submitting ? "Verifying…" : "Verify"}
         </button>
         <button type="button" disabled={submitting} onClick={() => void resend()} className="block w-full text-center text-sm text-brand-700">
@@ -104,13 +104,13 @@ export default function ForgotPassword() {
   }
 
   return <form onSubmit={sendCode} className="mx-auto max-w-md space-y-4">
-    <h1 className="text-xl font-semibold">Reset your password</h1>
+    <h1 className="text-2xl font-extrabold">Reset your password</h1>
     <p className="text-sm text-neutral-600">Enter your account email and we&apos;ll send you a verification code.</p>
     <label className="block text-sm font-medium" htmlFor="recovery-email">Email</label>
     <input id="recovery-email" type="email" autoComplete="email" required value={email}
-      onChange={(e) => setEmail(e.target.value)} className="w-full rounded-lg border border-neutral-300 px-3 py-2" />
+      onChange={(e) => setEmail(e.target.value)} className="w-full rounded-xl border border-neutral-300 px-3 py-2" />
     {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
-    <button type="submit" disabled={submitting} className="w-full rounded-lg bg-brand-600 py-2.5 font-medium text-white disabled:opacity-60">
+    <button type="submit" disabled={submitting} className="w-full rounded-xl bg-brand-600 py-2.5 font-medium text-white disabled:opacity-60">
       {submitting ? "Sending…" : "Send code"}
     </button>
     <p className="text-center text-sm"><Link href="/auth/sign-in" className="touch-link font-medium text-brand-700">Back to Sign In</Link></p>

@@ -81,7 +81,7 @@ export default function FullProviderView({
               <p className="text-sm text-neutral-500">{distanceKm != null ? `${distanceKm.toFixed(1)} km away` : "Distance: Not available"}</p>
             </div>
           </div>
-          <button type="button" onClick={onClose} aria-label="Back to profiles" className="shrink-0 rounded-lg border border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50">
+          <button type="button" onClick={onClose} aria-label="Back to profiles" className="shrink-0 rounded-xl border border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50">
             Back
           </button>
         </div>
@@ -111,8 +111,8 @@ export default function FullProviderView({
         <Link href={`/profile/${profile.username}`} className="block text-sm font-medium text-brand-700 hover:underline">View public profile page →</Link>
 
         <div className="flex gap-2 pt-1">
-          <button type="button" disabled={disabled} onClick={onSkip} className="flex-1 rounded-lg border border-neutral-300 bg-white py-2.5 font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-60">Skip</button>
-          <button type="button" disabled={disabled} onClick={onSendGig} className="flex-1 rounded-lg bg-brand-600 py-2.5 font-medium text-white disabled:opacity-60">Send Gig</button>
+          <button type="button" disabled={disabled} onClick={onSkip} className="flex-1 rounded-xl border border-neutral-300 bg-white py-2.5 font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-60">Skip</button>
+          <button type="button" disabled={disabled} onClick={onSendGig} className="flex-1 rounded-xl bg-brand-600 py-2.5 font-medium text-white disabled:opacity-60">Send Gig</button>
         </div>
       </div>
     </div>

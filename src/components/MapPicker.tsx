@@ -69,7 +69,7 @@ export default function MapPicker({ lat, lng, onPick, radiusKm, interactive = tr
           map.on("click", (event) => settle(event.latlng));
         }
         const circle = radiusKm
-          ? L.circle([lat, lng], { radius: radiusKm * 1000, color: "#059669", weight: 1.5, fillColor: "#059669", fillOpacity: 0.08 }).addTo(map)
+          ? L.circle([lat, lng], { radius: radiusKm * 1000, color: "#6d28d9", weight: 1.5, fillColor: "#6d28d9", fillOpacity: 0.08 }).addTo(map)
           : null;
         // A compact preview has no room to pan or zoom, so it fits the circle instead of
         // using the same fixed zoom as the full interactive map (where a 50km circle would
@@ -101,20 +101,20 @@ export default function MapPicker({ lat, lng, onPick, radiusKm, interactive = tr
       current.circle.setLatLng([lat, lng]);
       current.circle.setRadius(radiusKm * 1000);
     } else {
-      current.circle = current.L.circle([lat, lng], { radius: radiusKm * 1000, color: "#059669", weight: 1.5, fillColor: "#059669", fillOpacity: 0.08 }).addTo(current.map);
+      current.circle = current.L.circle([lat, lng], { radius: radiusKm * 1000, color: "#6d28d9", weight: 1.5, fillColor: "#6d28d9", fillOpacity: 0.08 }).addTo(current.map);
     }
     if (compact && current.circle) current.map.fitBounds(current.circle.getBounds(), { padding: [4, 4] });
   }, [lat, lng, radiusKm, compact]);
 
   if (failed) {
     return compact ? null
-      : <p role="status" className="rounded-lg bg-neutral-100 px-3 py-2 text-sm text-neutral-600">The map couldn&apos;t load. Your area is still saved, so you can continue without it.</p>;
+      : <p role="status" className="rounded-xl bg-neutral-100 px-3 py-2 text-sm text-neutral-600">The map couldn&apos;t load. Your area is still saved, so you can continue without it.</p>;
   }
   return (
     <div className="space-y-1.5">
       <div ref={container} role={interactive ? "application" : "img"}
         aria-label={interactive ? "Map: tap or drag the pin to adjust your area" : "Map preview of your area"}
-        className={`relative z-0 w-full overflow-hidden rounded-xl border border-neutral-200 isolate ${compact ? "h-28" : "h-64"}`} />
+        className={`relative z-0 w-full overflow-hidden rounded-2xl border border-neutral-200 isolate ${compact ? "h-28" : "h-64"}`} />
       {!compact && tilesFailed && <p role="status" className="text-xs text-neutral-500">Map tiles are slow or unavailable. You can still set the pin, or just keep the area you entered.</p>}
       {!compact && (
         <p className="text-xs text-neutral-500">

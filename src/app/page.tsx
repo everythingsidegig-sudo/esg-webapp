@@ -28,7 +28,7 @@ function HomeInner() {
   return (
     <div className="mx-auto flex w-full max-w-md flex-col gap-6">
       {deleted && (
-        <p role="status" className="rounded-lg bg-neutral-100 px-4 py-2 text-center text-sm text-neutral-700">
+        <p role="status" className="rounded-xl bg-neutral-100 px-4 py-2 text-center text-sm text-neutral-700">
           Account Deleted — Your ESG account has been deleted.
         </p>
       )}

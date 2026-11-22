@@ -108,7 +108,7 @@ export default function GigUpdatesBell() {
         )}
       </button>
       {open && (
-        <div className="absolute right-0 z-20 mt-2 max-h-96 w-[min(20rem,calc(100vw-2rem))] overflow-y-auto rounded-lg border border-neutral-200 bg-white shadow-lg">
+        <div className="absolute right-0 z-20 mt-2 max-h-96 w-[min(20rem,calc(100vw-2rem))] overflow-y-auto rounded-xl border border-neutral-200 bg-white shadow-lg">
           <div className="border-b border-neutral-100 px-3 py-2 text-sm font-semibold">Gig Updates</div>
           {items.length === 0 && <div className="p-4 text-sm text-neutral-500">No updates yet.</div>}
           {items.map((n) => (

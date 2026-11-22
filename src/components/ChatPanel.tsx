@@ -303,7 +303,7 @@ export default function ChatPanel({
 
       {open && (
         <div className="border-t border-neutral-200 bg-white px-3 pt-3">
-          {priceError && <p role="alert" className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{priceError}</p>}
+          {priceError && <p role="alert" className="mb-2 rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700">{priceError}</p>}
           {!priceFormOpen && view.canPropose && (
             <button type="button" onClick={() => { setPriceFormOpen(true); setPriceError(null); }}
               className="flex min-h-11 w-full items-center justify-center gap-2 rounded-full border border-brand-600 px-4 text-sm font-semibold text-brand-700 transition hover:bg-brand-50">
@@ -320,7 +320,7 @@ export default function ChatPanel({
               <input id="new-price" inputMode="decimal" autoComplete="off" value={priceDraft}
                 onChange={(e) => { setPriceDraft(e.target.value); setPriceError(null); }}
                 placeholder={String(agreedAmount)}
-                className="min-h-11 w-full rounded-xl border border-neutral-300 bg-neutral-50 px-4 text-[15px] outline-none transition focus:border-brand-500 focus:bg-white focus:ring-2 focus:ring-brand-100" />
+                className="min-h-11 w-full rounded-2xl border border-neutral-300 bg-neutral-50 px-4 text-[15px] outline-none transition focus:border-brand-500 focus:bg-white focus:ring-2 focus:ring-brand-100" />
               <div className="flex gap-2">
                 <button type="submit" disabled={!priceDraft.trim() || !!priceBusy} className={`${button} flex-1 bg-brand-600 text-white shadow-sm hover:bg-brand-700`}>
                   {priceBusy === "propose" ? "Sending…" : "Send proposal"}

@@ -60,7 +60,7 @@ export default function GigTile({
 
   if (own) {
     return (
-      <div aria-disabled="true" className="relative rounded-xl border border-neutral-200 bg-neutral-100 p-4 opacity-60 grayscale">
+      <div aria-disabled="true" className="relative rounded-2xl border border-neutral-200 bg-neutral-100 p-4 opacity-60 grayscale">
         <div className="flex items-center justify-between gap-2">
           <span className="text-xs font-medium uppercase tracking-wide text-neutral-500">{gig.service_type}</span>
           <span className="font-semibold text-neutral-500">{formatMoney(gig.amount)}</span>
@@ -78,7 +78,7 @@ export default function GigTile({
     <div
       onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={settle} onPointerCancel={() => setDrag(null)} onClick={tapToView}
       style={{ touchAction: "pan-y", transform: drag ? `translateX(${dragX}px) rotate(${dragX / 30}deg)` : undefined }}
-      className="relative cursor-pointer rounded-xl border border-neutral-200 bg-white p-4 shadow-sm"
+      className="relative cursor-pointer rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm"
     >
       {feedback && (
         // Centered on the tile itself (not pinned to an edge): it travels with the card as it's
@@ -108,9 +108,9 @@ export default function GigTile({
         </div>
       )}
       <div className="mt-3 flex gap-2">
-        <button type="button" onClick={(e) => { e?.stopPropagation(); onReject(); }} className="flex-1 rounded-lg border border-neutral-300 bg-white py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50">Reject</button>
-        <button type="button" onClick={(e) => { e?.stopPropagation(); onView(); }} className="flex-1 rounded-lg border border-neutral-300 bg-white py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50">View</button>
-        <button type="button" onClick={(e) => { e?.stopPropagation(); onRequestAccept(); }} className="flex-1 rounded-lg bg-brand-600 py-2 text-sm font-medium text-white hover:bg-brand-700">Accept</button>
+        <button type="button" onClick={(e) => { e?.stopPropagation(); onReject(); }} className="flex-1 rounded-xl border border-neutral-300 bg-white py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50">Reject</button>
+        <button type="button" onClick={(e) => { e?.stopPropagation(); onView(); }} className="flex-1 rounded-xl border border-neutral-300 bg-white py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50">View</button>
+        <button type="button" onClick={(e) => { e?.stopPropagation(); onRequestAccept(); }} className="flex-1 rounded-xl bg-brand-600 py-2 text-sm font-medium text-white hover:bg-brand-700">Accept</button>
       </div>
     </div>
   );

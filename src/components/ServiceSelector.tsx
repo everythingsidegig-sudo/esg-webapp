@@ -98,14 +98,14 @@ export default function ServiceSelector({ initial, revisions, mode, onSave, onFi
 
   const tab = (target: Branch) => (
     <button key={target} role="tab" type="button" aria-selected={branch === target} onClick={() => { setBranch(target); setMessage(null); }}
-      className={`min-h-11 flex-1 rounded-lg px-2 py-1.5 text-center text-sm font-semibold transition-colors ${branch === target ? "bg-white text-brand-700 shadow-sm" : "text-neutral-500 hover:text-neutral-900"}`}>
+      className={`min-h-11 flex-1 rounded-xl px-2 py-1.5 text-center text-sm font-semibold transition-colors ${branch === target ? "bg-white text-brand-700 shadow-sm" : "text-neutral-500 hover:text-neutral-900"}`}>
       {BRANCH_LABEL[target]}
       <span className="block text-xs font-normal">{totalSelected(drafts[target])} selected{dirty[target] ? " · unsaved" : ""}</span>
     </button>
   );
 
   const tabs = (
-    <div role="tablist" aria-label="Service lists" className="flex gap-1 rounded-xl bg-neutral-100 p-1">{BRANCHES.map(tab)}</div>
+    <div role="tablist" aria-label="Service lists" className="flex gap-1 rounded-2xl bg-neutral-100 p-1">{BRANCHES.map(tab)}</div>
   );
   const status = message && (
     <p role={message.kind === "error" ? "alert" : "status"} className={`text-sm ${message.kind === "error" ? "text-red-600" : "text-brand-700"}`}>{message.text}</p>
@@ -120,7 +120,7 @@ export default function ServiceSelector({ initial, revisions, mode, onSave, onFi
         {BRANCHES.map((target) => {
           const summary = summarize(drafts[target]);
           return (
-            <section key={target} aria-label={BRANCH_LABEL[target]} className="space-y-2 rounded-xl border border-neutral-200 bg-white p-4">
+            <section key={target} aria-label={BRANCH_LABEL[target]} className="space-y-2 rounded-2xl border border-neutral-200 bg-white p-4">
               <div className="flex items-center justify-between gap-2">
                 <h3 className="font-medium">{BRANCH_LABEL[target]}{dirty[target] ? " (unsaved)" : ""}</h3>
                 <button type="button" onClick={() => { setBranch(target); setView("browse"); }} className="touch-link text-sm font-medium text-brand-700">Edit</button>
@@ -152,13 +152,13 @@ export default function ServiceSelector({ initial, revisions, mode, onSave, onFi
         {status}
         <div className="space-y-2">
           <button type="button" disabled={saving} onClick={() => void finish()}
-            className="flex min-h-11 w-full items-center justify-center rounded-lg bg-brand-600 px-4 py-2.5 font-medium text-white hover:bg-brand-700 disabled:opacity-60">
+            className="flex min-h-11 w-full items-center justify-center rounded-xl bg-brand-600 px-4 py-2.5 font-medium text-white hover:bg-brand-700 disabled:opacity-60">
             {saving ? "Saving…" : mode === "onboarding" ? "Save & Complete Registration" : "Save changes"}
           </button>
           {message?.kind === "error" && !saving && (
             <button type="button" onClick={() => void finish()} className="touch-link block w-full text-center text-sm font-medium text-brand-700">Retry</button>
           )}
-          <button type="button" onClick={() => setView("browse")} className="flex min-h-11 w-full items-center justify-center rounded-lg border border-neutral-300 bg-white px-4 py-2.5 font-medium text-neutral-700 hover:bg-neutral-50">Keep editing</button>
+          <button type="button" onClick={() => setView("browse")} className="flex min-h-11 w-full items-center justify-center rounded-xl border border-neutral-300 bg-white px-4 py-2.5 font-medium text-neutral-700 hover:bg-neutral-50">Keep editing</button>
           {mode === "onboarding" && <button type="button" onClick={skip} className="touch-link block w-full text-center text-sm font-medium text-neutral-500">Skip for now</button>}
         </div>
       </div>
@@ -186,13 +186,13 @@ export default function ServiceSelector({ initial, revisions, mode, onSave, onFi
     </nav>
   );
 
-  const row = "flex min-h-11 w-full items-center justify-between gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2 text-left hover:bg-neutral-50";
+  const row = "flex min-h-11 w-full items-center justify-between gap-2 rounded-xl border border-neutral-200 bg-white px-3 py-2 text-left hover:bg-neutral-50";
   const count = (n: number) => (n > 0 ? <span className="shrink-0 rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700">✓ {n} selected</span> : null);
 
   let body;
   if (trimmed) {
     body = hits.length === 0 ? (
-      <div className="space-y-2 rounded-lg border border-neutral-200 bg-white p-4 text-sm">
+      <div className="space-y-2 rounded-xl border border-neutral-200 bg-white p-4 text-sm">
         <p className="font-medium">No matching services</p>
         <div className="flex gap-3">
           <button type="button" onClick={() => setQuery("")} className="touch-link font-medium text-brand-700">Clear search</button>
@@ -213,7 +213,7 @@ export default function ServiceSelector({ initial, revisions, mode, onSave, onFi
           <li key={item.id}>
             <button type="button" onClick={() => go({ categoryId: item.id, serviceId: null })}
               className="flex h-full min-h-24 w-full flex-col items-start justify-between gap-2 rounded-2xl border border-neutral-200 bg-white p-3 text-left shadow-sm transition hover:border-brand-300 hover:shadow-md">
-              <span aria-hidden="true" className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50 text-xl">{categoryIcon(item.id)}</span>
+              <span aria-hidden="true" className="flex h-10 w-10 items-center justify-center rounded-2xl bg-brand-50 text-xl">{categoryIcon(item.id)}</span>
               <span className="text-sm font-medium leading-snug">{item.name}</span>
               <span className="flex items-center gap-1 text-xs text-brand-700">{count(countForCategory(draft, item.id))}</span>
             </button>
@@ -239,11 +239,11 @@ export default function ServiceSelector({ initial, revisions, mode, onSave, onFi
     const all = allState(draft, service.id);
     const other = draft.custom[service.id] ?? { checked: false, text: "" };
     const otherProblem = showProblems ? customError(other) : null;
-    const box = "flex min-h-11 items-center gap-3 rounded-lg border px-3 py-2";
+    const box = "flex min-h-11 items-center gap-3 rounded-xl border px-3 py-2";
     body = (
       <fieldset className="space-y-1.5">
         <legend className="mb-1 text-base font-semibold">{service.name}</legend>
-        {service.regulated && <p role="note" className="rounded-lg bg-yellow-50 p-3 text-sm text-yellow-800">This kind of work usually needs a licence. You can add it, but it won&apos;t show up in helper search until it is verified.</p>}
+        {service.regulated && <p role="note" className="rounded-xl bg-yellow-50 p-3 text-sm text-yellow-800">This kind of work usually needs a licence. You can add it, but it won&apos;t show up in helper search until it is verified.</p>}
         <label className={`${box} border-neutral-300 bg-neutral-50 font-medium`}>
           <input type="checkbox" checked={all === "all"} aria-checked={all === "some" ? "mixed" : all === "all"}
             ref={(el: HTMLInputElement | null) => { if (el) el.indeterminate = all === "some"; }}
@@ -264,7 +264,7 @@ export default function ServiceSelector({ initial, revisions, mode, onSave, onFi
           {other.checked && (
             <input type="text" aria-label={`Other ${service.name}`} aria-invalid={otherProblem ? true : undefined} maxLength={MAX_CUSTOM_LENGTH + 20} value={other.text} placeholder="Enter your own"
               onChange={(event) => edit((state) => setCustomText(state, service.id, event.target.value))}
-              className="min-h-11 min-w-0 flex-1 rounded-lg border border-neutral-300 px-3 py-2" />
+              className="min-h-11 min-w-0 flex-1 rounded-xl border border-neutral-300 px-3 py-2" />
           )}
           {otherProblem && <p role="alert" className="w-full text-sm text-red-600">{otherProblem}</p>}
         </div>
@@ -276,20 +276,20 @@ export default function ServiceSelector({ initial, revisions, mode, onSave, onFi
     <div className="space-y-4">
       {tabs}
       <input type="search" aria-label={`Search ${BRANCH_LABEL[branch]}`} placeholder="Search categories, services, subservices" value={query}
-        onChange={(event) => setQuery(event.target.value)} className="min-h-11 w-full rounded-lg border border-neutral-300 px-3 py-2" />
+        onChange={(event) => setQuery(event.target.value)} className="min-h-11 w-full rounded-xl border border-neutral-300 px-3 py-2" />
       {!trimmed && <p className="text-xs text-neutral-500">All categories are available under both lists. What you choose here is saved only under {BRANCH_LABEL[branch]}.</p>}
       {!trimmed && crumbs}
       {body}
       {status}
       <div className="space-y-2 border-t border-neutral-200 pt-3">
         <button type="button" disabled={saving || !dirty[branch]} onClick={() => void saveBranch(branch)}
-          className="flex min-h-11 w-full items-center justify-center rounded-lg bg-brand-600 px-4 py-2.5 font-medium text-white hover:bg-brand-700 disabled:opacity-60">
+          className="flex min-h-11 w-full items-center justify-center rounded-xl bg-brand-600 px-4 py-2.5 font-medium text-white hover:bg-brand-700 disabled:opacity-60">
           {saving ? "Saving…" : `Save to ${BRANCH_LABEL[branch]}`}
         </button>
         {message?.kind === "error" && !saving && (
           <button type="button" onClick={() => void saveBranch(branch)} className="touch-link block w-full text-center text-sm font-medium text-brand-700">Retry</button>
         )}
-        <button type="button" onClick={() => { setView("review"); setMessage(null); }} className="flex min-h-11 w-full items-center justify-center rounded-lg border border-neutral-300 bg-white px-4 py-2.5 font-medium text-neutral-700 hover:bg-neutral-50">
+        <button type="button" onClick={() => { setView("review"); setMessage(null); }} className="flex min-h-11 w-full items-center justify-center rounded-xl border border-neutral-300 bg-white px-4 py-2.5 font-medium text-neutral-700 hover:bg-neutral-50">
           Review &amp; finish
         </button>
         {mode === "onboarding" && <button type="button" onClick={skip} className="touch-link block w-full text-center text-sm font-medium text-neutral-500">Skip for now</button>}
