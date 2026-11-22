@@ -6,6 +6,7 @@ import AuthGuard from "@/components/AuthGuard";
 import { useAuth } from "@/lib/auth-context";
 import { createClient } from "@/lib/supabase/client";
 import { friendlyError } from "@/lib/journey";
+import Icon from "@/components/Icon";
 
 // ESG-SET-002 v1.0: Account Information. Identity/contact data only -- no
 // Gig stats, WOM/Lemon/Rotten Tomato, Money Made, or Skills & Services (My
@@ -168,7 +169,7 @@ function SettingsInner() {
 
         <div className="flex items-center gap-4">
           {profile.photo_url ? <img src={profile.photo_url} alt="Profile photo" className="h-14 w-14 rounded-full object-cover" />
-            : <div className="flex h-14 w-14 items-center justify-center rounded-full bg-neutral-200 text-lg">👤</div>}
+            : <div className="flex h-14 w-14 items-center justify-center rounded-full bg-neutral-200"><Icon name="profile" className="h-1/2 w-1/2 text-neutral-500" /></div>}
           <label className="inline-flex min-h-11 cursor-pointer items-center text-sm font-medium text-brand-700">
             {photoBusy ? "Uploading…" : "Change photo"}
             <input type="file" accept="image/jpeg,image/png,image/webp" disabled={photoBusy} className="hidden" onChange={(e) => { if (e.target.files?.[0]) void uploadPhoto(e.target.files[0]); }} />

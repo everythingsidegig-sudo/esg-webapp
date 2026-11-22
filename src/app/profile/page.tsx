@@ -19,6 +19,7 @@ import { loadTagCatalog, MAX_PROFILE_TAGS } from "@/lib/tags";
 import { formatMoney } from "@/lib/money";
 import { otherTextsChanged, profileUpdate } from "@/lib/profile-save";
 import type { Profile as ProfileRow, Tag } from "@/lib/database.types";
+import Icon from "@/components/Icon";
 
 const ALL_SKILLS = "*";
 
@@ -373,7 +374,7 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
     <div className="flex items-center justify-between gap-4">
       <div className="flex items-center gap-4">
         {profile.photo_url ? <img src={profile.photo_url} alt="Profile photo" className="h-16 w-16 rounded-full object-cover" />
-          : <div className="flex h-16 w-16 items-center justify-center rounded-full bg-neutral-200 text-xl">👤</div>}
+          : <div className="flex h-16 w-16 items-center justify-center rounded-full bg-neutral-200"><Icon name="profile" className="h-1/2 w-1/2 text-neutral-500" /></div>}
         <div>
           <h1 className="text-2xl font-extrabold">@{profile.username}</h1>
           <label className="inline-flex min-h-11 cursor-pointer items-center text-sm text-brand-700">Change photo
@@ -382,7 +383,7 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
         </div>
       </div>
       {/* ESG-SET-002 entry point: Home (Signed In) -> Profile -> Account Settings. */}
-      <Link href="/settings" aria-label="Account Settings" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-xl text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900">⚙️</Link>
+      <Link href="/settings" aria-label="Account Settings" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-neutral-700 hover:bg-neutral-100 hover:text-neutral-900"><Icon name="settings" className="h-6 w-6" /></Link>
     </div>
     <div className="grid grid-cols-3 gap-3 text-center">
       <div className="rounded-xl border border-neutral-200 bg-white p-3"><div className="text-lg font-semibold">{total ? `${Math.round(profile.wom_count / total * 100)}%` : "—"}</div><div className="text-xs text-neutral-500">WOM%</div></div>
@@ -430,7 +431,7 @@ function ProfileEditor({ profile }: { profile: ProfileRow }) {
         </p>
         {!helperLocationExpanded ? (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-neutral-200 bg-white px-3 py-2.5">
-            <p className="text-sm text-neutral-700">{helperLocationText ? `📍 ${helperLocationText}` : "No location set"}</p>
+            <p className="text-sm text-neutral-700">{helperLocationText ? <><Icon name="pin" className="inline h-4 w-4 align-text-bottom" /> {helperLocationText}</> : "No location set"}</p>
             <button type="button" onClick={() => setHelperLocationExpanded(true)}
               className="shrink-0 text-sm font-medium text-brand-700 hover:underline">
               {helperLocationText ? "Update location" : "Set location"}

@@ -57,7 +57,7 @@ export default function MapPicker({ lat, lng, onPick, radiusKm, interactive = tr
         // content instead of inheriting "auto" from that 0-width container -- a plain block
         // div resolves to 0 width there, which makes the `-50%` of `translate(-50%,-100%)`
         // compute to 0 and leaves the pin's tip rendered ~16px right of the real point.
-        const icon = L.divIcon({ className: "", html: '<div style="display:inline-block;font-size:32px;line-height:32px;transform:translate(-50%,-100%)" aria-hidden="true">📍</div>', iconSize: [0, 0] });
+        const icon = L.divIcon({ className: "", html: '<svg aria-hidden="true" viewBox="0 0 24 24" width="34" height="34" style="display:block;transform:translate(-50%,-100%)" fill="#6d28d9" stroke="#ffffff" stroke-width="1.5" stroke-linejoin="round"><path d="M12 22s-7.5-6.4-7.5-12a7.5 7.5 0 1115 0c0 5.6-7.5 12-7.5 12z"/><circle cx="12" cy="10" r="2.6" fill="#ffffff" stroke="none"/></svg>', iconSize: [0, 0] });
         const marker = L.marker([lat, lng], { draggable: interactive, icon, title: interactive ? "Drag to adjust the pin" : "Location pin", alt: "Location pin" }).addTo(map);
         if (interactive) {
           const settle = (point: { lat: number; lng: number }) => {

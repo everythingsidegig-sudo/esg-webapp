@@ -179,10 +179,9 @@ export function searchCatalog(query: string, limit = 30): SearchHit[] {
 
 export const pathLabel = (hit: SearchHit) => hit.path.join(" > ");
 
-// A friendly icon per category for the grid, in catalog order (c01 ... c23). Decoration only: the
-// category name stays the label, so a missing entry just shows no icon.
-const CATEGORY_ICONS = ["🧹", "🪑", "🔧", "📦", "🛍️", "🌿", "❄️", "🐾", "🧸", "🤝", "🗂️", "💻", "🎓", "🎉", "🚗", "💡", "🏗️", "💆", "🏢", "📷", "🧳", "🚜", "🍳"];
+// The flat icon for a category in the grid (c01 ... c23): the name of an entry in components/Icon.tsx.
+// Decoration only: the category name stays the label.
 export function categoryIcon(categoryId: string): string {
-  const index = Number(categoryId.replace(/^c/, "")) - 1;
-  return CATEGORY_ICONS[index] ?? "";
+  const number = Number(categoryId.replace(/^c/, ""));
+  return Number.isInteger(number) && number >= 1 && number <= 23 ? `cat${String(number).padStart(2, "0")}` : "";
 }

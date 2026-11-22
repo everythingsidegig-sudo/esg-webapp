@@ -16,6 +16,7 @@ import {
 import { formatMoney } from "@/lib/money";
 import { rpcActionError } from "@/lib/journey";
 import type { ClaimState, DirectRequest, DirectRequestState, Gig, GigWithTags } from "@/lib/database.types";
+import Icon from "@/components/Icon";
 
 type PosterRow = { gig: GigWithTags; proposals: number; helper: string | null; requestedTo: string | null };
 type HelperRow = { gig: GigWithTags; claimState: ClaimState | null; offer: number | null; customer: string | null };
@@ -74,12 +75,12 @@ function posterCard({ gig, proposals, helper, requestedTo }: PosterRow, savedNon
         {helper && section !== "open" && <p className="mt-2 text-sm text-neutral-600">Helper: @{helper}{agreedLine(gig) ? ` · ${agreedLine(gig)}` : ""}</p>}
         {gig.helper_withdrawn_at && <p className="mt-2 text-sm text-amber-700">Your helper withdrew. You can post it again for everyone.</p>}
         {gig.helper_removed_at && <p className="mt-2 text-sm text-amber-700">You removed your helper. You can post it again for everyone.</p>}
-        {gig.requested_helper_id && !gig.selected_provider_id && !gig.helper_withdrawn_at && !gig.helper_removed_at && <p className="mt-2 text-sm text-brand-800">🔒 Private request{requestedTo ? ` to @${requestedTo}` : ""}</p>}
+        {gig.requested_helper_id && !gig.selected_provider_id && !gig.helper_withdrawn_at && !gig.helper_removed_at && <p className="mt-2 text-sm text-brand-800"><Icon name="lock" className="inline h-4 w-4 align-text-bottom" /> Private request{requestedTo ? ` to @${requestedTo}` : ""}</p>}
         {tagChips(gig)}
       </Link>
       {section === "saved_non_public" && (
         <div className="space-y-2 border-t border-neutral-100 px-4 py-3">
-          <p className="text-sm text-neutral-600">🔒 Saved privately · not visible to the public</p>
+          <p className="text-sm text-neutral-600"><Icon name="lock" className="inline h-4 w-4 align-text-bottom" /> Saved privately · not visible to the public</p>
           {savedNonPublic.sentRequests.length === 0 ? (
             <p className="text-sm text-neutral-500">No requests sent yet.</p>
           ) : (

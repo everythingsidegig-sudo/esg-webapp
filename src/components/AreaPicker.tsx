@@ -6,6 +6,7 @@ import { approximateCoordinates } from "@/lib/journey";
 import { LOCATION_KEY, reverseGeocodeGeneralArea } from "@/lib/location";
 import { resolveAreaQuery } from "@/lib/area-lookup";
 import type { AreaMatch } from "@/lib/area-search";
+import Icon from "@/components/Icon";
 
 export type Area = { text: string; lat: number | null; lng: number | null };
 
@@ -117,7 +118,7 @@ export default function AreaPicker({ area, onChange, radiusKm }: { area: Area; o
       <section aria-label="Search area" className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
         <div className="flex flex-1 flex-wrap items-center justify-between gap-2 rounded-xl border border-neutral-200 bg-white px-3 py-2.5">
           <p role="status" className="flex flex-wrap items-center gap-x-2 text-sm text-neutral-700">
-            <span>📍 {area.text}</span>
+            <span><Icon name="pin" className="inline h-4 w-4 align-text-bottom" /> {area.text}</span>
             {area.lat == null && <span className="text-neutral-500">(no map position, so distance can&apos;t be shown)</span>}
           </p>
           <button type="button" onClick={() => setExpanded(true)}
@@ -149,7 +150,7 @@ export default function AreaPicker({ area, onChange, radiusKm }: { area: Area; o
       </div>
       {area.text && (
         <p role="status" className="flex flex-wrap items-center gap-x-2 text-sm text-neutral-700">
-          <span>📍 {area.text}</span>
+          <span><Icon name="pin" className="inline h-4 w-4 align-text-bottom" /> {area.text}</span>
           {area.lat == null && <span className="text-neutral-500">(no map position, so distance can&apos;t be shown)</span>}
         </p>
       )}
@@ -160,7 +161,7 @@ export default function AreaPicker({ area, onChange, radiusKm }: { area: Area; o
           className="min-h-11 w-full rounded-xl border border-neutral-300 px-3 py-2 sm:flex-1" />
         <button type="button" onClick={useMyLocation} disabled={locating}
           className="min-h-11 shrink-0 rounded-xl border border-brand-600 px-4 text-sm font-medium text-brand-700 hover:bg-brand-50 disabled:cursor-wait disabled:opacity-60">
-          {locating ? "Locating…" : "📍 Use my location"}
+          {locating ? "Locating…" : <><Icon name="pin" className="inline h-4 w-4 align-text-bottom" /> Use my location</>}
         </button>
       </div>
       {busy && <p role="status" className="text-sm text-neutral-500">Searching…</p>}

@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { CURRENCY, formatMoney } from "@/lib/money";
 import { MAX_PRICE_ROUNDS, negotiationActionError, negotiationUnavailable, negotiationView, proposalAmountError, proposalStatus } from "@/lib/negotiation";
 import type { ChatMessage, PriceProposal } from "@/lib/database.types";
+import Icon from "@/components/Icon";
 
 // Messages within this gap from the same person read as one group (one time stamp, tight spacing).
 const GROUP_GAP_MS = 5 * 60 * 1000;
@@ -203,7 +204,7 @@ export default function ChatPanel({
       <div role="log" aria-label="Conversation" aria-live="polite" className="flex-1 overflow-y-auto px-4 py-4">
         {timeline.length === 0 && (
           <div className="flex h-full flex-col items-center justify-center gap-1 text-center">
-            <span aria-hidden="true" className="text-3xl">💬</span>
+            <Icon name="chat" className="h-8 w-8 text-brand-600" />
             <p className="text-sm font-medium text-neutral-700">No messages yet</p>
             <p className="text-xs text-neutral-500">Say hello to get the conversation started.</p>
           </div>
@@ -307,7 +308,7 @@ export default function ChatPanel({
           {!priceFormOpen && view.canPropose && (
             <button type="button" onClick={() => { setPriceFormOpen(true); setPriceError(null); }}
               className="flex min-h-11 w-full items-center justify-center gap-2 rounded-full border border-brand-600 px-4 text-sm font-semibold text-brand-700 transition hover:bg-brand-50">
-              <span aria-hidden="true">💶</span>
+              <Icon name="cash" className="inline h-4 w-4 align-text-bottom" />
               {view.pendingFromOther ? "Counter with another price" : "Propose a new price"}
               <span className="text-xs font-normal text-neutral-500">({view.remaining} of {MAX_PRICE_ROUNDS} left)</span>
             </button>
@@ -367,7 +368,7 @@ export default function ChatPanel({
         </form>
       ) : (
         <div className="flex items-center justify-center gap-1.5 border-t border-neutral-200 bg-neutral-100 px-3 py-2.5 text-xs text-neutral-500">
-          <span aria-hidden="true">🔒</span> This conversation is read-only now.
+          <Icon name="lock" className="inline h-4 w-4 align-text-bottom" /> This conversation is read-only now.
         </div>
       )}
     </div>

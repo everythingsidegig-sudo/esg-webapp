@@ -17,6 +17,7 @@ import { loadTagCatalog, profileTagsForCategory, withProfileTags } from "@/lib/t
 import { pathLabel, searchCatalog, type SearchHit } from "@/lib/service-selection";
 import { hasPromptedForLocation, haversineKm, loadJourneyLocation, markLocationPrompted } from "@/lib/location";
 import RadiusSlider from "@/components/RadiusSlider";
+import Icon from "@/components/Icon";
 
 const DEFAULT_RADIUS_KM = 10;
 
@@ -43,7 +44,7 @@ function HelperCard({ profile, category, distanceKm, gated = false, onGate, plai
       {profile.photo_url ? (
         <img src={profile.photo_url} alt="" className="h-12 w-12 shrink-0 rounded-full object-cover" />
       ) : (
-        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-neutral-200 text-lg">👤</div>
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-neutral-200"><Icon name="profile" className="h-1/2 w-1/2 text-neutral-500" /></div>
       )}
       <div className="min-w-0 flex-1">
         <div className="font-medium">@{profile.username}</div>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Icon, { type IconName } from "@/components/Icon";
 import { CATALOG, CATEGORY_BY_ID, SERVICE_BY_ID } from "@/lib/service-catalog";
 import {
   BRANCHES, BRANCH_LABEL, MAX_CUSTOM_LENGTH, allState, categoryIcon, countForCategory, countForService, customError, pathLabel, sameSelection, searchCatalog,

@@ -5,6 +5,7 @@ import TagChip from "@/components/TagChip";
 import { profileTagsForCategory } from "@/lib/tags";
 import { resolveSwipe } from "@/lib/swipe";
 import type { PublicProfileWithTags } from "@/lib/database.types";
+import Icon from "@/components/Icon";
 
 export type ProviderStats = { gigsWorkedCount: number; womPercentage: number | null };
 
@@ -79,7 +80,7 @@ export default function ProviderCard({
         {profile.photo_url ? (
           <img src={profile.photo_url} alt="" className="h-20 w-20 shrink-0 rounded-full object-cover ring-2 ring-brand-200" />
         ) : (
-          <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-full bg-brand-100 text-2xl">👤</div>
+          <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-full bg-brand-100"><Icon name="profile" className="h-1/2 w-1/2 text-brand-700" /></div>
         )}
         <div className="min-w-0 flex-1">
           <div className="font-medium">@{profile.username}</div>

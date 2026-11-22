@@ -155,7 +155,7 @@ function nodes(tree, predicate) {
 }
 const textOf = (node) => [node?.props?.children].flat(Infinity)
   .map((child) => (typeof child === "string" || typeof child === "number" ? String(child) : child?.props ? textOf(child) : "")).join("");
-const button = (tree, label) => nodes(tree, (node) => node.type === "button" && node.props.children === label)[0];
+const button = (tree, label) => nodes(tree, (node) => node.type === "button" && (node.props.children === label || textOf(node).trim() === label))[0];
 // Profile skills/services: the real category checkboxes/ALL/OTHER live inside
 // CategoryList, which is opaque to this harness (like SelectionChip/OptionSheet) --
 // tests drive it via its props directly, computing the toggled array themselves
@@ -2346,7 +2346,7 @@ async function postGigLocation({ geolocation, reverse, initialText = "" }) {
   return { app, calls, lookups, tree: app.render() };
 }
 const locationInput = (tree) => nodes(tree, (node) => node.type === "input" && node.props.maxLength === 200)[0];
-const locateButton = (tree) => nodes(tree, (node) => node.type === "button" && /Use my current location/.test(String(node.props.children)))[0];
+const locateButton = (tree) => nodes(tree, (node) => node.type === "button" && /Use my current location/.test(textOf(node)))[0];
 
 test("Post Gig offers 'Use my current location', filling a locality and submitting only rounded coordinates", async () => {
   const { app, calls, lookups, tree: first } = await postGigLocation({
@@ -2533,7 +2533,7 @@ test("Help & Earn Money passes rounded current coordinates to Browse", async () 
     },
   });
   let tree = app.render();
-  button(tree, "📍 Use My Location").props.onClick();
+  button(tree, "Use My Location").props.onClick();
   tree = app.render();
   assert.equal(button(tree, "Finding your location…").props.disabled, true);
   await flush();
@@ -2557,7 +2557,7 @@ test("reverse-geocoding failure keeps coordinates and the Current location fallb
     },
   });
   let tree = app.render();
-  button(tree, "📍 Use My Location").props.onClick();
+  button(tree, "Use My Location").props.onClick();
   await flush();
   tree = app.render();
   assert.equal(nodes(tree, (node) => node.type === "input")[0].props.value, "Current location");
@@ -2576,7 +2576,7 @@ test("geolocation denial preserves manual location entry", async () => {
     },
   });
   let tree = app.render();
-  button(tree, "📍 Use My Location").props.onClick();
+  button(tree, "Use My Location").props.onClick();
   tree = app.render();
   assert.equal(nodes(tree, (node) => node.props.children === "Location permission denied. Enter a location manually below.").length, 1);
   nodes(tree, (node) => node.type === "input")[0].props.onChange({ target: { value: "Lund, Sweden" } });
@@ -4529,7 +4529,7 @@ test("/location: current location shows the pin without re-searching its own lab
     geolocation: { getCurrentPosition: (ok) => ok({ coords: { latitude: 59.329323, longitude: 18.068581 } }) },
     reverse: async () => "Stockholm, Sweden",
   });
-  button(granted.app.render(), "📍 Use My Location").props.onClick();
+  button(granted.app.render(), "Use My Location").props.onClick();
   await flush(); await flush();
   granted.app.render(); await flush(); await flush();
   let tree = granted.app.render();
@@ -4537,7 +4537,7 @@ test("/location: current location shows the pin without re-searching its own lab
   assert.equal(nodes(tree, (node) => node.type === "input")[0].props.value, "Stockholm, Sweden");
   assert.deepEqual(searches, [], "the label the page wrote itself is not searched again");
   const denied = await openLocationPage({ geolocation: { getCurrentPosition: (_ok, fail) => fail() } });
-  button(denied.app.render(), "📍 Use My Location").props.onClick();
+  button(denied.app.render(), "Use My Location").props.onClick();
   tree = denied.app.render();
   assert.match(textOf(nodes(tree, (node) => node.props.role === "alert")[0]), /Location permission denied/);
   tree = await denied.type("Lund");
@@ -5758,7 +5758,7 @@ test("ProfilePhoto: a profile photo opens full size and closes again; with no ph
 
   const none = app.render({ ...props, url: null });
   assert.equal(nodes(none, (node) => node.type === "button").length, 0, "no photo, nothing to tap");
-  assert.match(textOf(none), /👤/);
+  assert.equal(nodes(none, (node) => node.type === "icon" && node.props.name === "profile").length, 1, "the placeholder avatar icon");
 });
 
 test("ProviderCard: shows the provider's summary, and Skip/View Full Profile/Send Gig call their own callbacks without any drag", async () => {

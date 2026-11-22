@@ -8,6 +8,7 @@ import { profileTagsForCategory } from "@/lib/tags";
 import { resolveSwipe } from "@/lib/swipe";
 import type { ProviderStats } from "@/components/ProviderCard";
 import type { PublicProfileWithTags } from "@/lib/database.types";
+import Icon from "@/components/Icon";
 
 // Find Help Profile Swiping v1.0, "Full Profile": opened via View Full Profile without leaving
 // the deck (rendered as an overlay by the caller, same pattern as FullGigView). Preserves Send
@@ -87,9 +88,9 @@ export default function FullProviderView({
         </div>
 
         <section aria-label="Trust" className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
-          <span>👍 {womLabel} WOM</span>
-          <span>✅ {completedLabel} gigs completed</span>
-          <span>🪪 ID Verified: Not available</span>
+          <span><Icon name="thumbsUp" className="inline h-4 w-4 align-text-bottom" /> {womLabel} WOM</span>
+          <span><Icon name="checkCircle" className="inline h-4 w-4 align-text-bottom" /> {completedLabel} gigs completed</span>
+          <span><Icon name="idCard" className="inline h-4 w-4 align-text-bottom" /> ID Verified: Not available</span>
         </section>
 
         {tags.length > 0 && (

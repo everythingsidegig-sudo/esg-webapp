@@ -6,6 +6,7 @@ import { useAuth } from "@/lib/auth-context";
 import { createClient } from "@/lib/supabase/client";
 import { friendlyError, passwordError, takeAuthDestination } from "@/lib/journey";
 import { CategoryList } from "@/components/CategoryList";
+import Icon from "@/components/Icon";
 
 // ESG-AUTH-002 v0.5 screens 4-11: Username -> Password -> Profile Photo
 // (mandatory) -> Phone (optional) -> Skills I Can Offer (optional) ->
@@ -172,7 +173,7 @@ function RegisterInner() {
       {step === "photo" && <>
         <h1 className="text-2xl font-extrabold">Profile Photo</h1>
         {photoUrl ? <img src={photoUrl} alt="Profile photo" className="h-24 w-24 rounded-full object-cover" />
-          : <div className="flex h-24 w-24 items-center justify-center rounded-full bg-neutral-200 text-2xl">👤</div>}
+          : <div className="flex h-24 w-24 items-center justify-center rounded-full bg-neutral-200"><Icon name="profile" className="h-1/2 w-1/2 text-neutral-500" /></div>}
         <label className="inline-flex min-h-11 cursor-pointer items-center text-sm font-medium text-brand-700">
           {busy ? "Uploading…" : "Add / Choose Photo"}
           <input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy} className="hidden" onChange={(e) => { if (e.target.files?.[0]) void uploadPhoto(e.target.files[0]); }} />

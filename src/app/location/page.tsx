@@ -11,6 +11,7 @@ import { approximateCoordinates, safeNext, setupDestination } from "@/lib/journe
 import { LOCATION_KEY, loadJourneyLocation, reverseGeocodeGeneralArea } from "@/lib/location";
 import { useAuth } from "@/lib/auth-context";
 import { createClient } from "@/lib/supabase/client";
+import Icon from "@/components/Icon";
 
 function LocationEntryInner({ next }: { next: string | null }) {
   const router = useRouter();
@@ -220,7 +221,7 @@ function LocationEntryInner({ next }: { next: string | null }) {
         disabled={locating}
         className="touch-control w-full bg-brand-700 px-4 font-semibold text-white shadow-sm transition hover:bg-brand-800 disabled:cursor-wait disabled:opacity-60"
       >
-        {locating ? "Finding your location…" : "📍 Use My Location"}
+        {locating ? "Finding your location…" : <><Icon name="pin" className="mr-1 inline h-5 w-5 align-text-bottom" />Use My Location</>}
       </button>
 
       <div className="my-6 flex items-center gap-3 text-xs font-medium uppercase tracking-wider text-neutral-400">

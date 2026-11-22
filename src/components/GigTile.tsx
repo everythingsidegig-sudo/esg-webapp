@@ -7,6 +7,7 @@ import { priceLabel } from "@/lib/helper-request";
 import { gigTagNames } from "@/lib/tags";
 import { resolveSwipe } from "@/lib/swipe";
 import type { GigWithTags } from "@/lib/database.types";
+import Icon from "@/components/Icon";
 
 // ESG Gig Swipe Discovery v1.0: a list tile. Swipe right or Accept opens the shared
 // confirm step (never submits instantly); swipe left or Reject is a silent, local,
@@ -94,7 +95,7 @@ export default function GigTile({
         <span className="text-xs font-medium uppercase tracking-wide text-brand-700">{gig.service_type}</span>
         <div className="flex items-center gap-2">
           <span className="font-semibold">{formatMoney(gig.amount)}</span>
-          {gig.photo_url && <span aria-hidden="true" title="Has photos">📷</span>}
+          {gig.photo_url && <span title="Has photos"><Icon name="camera" className="h-4 w-4 text-neutral-500" /></span>}
         </div>
       </div>
       <div className="mt-1 font-medium">{gig.title}</div>

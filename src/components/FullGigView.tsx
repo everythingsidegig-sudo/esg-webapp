@@ -9,6 +9,7 @@ import { priceLabel } from "@/lib/helper-request";
 import { gigTagNames } from "@/lib/tags";
 import { resolveSwipe } from "@/lib/swipe";
 import type { GigWithTags, PublicProfile } from "@/lib/database.types";
+import Icon from "@/components/Icon";
 
 type PosterInfo = { profile: PublicProfile | null; womPercentage: number | null; gigsPosted: number | null };
 
@@ -125,9 +126,9 @@ export default function FullGigView({
         </section>
 
         <section aria-label="Compensation" className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
-          <span>💵 {formatMoney(gig.amount)} · {priceLabel(gig.price_type)}</span>
-          <span>📍 {gig.location_text}</span>
-          <span>🗓️ {gig.scheduled_at ? new Date(gig.scheduled_at).toLocaleString() : "Flexible"} · Duration: Not available</span>
+          <span><Icon name="cash" className="inline h-4 w-4 align-text-bottom" /> {formatMoney(gig.amount)} · {priceLabel(gig.price_type)}</span>
+          <span><Icon name="pin" className="inline h-4 w-4 align-text-bottom" /> {gig.location_text}</span>
+          <span><Icon name="calendar" className="inline h-4 w-4 align-text-bottom" /> {gig.scheduled_at ? new Date(gig.scheduled_at).toLocaleString() : "Flexible"} · Duration: Not available</span>
         </section>
 
         {tags.length > 0 && (

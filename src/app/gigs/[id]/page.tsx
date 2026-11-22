@@ -19,6 +19,7 @@ import { canAddProofPhotos } from "@/lib/proof-photos";
 import TagChip from "@/components/TagChip";
 import { gigTagNames } from "@/lib/tags";
 import type { Claim, ClaimState, CompletionOutcome, ExitReason, FeedbackType, GigWithTags, IncompleteChoice, PublicProfile } from "@/lib/database.types";
+import Icon from "@/components/Icon";
 
 const EXIT_REASONS: { value: ExitReason; label: string }[] = [
   { value: "unable_to_locate_poster", label: "Unable to locate the poster" },
@@ -231,7 +232,7 @@ function GigDetails({ id }: { id: string }) {
         <div className="flex items-center justify-between gap-2">
           <span className="text-xs font-medium uppercase tracking-wide text-brand-700">{gig.service_type}</span>
           <span className="flex items-center gap-2">
-            {requested && <span className="rounded-full bg-brand-100 px-2.5 py-0.5 text-xs font-medium text-brand-800">🔒 Private request</span>}
+            {requested && <span className="rounded-full bg-brand-100 px-2.5 py-0.5 text-xs font-medium text-brand-800"><Icon name="lock" className="mr-1 inline h-3.5 w-3.5 align-text-bottom" />Private request</span>}
             <StatusBadge status={gig.status} />
           </span>
         </div>
@@ -247,9 +248,9 @@ function GigDetails({ id }: { id: string }) {
         <p className="mt-2 text-neutral-600">{gig.description}</p>
         {gig.photo_url && <img src={gig.photo_url} alt="" className="mt-3 max-h-64 rounded-xl object-cover" />}
         <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-sm text-neutral-500">
-          <span>💵 {gig.agreed_amount != null && gig.selected_provider_id ? <>Agreed {formatMoney(gig.agreed_amount)} <span className="text-neutral-400">(budget {formatMoney(gig.amount)})</span></> : <>Budget {formatMoney(gig.amount)}</>}{requested && <> · {priceLabel(gig.price_type)}</>}</span>
-          <span>📍 {gig.location_text}</span>
-          <span>🗓️ {gig.scheduled_at ? new Date(gig.scheduled_at).toLocaleString() : "Flexible"}</span>
+          <span><Icon name="cash" className="inline h-4 w-4 align-text-bottom" /> {gig.agreed_amount != null && gig.selected_provider_id ? <>Agreed {formatMoney(gig.agreed_amount)} <span className="text-neutral-400">(budget {formatMoney(gig.amount)})</span></> : <>Budget {formatMoney(gig.amount)}</>}{requested && <> · {priceLabel(gig.price_type)}</>}</span>
+          <span><Icon name="pin" className="inline h-4 w-4 align-text-bottom" /> {gig.location_text}</span>
+          <span><Icon name="calendar" className="inline h-4 w-4 align-text-bottom" /> {gig.scheduled_at ? new Date(gig.scheduled_at).toLocaleString() : "Flexible"}</span>
         </div>
         {gigTagNames(gig).length > 0 && (
           <div className="mt-3 flex flex-wrap gap-1.5">
@@ -805,14 +806,14 @@ function GigDetails({ id }: { id: string }) {
                       onClick={() => run(() => supabase.rpc("submit_feedback", { p_gig_id: id, p_type: "wom", p_comment: feedbackComment.trim() || null }))}
                       className="flex-1 rounded-2xl bg-brand-600 py-3 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-60"
                     >
-                      👍 WOM (Recommend)
+                      <Icon name="thumbsUp" className="mr-1 inline h-4 w-4 align-text-bottom" /> WOM (Recommend)
                     </button>
                     <button
                       disabled={busy}
                       onClick={() => run(() => supabase.rpc("submit_feedback", { p_gig_id: id, p_type: "lemon", p_comment: feedbackComment.trim() || null }))}
                       className="flex-1 rounded-2xl border-2 border-accent-500 bg-accent-50 py-3 text-sm font-semibold text-accent-700 hover:bg-accent-100 disabled:opacity-60"
                     >
-                      👎 Lemon (Private)
+                      <Icon name="thumbsDown" className="mr-1 inline h-4 w-4 align-text-bottom" /> Lemon (Private)
                     </button>
                     <button
                       disabled={busy}
