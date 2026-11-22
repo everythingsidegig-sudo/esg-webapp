@@ -115,7 +115,7 @@ async function component(path, name, overrides = {}) {
     "@/components/TagChip": { default: "tag-chip" },
     "@/components/ProfilePhoto": { default: "profile-photo" },
     "@/components/OfferedServices": { default: "offered-services" },
-    "@/components/MyOfferedServices": { default: "my-offered-services" },
+    "@/components/HowItWorks": { default: "how-it-works" },
     "@/components/SwipeCard": { default: "swipe-card" },
     "@/components/ProofPhotos": { default: "proof-photos" },
     "@/components/GigProgress": { default: "gig-progress" },
@@ -1841,7 +1841,7 @@ test("bottom navigation is exactly Home | Explore | My Gigs | Profile; header ha
   const nav = nodes(tree, (node) => node.type === "nav")[0];
   const links = nodes(nav, (node) => node.type === "a");
   assert.deepEqual(links.map((link) => textOf(link.props.children[1])), ["Home", "Explore", "My Gigs", "Profile"]);
-  assert.deepEqual(links.map((link) => link.props.href), ["/location", "/browse", "/my-gigs", "/profile"]);
+  assert.deepEqual(links.map((link) => link.props.href), ["/", "/browse", "/my-gigs", "/profile"]);
   assert.equal(nodes(nav, (node) => node.props.href === "/messages").length, 0, "Messages is not a bottom tab");
 });
 
@@ -6014,7 +6014,7 @@ test("Post a Gig: a retained find-helpers request from before the change is stil
   assert.deepEqual(destinations, ["/post/find-helpers?gig=new-gig"]);
 });
 
-test("My Gigs: a saved non-public gig shows its sent requests (only a pending/interested one offers Accept), and Resume Finding Helpers / Cancel wire to the right RPCs", async () => {
+test("My Gigs: a saved non-public gig shows its sent requests (no Accept beside a pending one), and Resume Finding Helpers / Cancel wire to the right RPCs", async () => {
   const calls = [];
   const gig = myGig("g-saved", { status: "saved_non_public", title: "Assemble IKEA bed" });
   const sentRequests = [
@@ -6041,10 +6041,7 @@ test("My Gigs: a saved non-public gig shows its sent requests (only a pending/in
   assert.match(textOf(section), /@helper2 — Declined/);
   assert.equal(nodes(section, (node) => node.type === "a" && node.props.href === "/post/find-helpers?gig=g-saved").length, 1, "Resume Finding Helpers links back to the deck for this exact gig");
 
-  button(section, "Accept").props.onClick();
-  await flush();
-  assert.deepEqual(JSON.parse(JSON.stringify(calls.filter(([name]) => name === "accept_direct_request"))), [["accept_direct_request", { p_request_id: "dr-1" }]]);
-  assert.equal(nodes(section, (node) => node.type === "button" && node.props.children === "Accept").length, 1, "only the pending request offers Accept, not the declined one");
+  assert.equal(nodes(section, (node) => node.type === "button" && node.props.children === "Accept").length, 0, "a pending or declined request has no Accept button");
 
   button(section, "Cancel").props.onClick();
   await flush();
@@ -6674,27 +6671,6 @@ test("Find a Helper: a failed lookup says so, Clear removes the service filter, 
   assert.equal(nodes(search.app.render(), (node) => node.props["aria-label"] === "Helpers offering this service").length, 0, "the service filter is gone once a category is chosen");
 });
 
-test("Home: a signed-in member sees the services they offer (OFFER only) with a link to change them; signed out shows nothing", async () => {
-  const queries = [];
-  const rows = [{ service_id: "c12s05", subservice_id: "c12s05u01", custom_text: null }];
-  const client = fakeDb((query) => { queries.push(query); return { data: rows, error: null }; });
-  const app = await component("src/components/MyOfferedServices.tsx", "MyOfferedServices", { client });
-  app.auth.user = null;
-  assert.equal(app.render(), null, "signed out");
-  app.auth.user = { id: "u1" };
-  app.render(); await flush();
-  assert.equal(queries[0].table, "user_service_selections");
-  assert.deepEqual({ ...queries[0].eq }, { user_id: "u1", selection_type: "OFFER" }, "never the Need Help list");
-  const tree = app.render();
-  assert.ok(nodes(tree, (node) => node.type === "a" && node.props.href === "/services"));
-  assert.equal(nodes(tree, (node) => node.props.children === "Edit").length, 1);
-  rows.length = 0;
-  const empty = await component("src/components/MyOfferedServices.tsx", "MyOfferedServices", { client });
-  empty.auth.user = { id: "u1" };
-  empty.render(); await flush();
-  assert.equal(nodes(empty.render(), (node) => node.props.children === "Choose services").length, 1);
-});
-
 test("Gig progress: the four stages are reached in order, and a gig that is not on its way shows no strip", async () => {
   const { progressReached, PROGRESS_STEPS } = await import("../src/lib/gig-progress.ts");
   assert.deepEqual([...PROGRESS_STEPS], ["Posted", "Matched", "Started", "Done"]);
@@ -6710,4 +6686,68 @@ test("Gig progress: the four stages are reached in order, and a gig that is not 
   assert.equal(nodes(tree, (node) => node.type === "li").length, 4);
   assert.equal(nodes(tree, (node) => node.type === "li" && node.props["aria-current"] === "step").length, 1, "one current step");
   assert.equal(app.render({ gig: gig("draft") }), null);
+});
+
+test("Defect 002: Accept appears only once a helper has said they are interested, never beside a merely pending right-swipe", async () => {
+  const gig = myGig("g-saved", { status: "saved_non_public", title: "Assemble IKEA bed" });
+  const sentRequests = [
+    { id: "dr-1", gig_id: "g-saved", poster_id: user.id, provider_id: "h1", state: "pending", created_at: "2026-01-01T00:00:00Z" },
+    { id: "dr-2", gig_id: "g-saved", poster_id: user.id, provider_id: "h2", state: "interested", created_at: "2026-01-02T00:00:00Z" },
+  ];
+  const db = fakeDb((query) => {
+    if (query.table === "gigs" && query.eq.poster_id) return { data: [gig], error: null };
+    if (query.table === "gigs" && query.or) return { data: [], error: null };
+    if (query.table === "claims") return { data: [], error: null };
+    if (query.table === "public_profiles") return { data: [{ id: "h1", username: "helper1" }, { id: "h2", username: "helper2" }].filter((p) => query.in.id.includes(p.id)), error: null };
+    if (query.table === "direct_requests" && query.in.gig_id) return { data: sentRequests, error: null };
+    if (query.table === "direct_requests") return { data: [], error: null };
+    throw new Error(`unhandled query for table "${query.table}"`);
+  });
+  const app = await component("src/app/my-gigs/page.tsx", "MyGigsInner", { client: db });
+  app.render(); await flush();
+  app.render(); await flush();
+  const section = sectionNamed(app.render(), "Saved (Private)");
+  const items = nodes(section, (node) => node.type === "li");
+  const pending = items.find((item) => /@helper1/.test(textOf(item)));
+  const interested = items.find((item) => /@helper2/.test(textOf(item)));
+  assert.match(textOf(pending), /Pending/);
+  assert.equal(nodes(pending, (node) => node.type === "button").length, 0, "no Accept beside the pending helper");
+  assert.equal(nodes(interested, (node) => node.type === "button" && node.props.children === "Accept").length, 1);
+});
+
+test("Defect 003/004/006: Home has the two branches and the three-step How it works, with no Services panel; the Home tab opens it", async () => {
+  const app = await component("src/app/page.tsx", "HomeInner");
+  app.auth.user = user; app.auth.profile = { ...profile, onboarding_completed_at: "2026-01-01" };
+  const tree = app.render();
+  assert.equal(nodes(tree, (node) => node.type === "how-it-works").length, 1);
+  assert.doesNotMatch(textOf(tree), /Services you offer|Choose services/);
+  const src = await import("node:fs").then((fs) => fs.readFileSync("src/app/page.tsx", "utf8"));
+  assert.doesNotMatch(src, /MyOfferedServices/, "the Services panel is gone from the landing page");
+});
+
+test("Defect 004: How it works has exactly the three agreed steps, in order, with illustrations and arrows between them", async () => {
+  const app = await component("src/components/HowItWorks.tsx", "HowItWorks");
+  const tree = app.render();
+  const headings = nodes(tree, (node) => node.type === "h3").map(textOf);
+  assert.deepEqual(headings, ["Post or Browse", "Connect", "Complete & Review"]);
+  const text = textOf(tree);
+  for (const line of ["Post a task or find gigs nearby.", "Choose a helper or get selected.", "Finish the gig and share feedback."]) assert.ok(text.includes(line), line);
+  assert.equal(nodes(tree, (node) => typeof node.type === "function").length, 3, "one illustration per step");
+  assert.equal(nodes(tree, (node) => node.type === "span" && node.props.children === "→").length, 2, "an arrow between the steps");
+});
+
+test("Defect 005: your own gig is greyed out and inert in Help & Earn; other people's gigs stay selectable", async () => {
+  const gig = { id: "g1", poster_id: "me", service_type: "Cleaning", title: "Rake the yard", description: "Leaves", amount: 40, price_type: "fixed", location_text: "Lund", scheduled_at: null, photo_url: null, gig_tags: [] };
+  const calls = [];
+  const handlers = { onView: () => calls.push("view"), onRequestAccept: () => calls.push("accept"), onReject: () => calls.push("reject") };
+  const mine = await component("src/components/GigTile.tsx", "GigTile");
+  const ownTree = mine.render({ gig, own: true, ...handlers });
+  assert.equal(ownTree.props["aria-disabled"], "true");
+  assert.match(ownTree.props.className, /opacity-60/);
+  assert.equal(nodes(ownTree, (node) => node.type === "button").length, 0, "no Accept, Reject or View on your own gig");
+  assert.equal(ownTree.props.onClick, undefined, "tapping it does nothing");
+  assert.match(textOf(ownTree), /your gig.*can.t accept/);
+  const theirs = await component("src/components/GigTile.tsx", "GigTile");
+  const theirTree = theirs.render({ gig, own: false, ...handlers });
+  assert.ok(nodes(theirTree, (node) => node.type === "button" && node.props.children === "Accept").length === 1);
 });

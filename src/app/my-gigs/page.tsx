@@ -87,7 +87,7 @@ function posterCard({ gig, proposals, helper, requestedTo }: PosterRow, savedNon
               {savedNonPublic.sentRequests.map(({ request, providerName }) => (
                 <li key={request.id} className="flex items-center justify-between gap-2 text-sm">
                   <span>@{providerName ?? "a helper"} — {REQUEST_STATE_LABEL[request.state]}</span>
-                  {(request.state === "pending" || request.state === "interested") && (
+                  {request.state === "interested" && (
                     <button type="button" disabled={savedNonPublic.busy === request.id}
                       onClick={() => savedNonPublic.onAccept(request.id)}
                       className="shrink-0 rounded-lg bg-brand-600 px-3 py-1 text-xs font-medium text-white disabled:opacity-60">Accept</button>

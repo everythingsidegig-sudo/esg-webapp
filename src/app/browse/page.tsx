@@ -146,6 +146,7 @@ function BrowseInner() {
   // touchpoint for no decision. Negotiable still opens the offer step, since an amount
   // genuinely needs to be entered there; that one is input, not a confirmation.
   function requestAccept(gig: GigWithTags) {
+    if (user && gig.poster_id === user.id) return; // your own gig can never be accepted
     if (!user) {
       router.push(`/auth/sign-in?next=${encodeURIComponent(safeNext(`/browse?resume=${gig.id}`))}`);
       return;
@@ -256,7 +257,7 @@ function BrowseInner() {
 
       <div className="grid gap-3">
         {filtered.map((gig) => (
-          <GigTile key={gig.id} gig={gig} onView={() => setViewingGig(gig)} onRequestAccept={() => requestAccept(gig)} onReject={() => reject(gig)} />
+          <GigTile key={gig.id} gig={gig} own={!!user && gig.poster_id === user.id} onView={() => setViewingGig(gig)} onRequestAccept={() => requestAccept(gig)} onReject={() => reject(gig)} />
         ))}
       </div>
 
