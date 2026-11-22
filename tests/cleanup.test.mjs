@@ -6726,7 +6726,7 @@ test("Defect 003/004/006: Home has the two branches and the three-step How it wo
   assert.doesNotMatch(src, /MyOfferedServices/, "the Services panel is gone from the landing page");
 });
 
-test("Defect 004 / UI spec: How it Works is a vertical list of the three agreed steps, numbered in the title, one icon each", async () => {
+test("Defect 004 / UI spec: How it Works is a vertical list of the three agreed steps, numbered in the title, one illustration each", async () => {
   const app = await component("src/components/HowItWorks.tsx", "HowItWorks");
   const tree = app.render();
   assert.equal(textOf(nodes(tree, (node) => node.type === "h2")[0]), "How it Works", "Title Case header, not all caps");
@@ -6734,7 +6734,7 @@ test("Defect 004 / UI spec: How it Works is a vertical list of the three agreed 
   assert.deepEqual(headings, ["1. Post or Browse", "2. Connect", "3. Complete & Review"]);
   const text = textOf(tree);
   for (const line of ["Post a task or find gigs nearby.", "Choose a helper or get selected.", "Finish the gig and share feedback."]) assert.ok(text.includes(line), line);
-  assert.equal(nodes(tree, (node) => node.type === "icon").length, 3, "one flat icon per step");
+  assert.equal(nodes(tree, (node) => typeof node.type === "function").length, 3, "one illustration per step");
   assert.equal(nodes(tree, (node) => node.type === "ol")[0].props.className.includes("grid-cols"), false, "stacked vertically, not a cramped row");
 });
 

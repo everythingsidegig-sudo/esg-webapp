@@ -46,7 +46,7 @@ function HomeInner() {
           onClick={(event) => goVia(event, "/need-help")}
           className="flex items-center gap-4 rounded-3xl border border-neutral-200 bg-white p-5 shadow-md shadow-brand-900/5 transition hover:-translate-y-0.5 hover:shadow-lg"
         >
-          <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-brand-100 text-brand-700"><Icon name="hand" className="h-7 w-7" /></span>
+          <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-brand-100 text-3xl" aria-hidden="true">🙋</span>
           <div className="min-w-0 flex-1 text-left">
             <div className="text-lg font-extrabold text-neutral-900">I Need Help</div>
             <div className="mt-0.5 leading-snug text-neutral-700">Post a gig or find a helper nearby.</div>
@@ -58,7 +58,7 @@ function HomeInner() {
           onClick={(event) => goVia(event, "/browse")}
           className="flex items-center gap-4 rounded-3xl border border-neutral-200 bg-white p-5 shadow-md shadow-brand-900/5 transition hover:-translate-y-0.5 hover:shadow-lg"
         >
-          <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-brand-100 text-brand-700"><Icon name="wallet" className="h-7 w-7" /></span>
+          <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-accent-50 text-3xl" aria-hidden="true">💪</span>
           <div className="min-w-0 flex-1 text-left">
             <div className="text-lg font-extrabold text-neutral-900">Help &amp; Make Money</div>
             <div className="mt-0.5 leading-snug text-neutral-700">Browse gigs nearby and start earning.</div>
