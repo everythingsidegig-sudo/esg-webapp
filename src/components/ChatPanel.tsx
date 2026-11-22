@@ -57,7 +57,7 @@ export default function ChatPanel({
   // The server has not been upgraded for price negotiation yet (migration 0021): hide the controls
   // instead of showing buttons that cannot work. The conversation itself is unaffected.
   const [unavailable, setUnavailable] = useState(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const logRef = useRef<HTMLDivElement>(null);
 
   // Opening the conversation marks the other party's messages as read (the only
   // column clients may update on chat_messages), which drives the Messages badge.
@@ -132,7 +132,10 @@ export default function ChatPanel({
   ].sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    // Scroll only the conversation box itself. Scrolling an element into view also scrolls the whole page, which on opening a gig
+    // threw the page to the bottom of the chat and left the message box under the bottom bar.
+    const log = logRef.current;
+    log?.scrollTo?.({ top: log.scrollHeight, behavior: "smooth" });
   }, [timeline.length]);
 
   async function send() {
@@ -201,7 +204,7 @@ export default function ChatPanel({
 
   return (
     <div className="flex h-[30rem] max-h-[80vh] flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-neutral-50 shadow-sm">
-      <div role="log" aria-label="Conversation" aria-live="polite" className="flex-1 overflow-y-auto px-4 py-4">
+      <div ref={logRef} role="log" aria-label="Conversation" aria-live="polite" className="flex-1 overflow-y-auto px-4 py-4">
         {timeline.length === 0 && (
           <div className="flex h-full flex-col items-center justify-center gap-1 text-center">
             <Icon name="chat" className="h-8 w-8 text-brand-600" />
@@ -299,7 +302,6 @@ export default function ChatPanel({
             </div>
           );
         })}
-        <div ref={bottomRef} />
       </div>
 
       {open && (

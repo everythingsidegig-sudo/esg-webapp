@@ -43,6 +43,13 @@ h1, h2 {
   letter-spacing: -0.01em;
 }
 
+/* Never let a too-wide child widen the page: on a phone that shrinks the view and pushes the fixed bottom bar
+   partly off-screen. Inputs focused near the bottom also scroll clear of the bar. */
+html {
+  overflow-x: clip;
+  scroll-padding-bottom: 7rem;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);

@@ -6788,3 +6788,9 @@ test("Services screen: every category tile shows its flat icon, not the icon's n
   assert.deepEqual(icons.map((node) => node.props.name), Array.from({ length: 23 }, (_, i) => `cat${String(i + 1).padStart(2, "0")}`));
   assert.doesNotMatch(textOf(list), /cat\d\d/, "no icon name leaks into the visible text");
 });
+
+test("Chat scrolls only its own conversation, never the whole page, when messages arrive", async () => {
+  const src = await import("node:fs").then((fs) => fs.readFileSync("src/components/ChatPanel.tsx", "utf8"));
+  assert.doesNotMatch(src, /scrollIntoView/, "scrollIntoView would also scroll the page and hide the message box under the bottom bar");
+  assert.match(src, /log\?\.scrollTo\?\.\(\{ top: log\.scrollHeight/, "the conversation box scrolls itself to the newest message");
+});
