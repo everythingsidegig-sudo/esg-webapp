@@ -1,5 +1,6 @@
 "use client";
 
+import { useSyncExternalStore } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
@@ -8,9 +9,22 @@ import Icon from "@/components/Icon";
 import MessagesLink from "@/components/MessagesLink";
 import LogoutButton from "@/components/LogoutButton";
 
+// On the sign-in screen a signed-out visitor was sent to from My Gigs or Profile, the address carries
+// ?next=/my-gigs (or /profile): that tab stays highlighted so the bar still shows where they were headed.
+// Read from the address bar (not useSearchParams) so the layout needs no Suspense boundary.
+const noSubscription = () => () => {};
+function useNextPath(): string | null {
+  const search = useSyncExternalStore(noSubscription, () => (typeof window === "undefined" ? "" : window.location.search), () => "");
+  const next = new URLSearchParams(search).get("next");
+  return next && next.startsWith("/") && !next.startsWith("//") ? next.split(/[?#]/)[0] : null;
+}
+
 export default function Nav() {
   const { user, loading } = useAuth();
   const pathname = usePathname();
+  const nextPath = useNextPath();
+  // While signing in, the tab the visitor was heading to counts as the current one.
+  const currentPath = pathname?.startsWith("/auth") && nextPath ? nextPath : pathname;
 
   const destinations = [
     { label: "Home", href: "/", icon: "home" },
@@ -43,7 +57,7 @@ export default function Nav() {
         public, and My Gigs and Profile send a signed-out visitor to sign in with the bar still in view. */}
     <nav aria-label="Primary" className="pointer-events-none fixed inset-x-0 bottom-0 z-30 px-3 pb-[env(safe-area-inset-bottom)]"><div className="pointer-events-auto mx-auto mb-3 grid max-w-md grid-cols-4 gap-1 rounded-3xl bg-brand-900 p-1.5 shadow-xl shadow-brand-900/30 ring-1 ring-white/10">
       {destinations.map(({ label, href, icon }) => {
-        const active = href === "/" ? pathname === "/" || pathname === "/location" : pathname === href || pathname.startsWith(`${href}/`);
+        const active = href === "/" ? currentPath === "/" || currentPath === "/location" : currentPath === href || !!currentPath?.startsWith(`${href}/`);
         return <Link
           key={href}
           href={href}

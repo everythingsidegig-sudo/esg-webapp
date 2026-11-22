@@ -52,6 +52,7 @@ async function component(path, name, overrides = {}) {
     useMemo: (callback) => callback(),
     useCallback: (callback) => callback,
     Suspense: "suspense",
+    useSyncExternalStore: (_subscribe, getSnapshot) => getSnapshot(),
     useState(initial) {
       const index = cursor++;
       if (!(index in states)) states[index] = typeof initial === "function" ? initial() : initial;
@@ -6766,4 +6767,14 @@ test("Bottom navigation is there for signed-out visitors too, including on the s
   signIn.auth.user = null; signIn.auth.profile = null;
   const signInLinks = nodes(nodes(signIn.render(), (node) => node.type === "nav")[0], (node) => node.type === "a");
   assert.deepEqual(signInLinks.map((link) => link.props.href), ["/", "/browse", "/my-gigs", "/profile"], "the bar stays on the sign-in screen");
+});
+
+test("Sign-in reached from My Gigs or Profile keeps that bottom tab highlighted", async () => {
+  const mocks = { "@/components/GigUpdatesBell": { default: "notifications-bell" }, "next/navigation": { usePathname: () => "/auth/sign-in", useSearchParams: () => new URLSearchParams(), useRouter: () => ({ replace() {}, push() {} }) } };
+  for (const [search, selected] of [["?next=%2Fmy-gigs", "/my-gigs"], ["?next=%2Fprofile", "/profile"], ["?next=%2Fmy-gigs%3Ftab%3Dhelping", "/my-gigs"], ["", null], ["?next=%2F%2Fevil.example", null]]) {
+    const app = await component("src/components/Nav.tsx", "Nav", { mocks, globals: { window: { location: { search } } } });
+    app.auth.user = null; app.auth.profile = null;
+    const links = nodes(nodes(app.render(), (node) => node.type === "nav")[0], (node) => node.type === "a");
+    assert.deepEqual(links.filter((link) => link.props["aria-current"] === "page").map((link) => link.props.href), selected ? [selected] : [], search || "no next");
+  }
 });
