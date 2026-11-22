@@ -217,22 +217,22 @@ function BrowseInner() {
   }, [lastRejected]);
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-3">
       <h1 className="text-2xl font-extrabold">Gigs Nearby</h1>
 
       <AreaPicker area={area} onChange={setArea} radiusKm={radiusKm} />
 
       <div className="flex flex-wrap gap-3">
         <fieldset className="min-w-0 w-full">
-          <legend className="text-sm font-medium">Service category</legend>
-          <div className="mt-2 flex flex-wrap gap-2">
+          <legend className="sr-only">Service category</legend>
+          <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&>*]:shrink-0 [&>*]:whitespace-nowrap">
             {SERVICE_TYPES.map((s) => <SelectionChip key={s} selected={service === s} onClick={() => { setService(s); setSelectedTagIds([]); }}>{s}</SelectionChip>)}
           </div>
         </fieldset>
         {categoryTags.length > 0 && (
           <fieldset className="min-w-0 w-full">
-            <legend className="text-sm font-medium">Tags</legend>
-            <div className="mt-2 flex flex-wrap gap-2">
+            <legend className="sr-only">Tags</legend>
+            <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&>*]:shrink-0 [&>*]:whitespace-nowrap">
               {categoryTags.map((tag) => (
                 <SelectionChip key={tag.id} selected={selectedTagIds.includes(tag.id)}
                   onClick={() => setSelectedTagIds((current) => current.includes(tag.id) ? current.filter((id) => id !== tag.id) : [...current, tag.id])}>
