@@ -39,19 +39,21 @@ export default function Nav() {
       </div>
     </header>
 
-    {user && <nav aria-label="Primary" className="fixed inset-x-0 bottom-0 z-30 mx-auto grid w-full grid-cols-4 border-t border-neutral-200 bg-white/95 px-2 pb-[env(safe-area-inset-bottom)] shadow-[0_-8px_30px_rgba(15,23,42,0.08)] backdrop-blur-md md:bottom-4 md:max-w-lg md:rounded-2xl md:border md:px-3 md:shadow-xl">
+    {/* Shown to everyone (the landing page and Explore are public; My Gigs and Profile ask for sign-in),
+        except on the sign-in / sign-up screens themselves. */}
+    {!pathname?.startsWith("/auth") && <nav aria-label="Primary" className="pointer-events-none fixed inset-x-0 bottom-0 z-30 px-3 pb-[env(safe-area-inset-bottom)]"><div className="pointer-events-auto mx-auto mb-3 grid max-w-md grid-cols-4 gap-1 rounded-3xl bg-brand-900 p-1.5 shadow-xl shadow-brand-900/30 ring-1 ring-white/10">
       {destinations.map(({ label, href, icon }) => {
         const active = href === "/" ? pathname === "/" || pathname === "/location" : pathname === href || pathname.startsWith(`${href}/`);
         return <Link
           key={href}
           href={href}
           aria-current={active ? "page" : undefined}
-          className={`mx-0.5 my-1 flex min-h-14 flex-col items-center justify-center gap-0.5 rounded-2xl px-1 text-xs font-semibold transition-colors ${active ? "bg-brand-800 text-white" : "text-neutral-700 hover:bg-neutral-50 hover:text-neutral-900"}`}
+          className={`flex min-h-14 flex-col items-center justify-center gap-0.5 rounded-2xl px-1 text-xs font-semibold transition-colors ${active ? "bg-brand-100 text-brand-800" : "text-brand-200 hover:bg-white/10 hover:text-white"}`}
         >
           <Icon name={icon} className="h-6 w-6" strokeWidth={active ? 2.4 : 2} />
           <span>{label}</span>
         </Link>;
       })}
-    </nav>}
+    </div></nav>}
   </>;
 }
