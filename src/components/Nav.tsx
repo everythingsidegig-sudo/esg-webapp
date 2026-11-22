@@ -73,7 +73,7 @@ export default function Nav() {
                 active ? "-translate-y-[22px] scale-[1.12] border-[#f7f5fa] bg-white text-[#5b2ca0] shadow-md" : "border-transparent bg-transparent text-[#a996c4]"
               }`}
             >
-              <Icon name={icon} className="h-[22px] w-[22px]" strokeWidth={active ? 2.4 : 2} />
+              <Icon name={icon} className="h-6 w-6" strokeWidth={active ? 2.4 : 2} />
             </span>
             {/* Labels are pinned to the same offset with the same size and weight, so they stay on one straight baseline. */}
             <span
