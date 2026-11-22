@@ -3,7 +3,7 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import MyOfferedServices from "@/components/MyOfferedServices";
+import HowItWorks from "@/components/HowItWorks";
 import { hasPromptedForLocation, loadJourneyLocation, markLocationPrompted } from "@/lib/location";
 
 // Both landing options are public entry points. Authentication is requested
@@ -63,19 +63,7 @@ function HomeInner() {
           <span aria-hidden="true" className="ml-auto text-xl text-accent-700 transition group-hover:translate-x-0.5">›</span>
         </Link>
       </div>
-      <MyOfferedServices />
-      <section aria-label="How it works" className="rounded-2xl bg-white p-5 shadow-sm">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-500">How it works</h2>
-        <ol className="mt-3 grid grid-cols-3 gap-2 text-center text-sm">
-          {[["1", "Post", "Describe the gig"], ["2", "Match", "Pick your helper"], ["3", "Done", "Rate each other"]].map(([n, title, hint]) => (
-            <li key={n} className="space-y-1">
-              <div className="mx-auto flex h-9 w-9 items-center justify-center rounded-full bg-brand-100 font-bold text-brand-800">{n}</div>
-              <div className="font-medium">{title}</div>
-              <div className="text-xs text-neutral-500">{hint}</div>
-            </li>
-          ))}
-        </ol>
-      </section>
+      <HowItWorks />
     </div>
   );
 }

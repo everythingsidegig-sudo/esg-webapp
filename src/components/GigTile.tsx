@@ -18,11 +18,14 @@ export default function GigTile({
   onView,
   onRequestAccept,
   onReject,
+  own = false,
 }: {
   gig: GigWithTags;
   onView: () => void;
   onRequestAccept: () => void;
   onReject: () => void;
+  // The viewer posted this gig: shown greyed out and inert -- nobody can accept their own gig.
+  own?: boolean;
 }) {
   // Not a shared hook (deliberately): pointer handling is simple enough to duplicate between
   // this tile and FullGigView, and both need their own useState bound to their own render.
@@ -54,6 +57,22 @@ export default function GigTile({
   }
   const dragX = drag?.x ?? 0;
   const feedback = dragX > 24 ? "accept" : dragX < -24 ? "reject" : null;
+
+  if (own) {
+    return (
+      <div aria-disabled="true" className="relative rounded-xl border border-neutral-200 bg-neutral-100 p-4 opacity-60 grayscale">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs font-medium uppercase tracking-wide text-neutral-500">{gig.service_type}</span>
+          <span className="font-semibold text-neutral-500">{formatMoney(gig.amount)}</span>
+        </div>
+        <div className="mt-1 font-medium text-neutral-600">{gig.title}</div>
+        <div className="mt-1 text-sm text-neutral-500">
+          {gig.location_text} · {gig.scheduled_at ? new Date(gig.scheduled_at).toLocaleString() : "Flexible"} · {priceLabel(gig.price_type)}
+        </div>
+        <p className="mt-2 text-sm font-medium text-neutral-600">This is your gig, so you can&apos;t accept it.</p>
+      </div>
+    );
+  }
 
   return (
     <div

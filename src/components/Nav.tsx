@@ -12,7 +12,7 @@ export default function Nav() {
   const pathname = usePathname();
 
   const destinations = [
-    { label: "Home", href: "/location", icon: "M3 11l9-8 9 8M5 10v10h5v-6h4v6h5V10" },
+    { label: "Home", href: "/", icon: "M3 11l9-8 9 8M5 10v10h5v-6h4v6h5V10" },
     { label: "Explore", href: "/browse", icon: "M11 4a7 7 0 100 14 7 7 0 000-14zM21 21l-5-5" },
     { label: "My Gigs", href: "/my-gigs", icon: "M8 3h8l1 2h3v16H4V5h3l1-2zM8 11h8M8 15h5" },
     { label: "Profile", href: "/profile", icon: "M12 12a4 4 0 100-8 4 4 0 000 8zM4 21c0-4 4-6 8-6s8 2 8 6" },
@@ -40,7 +40,7 @@ export default function Nav() {
 
     {user && <nav aria-label="Primary" className="fixed inset-x-0 bottom-0 z-30 mx-auto grid w-full grid-cols-4 border-t border-neutral-200 bg-white/95 px-2 pb-[env(safe-area-inset-bottom)] shadow-[0_-8px_30px_rgba(15,23,42,0.08)] backdrop-blur-md md:bottom-4 md:max-w-lg md:rounded-2xl md:border md:px-3 md:shadow-xl">
       {destinations.map(({ label, href, icon }) => {
-        const active = pathname === href || (href !== "/location" && pathname.startsWith(`${href}/`));
+        const active = href === "/" ? pathname === "/" || pathname === "/location" : pathname === href || pathname.startsWith(`${href}/`);
         return <Link
           key={href}
           href={href}
