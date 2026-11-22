@@ -55,19 +55,33 @@ export default function Nav() {
 
     {/* Shown to everyone, on every screen (including sign-in and sign-up): the landing page and Explore are
         public, and My Gigs and Profile send a signed-out visitor to sign in with the bar still in view. */}
-    <nav aria-label="Primary" className="pointer-events-none fixed inset-x-0 bottom-0 z-30 px-3 pb-[env(safe-area-inset-bottom)]"><div className="pointer-events-auto mx-auto mb-3 grid max-w-md grid-cols-4 gap-1 rounded-3xl bg-brand-900 p-1.5 shadow-xl shadow-brand-900/30 ring-1 ring-white/10">
-      {destinations.map(({ label, href, icon }) => {
-        const active = href === "/" ? currentPath === "/" || currentPath === "/location" : currentPath === href || !!currentPath?.startsWith(`${href}/`);
-        return <Link
-          key={href}
-          href={href}
-          aria-current={active ? "page" : undefined}
-          className={`flex min-h-14 flex-col items-center justify-center gap-0.5 rounded-2xl px-1 text-xs font-semibold transition-colors ${active ? "bg-brand-100 text-brand-800" : "text-brand-200 hover:bg-white/10 hover:text-white"}`}
-        >
-          <Icon name={icon} className="h-6 w-6" strokeWidth={active ? 2.4 : 2} />
-          <span>{label}</span>
-        </Link>;
-      })}
-    </div></nav>
+    <nav aria-label="Primary" className="pointer-events-none fixed inset-x-0 bottom-0 z-30 overflow-visible px-3 pb-[env(safe-area-inset-bottom)]">
+      {/* Floating plum bar. overflow-visible (here and on every tab) lets the active icon bubble pop up past the top edge. */}
+      <div className="pointer-events-auto mx-auto mb-3 flex h-[68px] max-w-md overflow-visible rounded-[24px] bg-[#2b1449] shadow-xl shadow-[#2b1449]/30">
+        {destinations.map(({ label, href, icon }) => {
+          const active = href === "/" ? currentPath === "/" || currentPath === "/location" : currentPath === href || !!currentPath?.startsWith(`${href}/`);
+          return <Link
+            key={href}
+            href={href}
+            aria-current={active ? "page" : undefined}
+            className="relative block h-[68px] flex-1 overflow-visible"
+          >
+            {/* Every tab has the same 42px circle in the same spot. Active: it lifts and grows on a spring curve, turns
+                white with a purple icon, and gets a page-coloured ring that reads as a cut-out notch in the bar. */}
+            <span
+              className={`absolute left-1/2 top-[3px] -ml-[21px] flex h-[42px] w-[42px] items-center justify-center rounded-full border-4 transition-[transform,background-color,border-color,color] duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] motion-reduce:transition-none ${
+                active ? "-translate-y-[22px] scale-[1.12] border-[#f7f5fa] bg-white text-[#5b2ca0] shadow-md" : "border-transparent bg-transparent text-[#a996c4]"
+              }`}
+            >
+              <Icon name={icon} className="h-[22px] w-[22px]" strokeWidth={active ? 2.4 : 2} />
+            </span>
+            {/* Labels are pinned to the same offset with the same size and weight, so they stay on one straight baseline. */}
+            <span
+              className={`absolute inset-x-0 bottom-[9px] text-center text-xs font-semibold leading-none transition-colors ${active ? "text-white [text-shadow:0_0_8px_rgba(255,255,255,0.55)]" : "text-[#a996c4]"}`}
+            >{label}</span>
+          </Link>;
+        })}
+      </div>
+    </nav>
   </>;
 }
