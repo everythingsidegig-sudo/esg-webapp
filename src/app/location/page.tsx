@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import Icon from "@/components/Icon";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { postcodeCandidates } from "@/lib/zip-location";
 import { resolveAreaQuery } from "@/lib/area-lookup";
@@ -194,12 +195,12 @@ function LocationEntryInner({ next }: { next: string | null }) {
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         <Link href="/need-help" className="flex min-h-36 flex-col items-start justify-center rounded-2xl border border-neutral-200 bg-white p-5 text-left shadow-sm transition hover:border-brand-200 hover:shadow-md">
-          <div className="text-3xl">🙋</div>
+          <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-100 text-brand-700"><Icon name="hand" className="h-6 w-6" /></span>
           <div className="mt-3 font-bold">I Need Help</div>
           <div className="mt-1 text-sm leading-5 text-neutral-500">Post a gig or find a helper.</div>
         </Link>
         <button type="button" onClick={browseGigs} aria-label="Help & Earn Money" className="flex min-h-36 flex-col items-start justify-center rounded-2xl border border-neutral-200 bg-white p-5 text-left shadow-sm transition hover:border-brand-200 hover:shadow-md">
-          <div className="text-3xl">💪</div>
+          <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-100 text-brand-700"><Icon name="wallet" className="h-6 w-6" /></span>
           <div className="mt-3 font-bold">Help &amp; Earn Money</div>
           <div className="mt-1 text-sm leading-5 text-neutral-500">Browse gigs nearby.</div>
         </button>

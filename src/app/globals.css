@@ -29,6 +29,8 @@
   --color-brand-700: #6d28d9;
   --color-brand-800: #5b21b6;
   --color-brand-900: #3f1a7a;
+  /* Secondary text was a faint grey; this keeps it clearly legible on white (about 7:1). */
+  --color-neutral-500: #52525b;
   --color-accent-50: #fff8eb;
   --color-accent-100: #ffeccc;
   --color-accent-400: #ffb02e;
@@ -45,6 +47,7 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  line-height: 1.5;
   overflow-x: hidden;
 }
 

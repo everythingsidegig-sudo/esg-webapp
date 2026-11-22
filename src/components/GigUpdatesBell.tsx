@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/lib/auth-context";
+import Icon from "@/components/Icon";
 import type { Notification } from "@/lib/database.types";
 
 // Every update opens its gig -- the permanent place to manage it. A new
@@ -95,13 +96,13 @@ export default function GigUpdatesBell() {
     <div className="relative" ref={rootRef}>
       <button
         onClick={() => setOpen((o) => !o)}
-        className="relative flex h-11 w-11 items-center justify-center rounded-full text-xl hover:bg-neutral-100"
+        className="relative flex h-11 w-11 items-center justify-center rounded-full text-neutral-800 hover:bg-neutral-100"
         aria-label={unreadCount > 0 ? `Gig Updates, ${unreadCount} unread` : "Gig Updates"}
         aria-expanded={open}
       >
-        <span aria-hidden="true">🤝</span>
+        <Icon name="bell" className="h-6 w-6" />
         {unreadCount > 0 && (
-          <span aria-hidden="true" className="absolute right-0.5 top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-xs text-white">
+          <span aria-hidden="true" className="absolute -right-0.5 -top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-xs font-bold text-white ring-2 ring-white">
             {unreadCount > 9 ? "9+" : unreadCount}
           </span>
         )}

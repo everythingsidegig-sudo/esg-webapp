@@ -116,6 +116,7 @@ async function component(path, name, overrides = {}) {
     "@/components/ProfilePhoto": { default: "profile-photo" },
     "@/components/OfferedServices": { default: "offered-services" },
     "@/components/HowItWorks": { default: "how-it-works" },
+    "@/components/Icon": { default: "icon" },
     "@/components/SwipeCard": { default: "swipe-card" },
     "@/components/ProofPhotos": { default: "proof-photos" },
     "@/components/GigProgress": { default: "gig-progress" },
@@ -4420,7 +4421,7 @@ test("My Gigs fetches gigs addressed to the helper (no claim needed) and marks t
 
 test("A request notification opens the request panel; other notifications still open their gig or proposals", async () => {
   const bell = await loadLib("src/components/GigUpdatesBell.tsx", {
-    react: {}, "next/navigation": {}, "@/lib/supabase/client": {}, "@/lib/auth-context": {}, "react/jsx-runtime": { jsx() {}, jsxs() {} },
+    react: {}, "next/navigation": {}, "@/lib/supabase/client": {}, "@/lib/auth-context": {}, "@/components/Icon": {}, "react/jsx-runtime": { jsx() {}, jsxs() {} },
   });
   assert.equal(bell.notificationHref({ gig_id: "g1", type: "gig_request" }), "/gigs/g1#request");
   assert.equal(bell.notificationHref({ gig_id: "g1", type: "claim_received" }), "/gigs/g1#proposals");
@@ -4999,7 +5000,7 @@ test("Gig page: the chat is told when the price can be negotiated (helper chosen
 
 test("A price notification opens the chat where the proposal waits; other notification links are unchanged", async () => {
   const bell = await loadLib("src/components/GigUpdatesBell.tsx", {
-    react: {}, "next/navigation": {}, "@/lib/supabase/client": {}, "@/lib/auth-context": {}, "react/jsx-runtime": { jsx() {}, jsxs() {} },
+    react: {}, "next/navigation": {}, "@/lib/supabase/client": {}, "@/lib/auth-context": {}, "@/components/Icon": {}, "react/jsx-runtime": { jsx() {}, jsxs() {} },
   });
   for (const type of ["price_proposed", "price_accepted", "price_declined", "price_withdrawn"]) assert.equal(bell.notificationHref({ gig_id: "g1", type }), "/gigs/g1#messages", type);
   assert.equal(bell.notificationHref({ gig_id: "g1", type: "gig_request" }), "/gigs/g1#request");
@@ -6725,15 +6726,16 @@ test("Defect 003/004/006: Home has the two branches and the three-step How it wo
   assert.doesNotMatch(src, /MyOfferedServices/, "the Services panel is gone from the landing page");
 });
 
-test("Defect 004: How it works has exactly the three agreed steps, in order, with illustrations and arrows between them", async () => {
+test("Defect 004 / UI spec: How it Works is a vertical list of the three agreed steps, numbered in the title, one icon each", async () => {
   const app = await component("src/components/HowItWorks.tsx", "HowItWorks");
   const tree = app.render();
+  assert.equal(textOf(nodes(tree, (node) => node.type === "h2")[0]), "How it Works", "Title Case header, not all caps");
   const headings = nodes(tree, (node) => node.type === "h3").map(textOf);
-  assert.deepEqual(headings, ["Post or Browse", "Connect", "Complete & Review"]);
+  assert.deepEqual(headings, ["1. Post or Browse", "2. Connect", "3. Complete & Review"]);
   const text = textOf(tree);
   for (const line of ["Post a task or find gigs nearby.", "Choose a helper or get selected.", "Finish the gig and share feedback."]) assert.ok(text.includes(line), line);
-  assert.equal(nodes(tree, (node) => typeof node.type === "function").length, 3, "one illustration per step");
-  assert.equal(nodes(tree, (node) => node.type === "span" && node.props.children === "→").length, 2, "an arrow between the steps");
+  assert.equal(nodes(tree, (node) => node.type === "icon").length, 3, "one flat icon per step");
+  assert.equal(nodes(tree, (node) => node.type === "ol")[0].props.className.includes("grid-cols"), false, "stacked vertically, not a cramped row");
 });
 
 test("Defect 005: your own gig is greyed out and inert in Help & Earn; other people's gigs stay selectable", async () => {
