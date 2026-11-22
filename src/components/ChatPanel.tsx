@@ -48,6 +48,7 @@ export default function ChatPanel({
   const [proposals, setProposals] = useState<PriceProposal[]>([]);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
   const [priceFormOpen, setPriceFormOpen] = useState(false);
   const [priceDraft, setPriceDraft] = useState("");
   const [priceBusy, setPriceBusy] = useState<string | null>(null);
@@ -101,7 +102,7 @@ export default function ChatPanel({
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "chat_messages", filter: `gig_id=eq.${gigId}` },
         (payload) => {
-          setMessages((prev) => [...prev, payload.new as ChatMessage]);
+          setMessages((prev) => prev.some((m) => m.id === (payload.new as ChatMessage).id) ? prev : [...prev, payload.new as ChatMessage]);
           if ((payload.new as ChatMessage).sender_id !== currentUserId) void markRead();
         }
       )
@@ -136,13 +137,18 @@ export default function ChatPanel({
   async function send() {
     if (!draft.trim() || sending) return;
     setSending(true);
-    const { error } = await supabase.from("chat_messages").insert({
+    setSendError(null);
+    const { data, error } = await supabase.from("chat_messages").insert({
       gig_id: gigId,
       sender_id: currentUserId,
       body: draft.trim(),
-    });
+    }).select().single();
     setSending(false);
-    if (!error) setDraft("");
+    if (error) { setSendError("Your message didn't send. Check your connection and try again."); return; }
+    setDraft("");
+    // Show your own message right away instead of waiting for the realtime feed (which may be
+    // delayed or unavailable); the realtime copy of the same row is ignored by id.
+    if (data) setMessages((prev) => prev.some((m) => m.id === (data as ChatMessage).id) ? prev : [...prev, data as ChatMessage]);
   }
 
   const open = !!negotiation?.open && !readOnly && !unavailable;
@@ -224,10 +230,10 @@ export default function ChatPanel({
                   <section
                     aria-label={`Price proposal, round ${proposal.round} of ${MAX_PRICE_ROUNDS}`}
                     className={`w-full max-w-[85%] rounded-2xl border bg-white p-3.5 shadow-sm ${
-                      status === "accepted" ? "border-emerald-300" : "border-neutral-200"
+                      status === "accepted" ? "border-brand-300" : "border-neutral-200"
                     }`}
                   >
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-700">
                       Price proposal · Round {proposal.round} of {MAX_PRICE_ROUNDS}
                     </p>
                     <p className="mt-1 flex flex-wrap items-baseline gap-x-2 text-xl font-semibold text-neutral-900">
@@ -240,7 +246,7 @@ export default function ChatPanel({
                       <div className="mt-3 flex gap-2">
                         <button type="button" disabled={busy} onClick={() => void answer(proposal, true)}
                           aria-label={`Accept ${formatMoney(proposal.amount)}`}
-                          className={`${button} flex-1 bg-emerald-600 text-white shadow-sm hover:bg-emerald-700`}>Accept</button>
+                          className={`${button} flex-1 bg-brand-600 text-white shadow-sm hover:bg-brand-700`}>Accept</button>
                         <button type="button" disabled={busy} onClick={() => void answer(proposal, false)}
                           aria-label={`Decline ${formatMoney(proposal.amount)}`}
                           className={`${button} flex-1 border border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-50`}>Decline</button>
@@ -254,7 +260,7 @@ export default function ChatPanel({
                       </div>
                     )}
                     {status === "closed" && <p className="mt-2 text-sm text-neutral-500">The price can no longer be changed.</p>}
-                    {status === "accepted" && <p className="mt-2 text-sm font-medium text-emerald-700">✓ Accepted. The agreed price is {formatMoney(proposal.amount)}.</p>}
+                    {status === "accepted" && <p className="mt-2 text-sm font-medium text-brand-700">✓ Accepted. The agreed price is {formatMoney(proposal.amount)}.</p>}
                     {status === "declined" && <p className="mt-2 text-sm text-neutral-500">Declined</p>}
                     {status === "withdrawn" && <p className="mt-2 text-sm text-neutral-500">Withdrawn</p>}
                   </section>
@@ -276,7 +282,7 @@ export default function ChatPanel({
                 <div
                   className={`max-w-[80%] whitespace-pre-wrap break-words px-3.5 py-2 text-[15px] leading-snug ${
                     mine
-                      ? `bg-emerald-600 text-white shadow-sm rounded-2xl ${joinsNext ? "" : "rounded-br-md"}`
+                      ? `bg-brand-600 text-white shadow-sm rounded-2xl ${joinsNext ? "" : "rounded-br-md"}`
                       : `border border-neutral-200 bg-white text-neutral-900 shadow-sm rounded-2xl ${joinsNext ? "" : "rounded-bl-md"}`
                   }`}
                 >
@@ -300,7 +306,7 @@ export default function ChatPanel({
           {priceError && <p role="alert" className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{priceError}</p>}
           {!priceFormOpen && view.canPropose && (
             <button type="button" onClick={() => { setPriceFormOpen(true); setPriceError(null); }}
-              className="flex min-h-11 w-full items-center justify-center gap-2 rounded-full border border-emerald-600 px-4 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-50">
+              className="flex min-h-11 w-full items-center justify-center gap-2 rounded-full border border-brand-600 px-4 text-sm font-semibold text-brand-700 transition hover:bg-brand-50">
               <span aria-hidden="true">💶</span>
               {view.pendingFromOther ? "Counter with another price" : "Propose a new price"}
               <span className="text-xs font-normal text-neutral-500">({view.remaining} of {MAX_PRICE_ROUNDS} left)</span>
@@ -314,9 +320,9 @@ export default function ChatPanel({
               <input id="new-price" inputMode="decimal" autoComplete="off" value={priceDraft}
                 onChange={(e) => { setPriceDraft(e.target.value); setPriceError(null); }}
                 placeholder={String(agreedAmount)}
-                className="min-h-11 w-full rounded-xl border border-neutral-300 bg-neutral-50 px-4 text-[15px] outline-none transition focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-100" />
+                className="min-h-11 w-full rounded-xl border border-neutral-300 bg-neutral-50 px-4 text-[15px] outline-none transition focus:border-brand-500 focus:bg-white focus:ring-2 focus:ring-brand-100" />
               <div className="flex gap-2">
-                <button type="submit" disabled={!priceDraft.trim() || !!priceBusy} className={`${button} flex-1 bg-emerald-600 text-white shadow-sm hover:bg-emerald-700`}>
+                <button type="submit" disabled={!priceDraft.trim() || !!priceBusy} className={`${button} flex-1 bg-brand-600 text-white shadow-sm hover:bg-brand-700`}>
                   {priceBusy === "propose" ? "Sending…" : "Send proposal"}
                 </button>
                 <button type="button" onClick={() => { setPriceFormOpen(false); setPriceDraft(""); setPriceError(null); }}
@@ -332,6 +338,7 @@ export default function ChatPanel({
         </div>
       )}
 
+      {sendError && !readOnly && <p role="alert" className="border-t border-neutral-200 bg-white px-4 pt-2 text-sm text-red-600">{sendError}</p>}
       {!readOnly ? (
         <form
           onSubmit={(event) => { event.preventDefault(); void send(); }}
@@ -344,13 +351,13 @@ export default function ChatPanel({
             aria-label="Message"
             autoComplete="off"
             enterKeyHint="send"
-            className="min-h-11 flex-1 rounded-full border border-neutral-300 bg-neutral-50 px-4 text-[15px] outline-none transition placeholder:text-neutral-400 focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-100"
+            className="min-h-11 flex-1 rounded-full border border-neutral-300 bg-neutral-50 px-4 text-[15px] outline-none transition placeholder:text-neutral-400 focus:border-brand-500 focus:bg-white focus:ring-2 focus:ring-brand-100"
           />
           <button
             type="submit"
             disabled={!canSend}
             aria-label="Send message"
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-neutral-200 disabled:text-neutral-400 disabled:shadow-none"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-brand-600 text-white shadow-sm transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-neutral-200 disabled:text-neutral-400 disabled:shadow-none"
           >
             <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M5 12h14" />

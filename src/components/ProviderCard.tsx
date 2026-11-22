@@ -66,27 +66,27 @@ export default function ProviderCard({
     <div
       onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={settle} onPointerCancel={() => setDrag(null)} onClick={tapToView}
       style={{ touchAction: "pan-y", transform: drag ? `translateX(${dragX}px) rotate(${dragX / 30}deg)` : undefined }}
-      className="relative cursor-pointer rounded-xl border border-neutral-200 bg-white p-4 shadow-sm"
+      className="relative cursor-pointer rounded-2xl border border-neutral-200 bg-white p-4 shadow-md shadow-brand-900/5"
     >
       {feedback && (
         <div className={`pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 bg-white px-4 py-1.5 text-base font-bold uppercase tracking-wide shadow-md ${
-          feedback === "send" ? "border-emerald-500 text-emerald-600" : "border-red-500 text-red-600"
+          feedback === "send" ? "border-brand-500 text-brand-600" : "border-red-500 text-red-600"
         }`}>
           {feedback === "send" ? "Send Gig" : "Skip"}
         </div>
       )}
       <div className="flex items-center gap-3">
         {profile.photo_url ? (
-          <img src={profile.photo_url} alt="" className="h-20 w-20 shrink-0 rounded-full object-cover" />
+          <img src={profile.photo_url} alt="" className="h-20 w-20 shrink-0 rounded-full object-cover ring-2 ring-brand-200" />
         ) : (
-          <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-full bg-neutral-200 text-2xl">👤</div>
+          <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-full bg-brand-100 text-2xl">👤</div>
         )}
         <div className="min-w-0 flex-1">
           <div className="font-medium">@{profile.username}</div>
           <div className="text-sm text-neutral-500">
             {distanceKm != null ? `${distanceKm.toFixed(1)} km away` : "Distance: Not available"}
           </div>
-          <div className="mt-1 text-sm text-neutral-600">{womLabel} WOM · {completedLabel} gigs completed</div>
+          <div className="mt-1 inline-flex rounded-full bg-brand-50 px-2.5 py-0.5 text-sm font-medium text-brand-800">{womLabel} WOM · {completedLabel} gigs completed</div>
           <div className="mt-0.5 text-xs text-neutral-500">ID Verified: Not available · Typical rate: Not available</div>
         </div>
       </div>
@@ -98,7 +98,7 @@ export default function ProviderCard({
       <div className="mt-3 flex gap-2">
         <button type="button" onClick={(e) => { e?.stopPropagation(); onSkip(); }} aria-label="Skip" className="flex-1 rounded-lg border border-neutral-300 bg-white py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50">Skip (✕)</button>
         <button type="button" onClick={(e) => { e?.stopPropagation(); onView(); }} className="flex-1 rounded-lg border border-neutral-300 bg-white py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50">View Full Profile</button>
-        <button type="button" onClick={(e) => { e?.stopPropagation(); onSendGig(); }} className="flex-1 rounded-lg bg-emerald-600 py-2 text-sm font-medium text-white hover:bg-emerald-700">Send Gig</button>
+        <button type="button" onClick={(e) => { e?.stopPropagation(); onSendGig(); }} className="flex-1 rounded-lg bg-brand-600 py-2 text-sm font-medium text-white hover:bg-brand-700">Send Gig</button>
       </div>
     </div>
   );

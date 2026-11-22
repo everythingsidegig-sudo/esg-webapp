@@ -92,13 +92,13 @@ export default function ForgotPassword() {
         <input id="recovery-code" inputMode="numeric" autoComplete="one-time-code" maxLength={8} required value={code}
           onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} className="w-full rounded-lg border border-neutral-300 px-3 py-2 tracking-widest" />
         {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
-        <button type="submit" disabled={submitting} className="w-full rounded-lg bg-emerald-600 py-2.5 font-medium text-white disabled:opacity-60">
+        <button type="submit" disabled={submitting} className="w-full rounded-lg bg-brand-600 py-2.5 font-medium text-white disabled:opacity-60">
           {submitting ? "Verifying…" : "Verify"}
         </button>
-        <button type="button" disabled={submitting} onClick={() => void resend()} className="block w-full text-center text-sm text-emerald-700">
+        <button type="button" disabled={submitting} onClick={() => void resend()} className="block w-full text-center text-sm text-brand-700">
           Resend code
         </button>
-        <p className="text-center text-sm"><Link href="/auth/sign-in" className="touch-link font-medium text-emerald-700">Back to Sign In</Link></p>
+        <p className="text-center text-sm"><Link href="/auth/sign-in" className="touch-link font-medium text-brand-700">Back to Sign In</Link></p>
       </form>
     );
   }
@@ -110,9 +110,9 @@ export default function ForgotPassword() {
     <input id="recovery-email" type="email" autoComplete="email" required value={email}
       onChange={(e) => setEmail(e.target.value)} className="w-full rounded-lg border border-neutral-300 px-3 py-2" />
     {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
-    <button type="submit" disabled={submitting} className="w-full rounded-lg bg-emerald-600 py-2.5 font-medium text-white disabled:opacity-60">
+    <button type="submit" disabled={submitting} className="w-full rounded-lg bg-brand-600 py-2.5 font-medium text-white disabled:opacity-60">
       {submitting ? "Sending…" : "Send code"}
     </button>
-    <p className="text-center text-sm"><Link href="/auth/sign-in" className="touch-link font-medium text-emerald-700">Back to Sign In</Link></p>
+    <p className="text-center text-sm"><Link href="/auth/sign-in" className="touch-link font-medium text-brand-700">Back to Sign In</Link></p>
   </form>;
 }

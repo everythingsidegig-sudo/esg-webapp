@@ -7,6 +7,7 @@ import AuthGuard from "@/components/AuthGuard";
 import { useAuth } from "@/lib/auth-context";
 import { createClient } from "@/lib/supabase/client";
 import StatusBadge from "@/components/StatusBadge";
+import SwipeCard from "@/components/SwipeCard";
 import TagChip from "@/components/TagChip";
 import { gigTagNames } from "@/lib/tags";
 import {
@@ -73,7 +74,7 @@ function posterCard({ gig, proposals, helper, requestedTo }: PosterRow, savedNon
         {helper && section !== "open" && <p className="mt-2 text-sm text-neutral-600">Helper: @{helper}{agreedLine(gig) ? ` · ${agreedLine(gig)}` : ""}</p>}
         {gig.helper_withdrawn_at && <p className="mt-2 text-sm text-amber-700">Your helper withdrew. You can post it again for everyone.</p>}
         {gig.helper_removed_at && <p className="mt-2 text-sm text-amber-700">You removed your helper. You can post it again for everyone.</p>}
-        {gig.requested_helper_id && !gig.selected_provider_id && !gig.helper_withdrawn_at && !gig.helper_removed_at && <p className="mt-2 text-sm text-emerald-800">🔒 Private request{requestedTo ? ` to @${requestedTo}` : ""}</p>}
+        {gig.requested_helper_id && !gig.selected_provider_id && !gig.helper_withdrawn_at && !gig.helper_removed_at && <p className="mt-2 text-sm text-brand-800">🔒 Private request{requestedTo ? ` to @${requestedTo}` : ""}</p>}
         {tagChips(gig)}
       </Link>
       {section === "saved_non_public" && (
@@ -89,14 +90,14 @@ function posterCard({ gig, proposals, helper, requestedTo }: PosterRow, savedNon
                   {(request.state === "pending" || request.state === "interested") && (
                     <button type="button" disabled={savedNonPublic.busy === request.id}
                       onClick={() => savedNonPublic.onAccept(request.id)}
-                      className="shrink-0 rounded-lg bg-emerald-600 px-3 py-1 text-xs font-medium text-white disabled:opacity-60">Accept</button>
+                      className="shrink-0 rounded-lg bg-brand-600 px-3 py-1 text-xs font-medium text-white disabled:opacity-60">Accept</button>
                   )}
                 </li>
               ))}
             </ul>
           )}
           <div className="flex gap-3 pt-1">
-            <Link href={`/post/find-helpers?gig=${gig.id}`} className="touch-link text-sm font-medium text-emerald-700">Resume Finding Helpers</Link>
+            <Link href={`/post/find-helpers?gig=${gig.id}`} className="touch-link text-sm font-medium text-brand-700">Resume Finding Helpers</Link>
             <button type="button" disabled={savedNonPublic.busy === gig.id} onClick={() => savedNonPublic.onCancel(gig.id)}
               className="text-sm font-medium text-red-700 disabled:opacity-60">Cancel</button>
           </div>
@@ -105,38 +106,48 @@ function posterCard({ gig, proposals, helper, requestedTo }: PosterRow, savedNon
       <div className="flex items-center justify-between gap-3 border-t border-neutral-100 px-4">
         {section === "open"
           ? proposals > 0
-            ? <Link href={`/gigs/${gig.id}#proposals`} className="touch-link text-sm font-semibold text-emerald-700">{proposalCountLabel(proposals)}</Link>
+            ? <Link href={`/gigs/${gig.id}#proposals`} className="touch-link text-sm font-semibold text-brand-700">{proposalCountLabel(proposals)}</Link>
             : <span className="text-sm text-neutral-500">No proposals yet</span>
           : <span />}
-        <Link href={`/gigs/${gig.id}`} className="touch-link text-sm font-medium text-emerald-700">View gig</Link>
+        <Link href={`/gigs/${gig.id}`} className="touch-link text-sm font-medium text-brand-700">View gig</Link>
       </div>
     </div>
   );
 }
 
-function receivedRequestCard({ request, gig, posterName }: ReceivedRequestRow, busy: string | null, onRespond: (requestId: string, interested: boolean) => void) {
+function receivedRequestCard({ request, gig, posterName }: ReceivedRequestRow, busy: string | null, onRespond: (requestId: string, interested: boolean) => void, onLater?: (requestId: string) => void) {
   return (
-    <div key={request.id} className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="truncate font-medium">{gig.title}</div>
-          <div className="mt-0.5 text-sm text-neutral-500">{gigMeta(gig)}</div>
+    // Swipe right = Interested, left = Decline (only while it is pending and not mid-request). The
+    // buttons below do the same thing, so swiping is a shortcut and never the only way.
+    <SwipeCard key={request.id} enabled={request.state === "pending" && busy !== request.id}
+      onSwipeRight={() => onRespond(request.id, true)} onSwipeLeft={() => onRespond(request.id, false)}
+      rightLabel="Interested" leftLabel="Decline" className="rounded-xl border border-neutral-200 bg-white shadow-sm">
+      <Link href={`/gigs/${gig.id}`} className="block p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="truncate font-medium">{gig.title}</div>
+            <div className="mt-0.5 text-sm text-neutral-500">{gigMeta(gig)}</div>
+          </div>
+          <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${TONES[request.state === "pending" ? "pending" : request.state === "declined" ? "bad" : "neutral"]}`}>
+            {REQUEST_STATE_LABEL[request.state]}
+          </span>
         </div>
-        <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${TONES[request.state === "pending" ? "pending" : request.state === "declined" ? "bad" : "neutral"]}`}>
-          {REQUEST_STATE_LABEL[request.state]}
-        </span>
-      </div>
-      {posterName && <p className="mt-2 text-sm text-neutral-600">Sent by @{posterName}</p>}
-      <p className="mt-1 text-sm text-neutral-600">Offered: {formatMoney(gig.amount)} · {gig.price_type === "negotiable" ? "Negotiable" : "Fixed price"}</p>
+        {posterName && <p className="mt-2 text-sm text-neutral-600">Sent by @{posterName}</p>}
+        <p className="mt-1 text-sm text-neutral-600">Offered: {formatMoney(gig.amount)} · {gig.price_type === "negotiable" ? "Negotiable" : "Fixed price"}</p>
+      </Link>
       {request.state === "pending" && (
-        <div className="mt-3 flex gap-2">
+        <div className="flex gap-2 px-4 pb-4">
           <button type="button" disabled={busy === request.id} onClick={() => onRespond(request.id, false)}
             className="flex-1 rounded-lg border border-neutral-300 bg-white py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-60">Decline</button>
+          {onLater && (
+            <button type="button" disabled={busy === request.id} onClick={() => onLater(request.id)}
+              className="flex-1 rounded-lg border border-neutral-300 bg-white py-2 text-sm font-medium text-neutral-500 hover:bg-neutral-50 disabled:opacity-60">Not now</button>
+          )}
           <button type="button" disabled={busy === request.id} onClick={() => onRespond(request.id, true)}
-            className="flex-1 rounded-lg bg-emerald-600 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60">Interested</button>
+            className="flex-1 rounded-lg bg-brand-600 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60">Interested</button>
         </div>
       )}
-    </div>
+    </SwipeCard>
   );
 }
 
@@ -156,11 +167,11 @@ function helperCard({ gig, claimState, offer, customer }: HelperRow, userId: str
         {customer && <p className="mt-2 text-sm text-neutral-600">{section === "requests" ? "Request from" : "Customer:"} @{customer}</p>}
         {section === "requests" && <p className="mt-1 text-sm text-neutral-600">Offered: {formatMoney(gig.amount)} · {gig.price_type === "negotiable" ? "Negotiable" : "Fixed price"}</p>}
         {offer != null && claimState === "pending" && <p className="mt-1 text-sm text-neutral-600">Your offer: {formatMoney(offer)}</p>}
-        {gig.selected_provider_id === userId && agreedLine(gig) && <p className="mt-1 text-sm font-medium text-emerald-700">{agreedLine(gig)}</p>}
+        {gig.selected_provider_id === userId && agreedLine(gig) && <p className="mt-1 text-sm font-medium text-brand-700">{agreedLine(gig)}</p>}
         {tagChips(gig)}
       </Link>
       <div className="flex justify-end border-t border-neutral-100 px-4">
-        <Link href={`/gigs/${gig.id}`} className="touch-link text-sm font-medium text-emerald-700">View gig</Link>
+        <Link href={`/gigs/${gig.id}`} className="touch-link text-sm font-medium text-brand-700">View gig</Link>
       </div>
     </div>
   );
@@ -186,6 +197,9 @@ function MyGigsInner() {
   const [receivedRequests, setReceivedRequests] = useState<ReceivedRequestRow[]>([]);
   const [requestBusy, setRequestBusy] = useState<string | null>(null);
   const [requestError, setRequestError] = useState<string | null>(null);
+  // "Not now" sends a waiting request to the back of the deck without answering it. Only remembered
+  // while this page is open: it is a way to look at the next one, not a saved decision.
+  const [setAside, setSetAside] = useState<string[]>([]);
 
   useEffect(() => {
     if (!user) return;
@@ -312,13 +326,13 @@ function MyGigsInner() {
     else { setHelpingLoading(true); setHelpingError(null); setHelpingReload((value) => value + 1); }
   }
 
-  const tabClass = (active: boolean) => `min-h-11 flex-1 rounded-lg px-3 text-sm font-semibold transition-colors ${active ? "bg-white text-emerald-700 shadow-sm" : "text-neutral-500 hover:text-neutral-900"}`;
+  const tabClass = (active: boolean) => `min-h-11 flex-1 rounded-lg px-3 text-sm font-semibold transition-colors ${active ? "bg-white text-brand-700 shadow-sm" : "text-neutral-500 hover:text-neutral-900"}`;
   const createdGig = created ? posted.find((row) => row.gig.id === created) : undefined;
 
   return (
     <div className="mx-auto max-w-2xl space-y-5">
       <h1 className="text-xl font-semibold">My Gigs</h1>
-      {createdGig && <p role="status" className="text-emerald-700">Gig successfully {createdGig.gig.status === "draft" ? "saved as a draft" : "posted"}. It appears below under I Need Help.</p>}
+      {createdGig && <p role="status" className="text-brand-700">Gig successfully {createdGig.gig.status === "draft" ? "saved as a draft" : "posted"}. It appears below under I Need Help.</p>}
       <div role="tablist" aria-label="My Gigs" className="flex gap-1 rounded-xl bg-neutral-100 p-1">
         <button role="tab" aria-selected={tab === "posted"} onClick={() => setTab("posted")} className={tabClass(tab === "posted")}>I Need Help</button>
         <button role="tab" aria-selected={tab === "helping"} onClick={() => setTab("helping")} className={tabClass(tab === "helping")}>I&apos;m Helping</button>
@@ -328,7 +342,7 @@ function MyGigsInner() {
       <div role="tabpanel" className="space-y-6">
         {loading ? <p className="text-neutral-500">Loading gigs…</p> : error ? null : tab === "posted" ? (
           posted.length === 0
-            ? <p className="text-neutral-500">You haven&apos;t posted a gig yet. <Link href="/post" className="touch-link font-medium text-emerald-700">Post a gig</Link></p>
+            ? <p className="text-neutral-500">You haven&apos;t posted a gig yet. <Link href="/post" className="touch-link font-medium text-brand-700">Post a gig</Link></p>
             : POSTER_SECTIONS.map(({ key, label }) => {
               const rows = posted.filter((row) => posterSection(row.gig) === key);
               if (rows.length === 0) return null;
@@ -339,12 +353,31 @@ function MyGigsInner() {
             })
         ) : (
           helping.length === 0 && receivedRequests.length === 0
-            ? <p className="text-neutral-500">You haven&apos;t sent any offers or received any requests yet. <Link href="/browse" className="touch-link font-medium text-emerald-700">Explore gigs</Link></p>
+            ? <p className="text-neutral-500">You haven&apos;t sent any offers or received any requests yet. <Link href="/browse" className="touch-link font-medium text-brand-700">Explore gigs</Link></p>
             : <>
               {receivedRequests.length > 0 && (
                 <section aria-label="Direct Requests" className="space-y-2">
                   <h2 className="text-sm font-semibold text-neutral-500">Direct Requests ({receivedRequests.length})</h2>
-                  {receivedRequests.map((row) => receivedRequestCard(row, requestBusy, (requestId, interested) => void respondRequest(requestId, interested)))}
+                  {/* A deck, like the helper-finding screen: one waiting request at a time, swipe or tap to answer, and
+                      the next one slides up. Answered requests stay listed underneath as plain cards. */}
+                  {(() => {
+                    const answer = (requestId: string, interested: boolean) => void respondRequest(requestId, interested);
+                    const pending = receivedRequests.filter((row) => row.request.state === "pending");
+                    const waiting = [...pending.filter((row) => !setAside.includes(row.request.id)),
+                      ...setAside.flatMap((id) => pending.filter((row) => row.request.id === id))];
+                    const later = (requestId: string) => setSetAside((current) => [...current.filter((id) => id !== requestId), requestId]);
+                    const answered = receivedRequests.filter((row) => row.request.state !== "pending");
+                    return <>
+                      {waiting.length > 0 && <>
+                        <p className="text-center text-sm text-neutral-500">Request 1 of {waiting.length} waiting for your answer</p>
+                        {receivedRequestCard(waiting[0], requestBusy, answer, waiting.length > 1 ? later : undefined)}
+                      </>}
+                      {answered.length > 0 && <>
+                        {waiting.length > 0 && <h3 className="pt-2 text-xs font-semibold uppercase tracking-wide text-neutral-400">Answered</h3>}
+                        {answered.map((row) => receivedRequestCard(row, requestBusy, answer))}
+                      </>}
+                    </>;
+                  })()}
                 </section>
               )}
               {HELPER_SECTIONS.map(({ key, label }) => {

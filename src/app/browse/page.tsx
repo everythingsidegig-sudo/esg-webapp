@@ -53,6 +53,21 @@ function BrowseInner() {
   const [toastIsError, setToastIsError] = useState(false);
   const [lastRejected, setLastRejected] = useState<string | null>(null);
 
+  // The full gig view is an overlay, not a route, so the browser/phone Back button used to skip
+  // straight past it to the previous page. Give it its own history entry: Back closes the
+  // overlay (returning to the gig list); closing it in-app removes the entry it added.
+  const viewingGigId = viewingGig?.id ?? null;
+  useEffect(() => {
+    if (!viewingGigId) return;
+    window.history.pushState({ esgGigView: true }, "");
+    const onPop = () => setViewingGig(null);
+    window.addEventListener("popstate", onPop);
+    return () => {
+      window.removeEventListener("popstate", onPop);
+      if ((window.history.state as { esgGigView?: boolean } | null)?.esgGigView) window.history.back();
+    };
+  }, [viewingGigId]);
+
   useEffect(() => {
     const saved = loadJourneyLocation();
     if (saved.text) {
@@ -266,7 +281,7 @@ function BrowseInner() {
       {lastRejected && !toast && (
         <div role="status" className="fixed inset-x-4 bottom-4 z-50 mx-auto flex max-w-md items-center justify-between gap-3 rounded-lg bg-neutral-900 px-4 py-3 text-sm text-white shadow-lg">
           <span>Skipped.</span>
-          <button type="button" onClick={undoReject} className="font-semibold text-emerald-300 hover:underline">Undo</button>
+          <button type="button" onClick={undoReject} className="font-semibold text-brand-300 hover:underline">Undo</button>
         </div>
       )}
     </div>

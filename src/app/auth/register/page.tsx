@@ -147,7 +147,7 @@ function RegisterInner() {
         </label>
         <p className="text-xs text-neutral-500">After account creation Username cannot be changed.</p>
         {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
-        <button disabled={busy} onClick={() => void continueUsername()} className="w-full rounded-lg bg-emerald-600 py-2.5 font-medium text-white disabled:opacity-60">
+        <button disabled={busy} onClick={() => void continueUsername()} className="w-full rounded-lg bg-brand-600 py-2.5 font-medium text-white disabled:opacity-60">
           {busy ? "Checking…" : "Continue"}
         </button>
       </>}
@@ -163,7 +163,7 @@ function RegisterInner() {
         {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
         <div className="flex gap-3">
           <button disabled={busy} onClick={back} className="rounded-lg border px-4 py-2.5 font-medium">Back</button>
-          <button disabled={busy} onClick={() => void continuePassword()} className="flex-1 rounded-lg bg-emerald-600 py-2.5 font-medium text-white disabled:opacity-60">
+          <button disabled={busy} onClick={() => void continuePassword()} className="flex-1 rounded-lg bg-brand-600 py-2.5 font-medium text-white disabled:opacity-60">
             {busy ? "Saving…" : "Continue"}
           </button>
         </div>
@@ -173,7 +173,7 @@ function RegisterInner() {
         <h1 className="text-xl font-semibold">Profile Photo</h1>
         {photoUrl ? <img src={photoUrl} alt="Profile photo" className="h-24 w-24 rounded-full object-cover" />
           : <div className="flex h-24 w-24 items-center justify-center rounded-full bg-neutral-200 text-2xl">👤</div>}
-        <label className="inline-flex min-h-11 cursor-pointer items-center text-sm font-medium text-emerald-700">
+        <label className="inline-flex min-h-11 cursor-pointer items-center text-sm font-medium text-brand-700">
           {busy ? "Uploading…" : "Add / Choose Photo"}
           <input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy} className="hidden" onChange={(e) => { if (e.target.files?.[0]) void uploadPhoto(e.target.files[0]); }} />
         </label>
@@ -181,7 +181,7 @@ function RegisterInner() {
         {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
         <div className="flex gap-3">
           <button disabled={busy} onClick={back} className="rounded-lg border px-4 py-2.5 font-medium">Back</button>
-          <button disabled={busy || !photoUrl} onClick={() => goTo("phone")} className="flex-1 rounded-lg bg-emerald-600 py-2.5 font-medium text-white disabled:opacity-60">
+          <button disabled={busy || !photoUrl} onClick={() => goTo("phone")} className="flex-1 rounded-lg bg-brand-600 py-2.5 font-medium text-white disabled:opacity-60">
             Continue
           </button>
         </div>
@@ -199,7 +199,7 @@ function RegisterInner() {
             const digits = phone.replace(/\D/g, "");
             if (digits && digits.length !== 10) { setError("Enter a 10-digit phone number."); return; }
             goTo("skills");
-          }} className="flex-1 rounded-lg bg-emerald-600 py-2.5 font-medium text-white disabled:opacity-60">
+          }} className="flex-1 rounded-lg bg-brand-600 py-2.5 font-medium text-white disabled:opacity-60">
             Continue
           </button>
         </div>
@@ -215,7 +215,7 @@ function RegisterInner() {
           <button disabled={busy} onClick={() => {
             if (skills.includes("Other") && !skillsOther.trim()) { setError("Specify your OTHER skill, or remove OTHER."); return; }
             goTo("services");
-          }} className="flex-1 rounded-lg bg-emerald-600 py-2.5 font-medium text-white disabled:opacity-60">
+          }} className="flex-1 rounded-lg bg-brand-600 py-2.5 font-medium text-white disabled:opacity-60">
             Continue
           </button>
         </div>
@@ -231,7 +231,7 @@ function RegisterInner() {
           <button disabled={busy} onClick={() => {
             if (services.includes("Other") && !servicesOther.trim()) { setError("Specify your OTHER service, or remove OTHER."); return; }
             goTo("terms");
-          }} className="flex-1 rounded-lg bg-emerald-600 py-2.5 font-medium text-white disabled:opacity-60">
+          }} className="flex-1 rounded-lg bg-brand-600 py-2.5 font-medium text-white disabled:opacity-60">
             Continue
           </button>
         </div>
@@ -246,7 +246,7 @@ function RegisterInner() {
         {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
         <div className="flex gap-3">
           <button disabled={busy} onClick={back} className="rounded-lg border px-4 py-2.5 font-medium">Back</button>
-          <button disabled={busy || !termsAccepted} onClick={() => void createAccount()} className="flex-1 rounded-lg bg-emerald-600 py-2.5 font-medium text-white disabled:opacity-60">
+          <button disabled={busy || !termsAccepted} onClick={() => void createAccount()} className="flex-1 rounded-lg bg-brand-600 py-2.5 font-medium text-white disabled:opacity-60">
             {busy ? "Creating account…" : "Create Account"}
           </button>
         </div>
@@ -255,7 +255,7 @@ function RegisterInner() {
       {step === "created" && <div className="space-y-4 text-center">
         <h1 className="text-xl font-semibold">Account Created</h1>
         <p className="text-sm text-neutral-600">You&apos;re signed in.</p>
-        <button onClick={() => router.replace(afterRegistration())} className="w-full rounded-lg bg-emerald-600 py-2.5 font-medium text-white">Continue</button>
+        <button onClick={() => router.replace(afterRegistration())} className="w-full rounded-lg bg-brand-600 py-2.5 font-medium text-white">Continue</button>
       </div>}
     </div>
   );

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import ProfilePhoto from "@/components/ProfilePhoto";
 import TagChip from "@/components/TagChip";
 import { profileTagsForCategory } from "@/lib/tags";
 import { resolveSwipe } from "@/lib/swipe";
@@ -66,7 +67,7 @@ export default function FullProviderView({
       >
         {feedback && (
           <div className={`pointer-events-none absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 bg-white px-4 py-1.5 text-base font-bold uppercase tracking-wide shadow-md ${
-            feedback === "send" ? "border-emerald-500 text-emerald-600" : "border-red-500 text-red-600"
+            feedback === "send" ? "border-brand-500 text-brand-600" : "border-red-500 text-red-600"
           }`}>
             {feedback === "send" ? "Send Gig" : "Skip"}
           </div>
@@ -74,11 +75,7 @@ export default function FullProviderView({
 
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-3">
-            {profile.photo_url ? (
-              <img src={profile.photo_url} alt="" className="h-16 w-16 shrink-0 rounded-full object-cover" />
-            ) : (
-              <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-neutral-200 text-xl">👤</div>
-            )}
+            <ProfilePhoto url={profile.photo_url} username={profile.username} sizeClass="h-16 w-16" />
             <div>
               <h2 className="text-xl font-semibold">@{profile.username}</h2>
               <p className="text-sm text-neutral-500">{distanceKm != null ? `${distanceKm.toFixed(1)} km away` : "Distance: Not available"}</p>
@@ -111,11 +108,11 @@ export default function FullProviderView({
 
         <p className="text-sm text-neutral-500">Typical rate: Not available</p>
 
-        <Link href={`/profile/${profile.username}`} className="block text-sm font-medium text-emerald-700 hover:underline">View public profile page →</Link>
+        <Link href={`/profile/${profile.username}`} className="block text-sm font-medium text-brand-700 hover:underline">View public profile page →</Link>
 
         <div className="flex gap-2 pt-1">
           <button type="button" disabled={disabled} onClick={onSkip} className="flex-1 rounded-lg border border-neutral-300 bg-white py-2.5 font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-60">Skip</button>
-          <button type="button" disabled={disabled} onClick={onSendGig} className="flex-1 rounded-lg bg-emerald-600 py-2.5 font-medium text-white disabled:opacity-60">Send Gig</button>
+          <button type="button" disabled={disabled} onClick={onSendGig} className="flex-1 rounded-lg bg-brand-600 py-2.5 font-medium text-white disabled:opacity-60">Send Gig</button>
         </div>
       </div>
     </div>

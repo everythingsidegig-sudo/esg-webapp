@@ -161,7 +161,7 @@ function FindHelpersInner() {
     return <div className="mx-auto max-w-lg space-y-4">
       <h1 className="text-xl font-semibold">Find Helpers Nearby</h1>
       <p role="alert" className="rounded-lg bg-red-50 px-3 py-2.5 text-sm text-red-700">{gigError ?? "No gig was specified."}</p>
-      <Link href="/my-gigs" className="touch-link block text-sm font-medium text-emerald-700">← Back to My Gigs</Link>
+      <Link href="/my-gigs" className="touch-link block text-sm font-medium text-brand-700">← Back to My Gigs</Link>
     </div>;
   }
   if (!gig) return <p className="text-neutral-500">Loading…</p>;
@@ -220,7 +220,7 @@ function FindHelpersInner() {
         </div>
       )}
 
-      <Link href="/my-gigs" className="touch-link block text-center text-sm font-medium text-emerald-700">Done for now — go to My Gigs</Link>
+      <Link href="/my-gigs" className="touch-link block text-center text-sm font-medium text-brand-700">Done for now — go to My Gigs</Link>
     </div>
   );
 }

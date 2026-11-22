@@ -82,7 +82,7 @@ function SignUpInner() {
         <h1 className="text-xl font-semibold">Check Your Email</h1>
         <p className="text-sm text-neutral-600">Verification link sent to {email.trim()}.</p>
         <p className="text-sm text-neutral-600">Click the link to verify your email, then continue registration at Username.</p>
-        <button disabled={submitting} onClick={() => void resend()} className="block w-full text-emerald-700">
+        <button disabled={submitting} onClick={() => void resend()} className="block w-full text-brand-700">
           {submitting ? "Sending…" : "Resend Verification Link"}
         </button>
         {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
@@ -110,9 +110,9 @@ function SignUpInner() {
       {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
       {alreadyRegistered && (
         <p className="text-sm text-neutral-600">
-          <Link href="/auth/sign-in" className="touch-link font-medium text-emerald-700">Sign In</Link>
+          <Link href="/auth/sign-in" className="touch-link font-medium text-brand-700">Sign In</Link>
           {" or "}
-          <button type="button" onClick={() => { setEmail(""); setError(null); setAlreadyRegistered(false); }} className="touch-link font-medium text-emerald-700">
+          <button type="button" onClick={() => { setEmail(""); setError(null); setAlreadyRegistered(false); }} className="touch-link font-medium text-brand-700">
             Use Another Email
           </button>
         </p>
@@ -121,14 +121,14 @@ function SignUpInner() {
       <button
         type="submit"
         disabled={submitting}
-        className="w-full rounded-lg bg-emerald-600 py-2.5 font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
+        className="w-full rounded-lg bg-brand-600 py-2.5 font-medium text-white hover:bg-brand-700 disabled:opacity-60"
       >
         {submitting ? "Sending…" : "Send Verification Link"}
       </button>
 
       <p className="flex flex-wrap items-center justify-center gap-x-1 text-sm text-neutral-500">
         Already have an account?{" "}
-        <Link href="/auth/sign-in" className="touch-link font-medium text-emerald-700">Sign In</Link>
+        <Link href="/auth/sign-in" className="touch-link font-medium text-brand-700">Sign In</Link>
       </p>
     </form>
   );

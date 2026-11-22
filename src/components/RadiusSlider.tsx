@@ -36,7 +36,7 @@ export default function RadiusSlider({
         onChange={(e) => onChange(Number(e.target.value))}
         aria-label="Search radius in kilometers"
         aria-valuetext={`${valueKm} kilometers, ${miles.toFixed(1)} miles`}
-        className="w-full accent-emerald-600"
+        className="w-full accent-brand-600"
       />
       <div className="flex justify-between text-xs text-neutral-400">
         <span>{MIN_RADIUS_KM} km</span>

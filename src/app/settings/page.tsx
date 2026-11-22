@@ -169,12 +169,12 @@ function SettingsInner() {
         <div className="flex items-center gap-4">
           {profile.photo_url ? <img src={profile.photo_url} alt="Profile photo" className="h-14 w-14 rounded-full object-cover" />
             : <div className="flex h-14 w-14 items-center justify-center rounded-full bg-neutral-200 text-lg">👤</div>}
-          <label className="inline-flex min-h-11 cursor-pointer items-center text-sm font-medium text-emerald-700">
+          <label className="inline-flex min-h-11 cursor-pointer items-center text-sm font-medium text-brand-700">
             {photoBusy ? "Uploading…" : "Change photo"}
             <input type="file" accept="image/jpeg,image/png,image/webp" disabled={photoBusy} className="hidden" onChange={(e) => { if (e.target.files?.[0]) void uploadPhoto(e.target.files[0]); }} />
           </label>
         </div>
-        {photoMessage && <p role="status" className="text-sm text-emerald-700">{photoMessage}</p>}
+        {photoMessage && <p role="status" className="text-sm text-brand-700">{photoMessage}</p>}
         {photoError && <p role="alert" className="text-sm text-red-600">{photoError}</p>}
 
         <div>
@@ -188,7 +188,7 @@ function SettingsInner() {
             <div className="mt-1 flex gap-2">
               <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} disabled={emailBusy}
                 className="flex-1 rounded-lg border border-neutral-300 px-3 py-2 disabled:opacity-60" />
-              <button type="button" disabled={emailBusy} onClick={() => void saveEmail()} className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-60">
+              <button type="button" disabled={emailBusy} onClick={() => void saveEmail()} className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-60">
                 {emailBusy ? "Saving…" : "Save"}
               </button>
               <button type="button" disabled={emailBusy} onClick={() => setEmailEditing(false)} className="rounded-lg border px-3 py-2 text-sm">Cancel</button>
@@ -196,10 +196,10 @@ function SettingsInner() {
           ) : (
             <div className="mt-1 flex items-center justify-between">
               <p className="text-sm text-neutral-500">{user.email}</p>
-              <button type="button" onClick={startEmailEdit} className="text-sm font-medium text-emerald-700">Edit</button>
+              <button type="button" onClick={startEmailEdit} className="text-sm font-medium text-brand-700">Edit</button>
             </div>
           )}
-          {emailMessage && <p role="status" className="mt-1 text-sm text-emerald-700">{emailMessage}</p>}
+          {emailMessage && <p role="status" className="mt-1 text-sm text-brand-700">{emailMessage}</p>}
           {emailError && <p role="alert" className="mt-1 text-sm text-red-600">{emailError}</p>}
         </div>
 
@@ -209,7 +209,7 @@ function SettingsInner() {
             <div className="mt-1 flex gap-2">
               <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} disabled={phoneBusy} placeholder="10-digit U.S. number"
                 className="flex-1 rounded-lg border border-neutral-300 px-3 py-2 disabled:opacity-60" />
-              <button type="button" disabled={phoneBusy} onClick={() => void savePhone()} className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-60">
+              <button type="button" disabled={phoneBusy} onClick={() => void savePhone()} className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-60">
                 {phoneBusy ? "Saving…" : "Save"}
               </button>
               <button type="button" disabled={phoneBusy} onClick={() => setPhoneEditing(false)} className="rounded-lg border px-3 py-2 text-sm">Cancel</button>
@@ -217,10 +217,10 @@ function SettingsInner() {
           ) : (
             <div className="mt-1 flex items-center justify-between">
               <p className="text-sm text-neutral-500">{profile.phone || "Not provided"}</p>
-              <button type="button" onClick={startPhoneEdit} className="text-sm font-medium text-emerald-700">Edit</button>
+              <button type="button" onClick={startPhoneEdit} className="text-sm font-medium text-brand-700">Edit</button>
             </div>
           )}
-          {phoneMessage && <p role="status" className="mt-1 text-sm text-emerald-700">{phoneMessage}</p>}
+          {phoneMessage && <p role="status" className="mt-1 text-sm text-brand-700">{phoneMessage}</p>}
           {phoneError && <p role="alert" className="mt-1 text-sm text-red-600">{phoneError}</p>}
         </div>
       </section>
@@ -235,9 +235,9 @@ function SettingsInner() {
           <input type="password" autoComplete="new-password" required value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)}
             disabled={passwordBusy} className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 disabled:opacity-60" />
         </label>
-        {passwordMessage && <p role="status" className="text-sm text-emerald-700">{passwordMessage}</p>}
+        {passwordMessage && <p role="status" className="text-sm text-brand-700">{passwordMessage}</p>}
         {passwordError && <p role="alert" className="text-sm text-red-600">{passwordError}</p>}
-        <button type="submit" disabled={passwordBusy} className="w-full rounded-lg bg-emerald-600 py-2.5 font-medium text-white disabled:opacity-60">
+        <button type="submit" disabled={passwordBusy} className="w-full rounded-lg bg-brand-600 py-2.5 font-medium text-white disabled:opacity-60">
           {passwordBusy ? "Updating…" : "Update Password"}
         </button>
       </form>

@@ -29,29 +29,29 @@ export default function AcceptConfirm({
   const problem = offerError(offerAmount);
 
   return (
-    <div role="dialog" aria-label="Confirm offer" className="space-y-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-      <h3 className="font-semibold text-emerald-900">Accept &ldquo;{gig.title}&rdquo;?</h3>
+    <div role="dialog" aria-label="Confirm offer" className="space-y-3 rounded-xl border border-brand-200 bg-brand-50 p-4">
+      <h3 className="font-semibold text-brand-900">Accept &ldquo;{gig.title}&rdquo;?</h3>
       {negotiable ? (
         <>
-          <label className="block text-sm text-emerald-900">Your offer (CAD)
+          <label className="block text-sm text-brand-900">Your offer (CAD)
             <input type="number" inputMode="decimal" min="0.01" step="0.01" required disabled={busy} value={offerAmount}
               onChange={(e) => setOfferAmount(e.target.value)}
               className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 disabled:opacity-60" />
           </label>
-          <p className="text-xs text-emerald-800">The poster&apos;s budget is {formatMoney(gig.amount)} ({priceLabel(gig.price_type)}). You can offer a different price.</p>
-          <label className="block text-sm text-emerald-900">Message (optional)
+          <p className="text-xs text-brand-800">The poster&apos;s budget is {formatMoney(gig.amount)} ({priceLabel(gig.price_type)}). You can offer a different price.</p>
+          <label className="block text-sm text-brand-900">Message (optional)
             <textarea maxLength={500} rows={2} disabled={busy} value={message} onChange={(e) => setMessage(e.target.value)}
               className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 disabled:opacity-60" />
           </label>
         </>
       ) : (
-        <p className="text-sm text-emerald-900">You&apos;re offering to help for <strong>{formatMoney(gig.amount)}</strong> ({priceLabel(gig.price_type)}).</p>
+        <p className="text-sm text-brand-900">You&apos;re offering to help for <strong>{formatMoney(gig.amount)}</strong> ({priceLabel(gig.price_type)}).</p>
       )}
       {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
       <div className="flex gap-2">
         <button type="button" disabled={busy || (negotiable && !!problem)}
           onClick={() => onConfirm(negotiable ? Number(offerAmount) : gig.amount, negotiable ? (message.trim() || null) : null)}
-          className="flex-1 rounded-lg bg-emerald-600 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60">
+          className="flex-1 rounded-lg bg-brand-600 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60">
           {busy ? "Sending…" : "Confirm"}
         </button>
         <button type="button" disabled={busy} onClick={onCancel}

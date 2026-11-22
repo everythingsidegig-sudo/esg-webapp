@@ -20,9 +20,12 @@ export function postRequestHref(username: string, category?: string | null): str
   return `/post?${params.toString()}`;
 }
 
-export const PRICE_CHOICES: { value: PriceType; label: string; hint: string }[] = [
-  { value: "fixed", label: "Fixed", hint: "The helper accepts or declines your price." },
-  { value: "negotiable", label: "Negotiable", hint: "The helper may accept, decline, or counteroffer. You choose whether to accept a counteroffer." },
+// hint: a private request to one helper. publicHint: a gig posted for everyone.
+export const PRICE_CHOICES: { value: PriceType; label: string; hint: string; publicHint: string }[] = [
+  { value: "fixed", label: "Fixed", hint: "The helper accepts or declines your price.",
+    publicHint: "Helpers take your price as it is." },
+  { value: "negotiable", label: "Negotiable", hint: "The helper may accept, decline, or counteroffer. You choose whether to accept a counteroffer.",
+    publicHint: "Helpers can accept your price or offer their own. You choose which offer to accept." },
 ];
 
 export function priceLabel(type: PriceType): string {

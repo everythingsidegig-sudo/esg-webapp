@@ -121,7 +121,7 @@ export default function AreaPicker({ area, onChange, radiusKm }: { area: Area; o
             {area.lat == null && <span className="text-neutral-500">(no map position, so distance can&apos;t be shown)</span>}
           </p>
           <button type="button" onClick={() => setExpanded(true)}
-            className="shrink-0 text-sm font-medium text-emerald-700 hover:underline">
+            className="shrink-0 text-sm font-medium text-brand-700 hover:underline">
             Update location
           </button>
         </div>
@@ -159,7 +159,7 @@ export default function AreaPicker({ area, onChange, radiusKm }: { area: Area; o
           placeholder="ZIP or postal code, neighborhood or city"
           className="min-h-11 w-full rounded-lg border border-neutral-300 px-3 py-2 sm:flex-1" />
         <button type="button" onClick={useMyLocation} disabled={locating}
-          className="min-h-11 shrink-0 rounded-lg border border-emerald-600 px-4 text-sm font-medium text-emerald-700 hover:bg-emerald-50 disabled:cursor-wait disabled:opacity-60">
+          className="min-h-11 shrink-0 rounded-lg border border-brand-600 px-4 text-sm font-medium text-brand-700 hover:bg-brand-50 disabled:cursor-wait disabled:opacity-60">
           {locating ? "Locating…" : "📍 Use my location"}
         </button>
       </div>

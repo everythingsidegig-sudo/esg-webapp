@@ -90,7 +90,7 @@ export default function FullGigView({
           // Centered on the card itself (not pinned to an edge): it travels with the card as
           // it's dragged, so it stays squarely in view throughout the swipe.
           <div className={`pointer-events-none absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 bg-white px-4 py-1.5 text-base font-bold uppercase tracking-wide shadow-md ${
-            feedback === "accept" ? "border-emerald-500 text-emerald-600" : "border-red-500 text-red-600"
+            feedback === "accept" ? "border-brand-500 text-brand-600" : "border-red-500 text-red-600"
           }`}>
             {feedback === "accept" ? "Accept" : "Reject"}
           </div>
@@ -98,7 +98,7 @@ export default function FullGigView({
 
         <div className="flex items-start justify-between gap-2">
           <div>
-            <span className="text-xs font-medium uppercase tracking-wide text-emerald-700">{gig.service_type}</span>
+            <span className="text-xs font-medium uppercase tracking-wide text-brand-700">{gig.service_type}</span>
             <h2 className="text-xl font-semibold">{gig.title}</h2>
           </div>
           <button type="button" onClick={onClose} aria-label="Back to list" className="shrink-0 rounded-lg border border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50">
@@ -143,7 +143,7 @@ export default function FullGigView({
             <p className="text-neutral-500">Loading…</p>
           ) : poster.profile ? (
             <p className="mt-1 text-neutral-600">
-              <Link href={`/profile/${poster.profile.username}`} className="font-medium text-emerald-700 hover:underline">@{poster.profile.username}</Link>
+              <Link href={`/profile/${poster.profile.username}`} className="font-medium text-brand-700 hover:underline">@{poster.profile.username}</Link>
               {" · "}WOM {poster.womPercentage != null ? `${poster.womPercentage}%` : "Not available"}
               {" · "}Gigs Posted {poster.gigsPosted ?? "Not available"}
             </p>
@@ -154,7 +154,7 @@ export default function FullGigView({
 
         <div className="flex gap-2 pt-1">
           <button type="button" disabled={disabled} onClick={onReject} className="flex-1 rounded-lg border border-neutral-300 bg-white py-2.5 font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-60">Reject</button>
-          <button type="button" disabled={disabled} onClick={onAccept} className="flex-1 rounded-lg bg-emerald-600 py-2.5 font-medium text-white disabled:opacity-60">Accept</button>
+          <button type="button" disabled={disabled} onClick={onAccept} className="flex-1 rounded-lg bg-brand-600 py-2.5 font-medium text-white disabled:opacity-60">Accept</button>
         </div>
       </div>
     </div>

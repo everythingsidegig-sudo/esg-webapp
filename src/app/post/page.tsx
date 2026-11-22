@@ -280,7 +280,7 @@ function PostGigForm() {
         const coords = approximateCoordinates(coordinates.lat, coordinates.lng);
         request = { p_request_id: crypto.randomUUID(), p_service_type: serviceType,
           p_title: title.trim(), p_description: description.trim(), p_amount: Number(amount),
-          p_price_type: requestedHelper ? priceType : "fixed", p_scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null,
+          p_price_type: priceType, p_scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null,
           p_location_text: locationText.trim(), p_lat: coords.lat, p_lng: coords.lng,
           p_photo_url: photoUrl, p_publish: mode === "publish", p_tag_ids: tagIds,
           p_private_address: privateAddress.trim() || null,
@@ -316,8 +316,8 @@ function PostGigForm() {
     return <div className="mx-auto max-w-lg space-y-4">
       <h1 className="text-xl font-semibold">Post a Gig</h1>
       <p role="alert" className="rounded-lg bg-red-50 px-3 py-2.5 text-sm text-red-700">{lookup.message}</p>
-      <Link href="/find-helper" className="touch-link block text-sm font-medium text-emerald-700">← Back to Find a Helper</Link>
-      <Link href="/post" className="touch-link block text-sm font-medium text-emerald-700">Post a public gig instead</Link>
+      <Link href="/find-helper" className="touch-link block text-sm font-medium text-brand-700">← Back to Find a Helper</Link>
+      <Link href="/post" className="touch-link block text-sm font-medium text-brand-700">Post a public gig instead</Link>
     </div>;
   }
   if (lookup.state === "loading") return <p className="text-neutral-500">Loading the helper…</p>;
@@ -325,21 +325,21 @@ function PostGigForm() {
     return <div className="mx-auto max-w-lg space-y-4">
       <h1 className="text-xl font-semibold">Repost a gig</h1>
       <p role="alert" className="rounded-lg bg-red-50 px-3 py-2.5 text-sm text-red-700">{repost.message}</p>
-      <Link href="/my-gigs" className="touch-link block text-sm font-medium text-emerald-700">← Back to My Gigs</Link>
-      <Link href="/post" className="touch-link block text-sm font-medium text-emerald-700">Post a new gig from scratch</Link>
+      <Link href="/my-gigs" className="touch-link block text-sm font-medium text-brand-700">← Back to My Gigs</Link>
+      <Link href="/post" className="touch-link block text-sm font-medium text-brand-700">Post a new gig from scratch</Link>
     </div>;
   }
   if (repost.state === "loading") return <p className="text-neutral-500">Loading the gig…</p>;
   return <div className="mx-auto max-w-lg space-y-4">
     <h1 className="text-xl font-semibold">{requestedHelper ? `Post a Gig for @${requestedHelper.username}` : "Post a Gig"}</h1>
     {requestedHelper && (
-      <div role="note" className="space-y-1 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm text-emerald-900">
+      <div role="note" className="space-y-1 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2.5 text-sm text-brand-900">
         <p><strong>Private request.</strong> Only @{requestedHelper.username} will see it, and it isn&apos;t posted publicly or shown in Browse.</p>
         {!retained && <Link href="/post" className="touch-link font-medium underline">Post a public gig instead</Link>}
       </div>
     )}
     {repost.state === "ready" && (
-      <div role="note" className="space-y-1 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm text-emerald-900">
+      <div role="note" className="space-y-1 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2.5 text-sm text-brand-900">
         <p><strong>Reposting &ldquo;{repost.title}&rdquo; as a new gig.</strong> The details are copied below. Choose a new date and check everything before you post. The original gig stays as it is.</p>
         {!requestedHelper && <p>The repost is a regular gig that every helper can see.</p>}
       </div>
@@ -374,11 +374,11 @@ function PostGigForm() {
         </fieldset>
       )}
       <label className="block">Gig Title<input required maxLength={120} value={title} onChange={(e) => setTitle(e.target.value)} className={input} /></label>
-      <label className="block">Brief Description<textarea required maxLength={50} rows={3} value={description} onChange={(e) => setDescription(e.target.value)} className={input} /></label>
+      <label className="block">Brief Description<textarea required maxLength={100} rows={3} value={description} onChange={(e) => setDescription(e.target.value)} className={input} /></label>
       <label className="block">Photo (optional)<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => { setPhoto(e.target.files?.[0] ?? null); setUploadedPhoto(null); }} /></label>
       {uploadedPhoto && !photo && repost.state === "ready" && <p className="text-sm text-neutral-500">The original photo will be reused. Choose a file to replace it.</p>}
       <label className="block">Budget ({CURRENCY})<input type="number" min="0.01" step="0.01" required value={amount} onChange={(e) => setAmount(e.target.value)} className={input} /></label>
-      {requestedHelper ? (
+      {(
         <div role="radiogroup" aria-labelledby="pricing-label">
           <p id="pricing-label" className="text-sm font-medium">Pricing</p>
           <div className="mt-2 flex flex-wrap gap-2">
@@ -392,15 +392,15 @@ function PostGigForm() {
                 event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="radio"]')[PRICE_CHOICES.indexOf(other)]?.focus();
               }}>{choice.label}</SelectionChip>)}
           </div>
-          <p className="mt-1 text-sm text-neutral-500">{PRICE_CHOICES.find((choice) => choice.value === priceType)!.hint}</p>
+          <p className="mt-1 text-sm text-neutral-500">{requestedHelper ? PRICE_CHOICES.find((choice) => choice.value === priceType)!.hint : PRICE_CHOICES.find((choice) => choice.value === priceType)!.publicHint}</p>
         </div>
-      ) : <p className="text-sm">Pricing: Fixed</p>}
+      )}
       <label className="block">Expected Date/Time<input type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} className={input} /></label>
       {!locationExpanded ? (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-neutral-300 bg-white px-3 py-2.5">
           <p className="text-sm text-neutral-700">📍 {locationText}</p>
           <button type="button" onClick={() => setLocationExpanded(true)}
-            className="shrink-0 text-sm font-medium text-emerald-700 hover:underline">
+            className="shrink-0 text-sm font-medium text-brand-700 hover:underline">
             Update location
           </button>
         </div>
@@ -428,7 +428,7 @@ function PostGigForm() {
               ))}
             </ul>
           )}
-          <button type="button" onClick={useMyLocation} className="text-sm font-medium text-emerald-700">{locating ? "Locating…" : "📍 Use my current location"}</button>
+          <button type="button" onClick={useMyLocation} className="text-sm font-medium text-brand-700">{locating ? "Locating…" : "📍 Use my current location"}</button>
           {locationNotice && <p role="status" className="text-sm text-neutral-600">{locationNotice}</p>}
           {coordinates.lat != null && coordinates.lng != null && (
             <div className="space-y-2">
@@ -448,11 +448,11 @@ function PostGigForm() {
       {/* Find Help Profile Swiping v1.0: only for an ordinary public gig -- a private request to
           one named helper (/post?helper=<username>) already has its own addressed flow. */}
       {!retained && !requestedHelper && (
-        <button onClick={() => void submit("find_helpers")} disabled={submitting} className="flex-1 rounded-lg border border-emerald-600 py-2.5 text-emerald-700 disabled:opacity-60">
+        <button onClick={() => void submit("find_helpers")} disabled={submitting} className="flex-1 rounded-lg border border-brand-600 py-2.5 text-brand-700 disabled:opacity-60">
           {submitting ? "Saving…" : "Save & Find Helpers Nearby"}
         </button>
       )}
-      <button onClick={() => void submit("publish")} disabled={submitting} className="flex-1 rounded-lg bg-emerald-600 py-2.5 text-white disabled:opacity-60">{submitting ? (requestedHelper ? "Sending…" : "Posting…") : retained ? "Retry previous request" : requestedHelper ? "Send request" : "Post Gig"}</button>
+      <button onClick={() => void submit("publish")} disabled={submitting} className="flex-1 rounded-lg bg-brand-600 py-2.5 text-white disabled:opacity-60">{submitting ? (requestedHelper ? "Sending…" : "Posting…") : retained ? "Retry previous request" : requestedHelper ? "Send request" : "Post Gig"}</button>
     </div>
   </div>;
 }

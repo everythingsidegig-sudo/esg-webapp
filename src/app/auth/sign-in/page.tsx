@@ -83,7 +83,7 @@ function SignInInner() {
       <h1 className="text-xl font-semibold">Sign In</h1>
 
       {helperName && (
-        <p role="status" className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+        <p role="status" className="rounded-lg bg-brand-50 px-3 py-2 text-sm text-brand-900">
           Sign in to view @{helperName}&apos;s profile.{" "}
           <Link href={findHelperHref(helperCategory)} className="touch-link font-medium underline">Continue browsing</Link>
         </p>
@@ -107,7 +107,7 @@ function SignInInner() {
       <div>
         <div className="mb-1 flex items-center justify-between gap-3">
           <label htmlFor="signin-password" className="text-sm font-medium">Password</label>
-          <Link href="/auth/forgot-password" className="touch-link text-sm font-medium text-emerald-700">Forgot password?</Link>
+          <Link href="/auth/forgot-password" className="touch-link text-sm font-medium text-brand-700">Forgot password?</Link>
         </div>
         <div className="relative">
           <input
@@ -123,7 +123,7 @@ function SignInInner() {
             type="button"
             onClick={() => setShowPassword((current) => !current)}
             aria-label={showPassword ? "Hide password" : "Show password"}
-            className="absolute inset-y-0 right-0 px-3 text-sm font-medium text-emerald-700"
+            className="absolute inset-y-0 right-0 px-3 text-sm font-medium text-brand-700"
           >
             {showPassword ? "Hide" : "Show"}
           </button>
@@ -135,14 +135,14 @@ function SignInInner() {
       <button
         type="submit"
         disabled={submitting}
-        className="w-full rounded-lg bg-emerald-600 py-2.5 font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
+        className="w-full rounded-lg bg-brand-600 py-2.5 font-medium text-white hover:bg-brand-700 disabled:opacity-60"
       >
         {submitting ? "Signing in…" : "Sign In"}
       </button>
 
       <p className="flex flex-wrap items-center justify-center gap-x-1 text-sm text-neutral-500">
         New user?{" "}
-        <Link href={`/auth/sign-up?next=${encodeURIComponent(next)}`} onClick={() => { rememberAuthDestination(next); rememberAreaForAuth(); }} className="touch-link font-medium text-emerald-700">
+        <Link href={`/auth/sign-up?next=${encodeURIComponent(next)}`} onClick={() => { rememberAuthDestination(next); rememberAreaForAuth(); }} className="touch-link font-medium text-brand-700">
           Register
         </Link>
       </p>

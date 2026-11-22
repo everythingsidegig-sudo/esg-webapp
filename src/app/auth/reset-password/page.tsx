@@ -64,12 +64,12 @@ export default function ResetPassword() {
   if (done) return <div className="mx-auto max-w-md space-y-3 text-center">
     <h1 className="text-xl font-semibold">Password reset</h1>
     <p className="text-sm text-neutral-600">Your password was successfully reset.</p>
-    <Link href="/auth/sign-in" className="touch-link font-medium text-emerald-700">Sign In</Link>
+    <Link href="/auth/sign-in" className="touch-link font-medium text-brand-700">Sign In</Link>
   </div>;
 
   if (!ready) return <div className="mx-auto max-w-md space-y-3 text-center">
     <h1 className="text-xl font-semibold">Reset your password</h1>
-    {sessionError ? <><p role="alert" className="text-sm text-red-600">{sessionError}</p><Link href="/auth/forgot-password" className="touch-link font-medium text-emerald-700">Request another code</Link></> : <p>Checking your session…</p>}
+    {sessionError ? <><p role="alert" className="text-sm text-red-600">{sessionError}</p><Link href="/auth/forgot-password" className="touch-link font-medium text-brand-700">Request another code</Link></> : <p>Checking your session…</p>}
   </div>;
 
   return <form onSubmit={submit} className="mx-auto max-w-md space-y-4">
@@ -81,7 +81,7 @@ export default function ResetPassword() {
     <input id="confirm-password" type="password" autoComplete="new-password" required value={confirm}
       onChange={(e) => setConfirm(e.target.value)} className="w-full rounded-lg border border-neutral-300 px-3 py-2" />
     {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
-    <button type="submit" disabled={saving} className="w-full rounded-lg bg-emerald-600 py-2.5 font-medium text-white disabled:opacity-60">
+    <button type="submit" disabled={saving} className="w-full rounded-lg bg-brand-600 py-2.5 font-medium text-white disabled:opacity-60">
       {saving ? "Updating…" : "Reset Password"}
     </button>
   </form>;
