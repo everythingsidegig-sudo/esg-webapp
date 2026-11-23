@@ -116,6 +116,8 @@ async function component(path, name, overrides = {}) {
     "@/components/TagChip": { default: "tag-chip" },
     "@/components/ProfilePhoto": { default: "profile-photo" },
     "@/components/OfferedServices": { default: "offered-services" },
+    "@/components/SavedServices": { default: "saved-services" },
+    "@/components/DeleteAccount": { default: "delete-account" },
     "@/components/HowItWorks": { default: "how-it-works" },
     "@/components/Icon": { default: "icon" },
     "@/components/SwipeCard": { default: "swipe-card" },
@@ -279,7 +281,7 @@ test("Profile: each newly selected skill opens its own options sheet, and every 
   const app = await component("src/app/profile/page.tsx", "ProfileEditor", {
     client, mocks: { "@/lib/tags": { loadTagCatalog: async () => catalog, MAX_PROFILE_TAGS: 8 } },
   });
-  const props = { profile: { ...profile, skills: [], services: [] } };
+  const props = { profile: { ...profile, skills: ["Errands"], services: [] } };
   app.render(props); await flush();
   let tree = app.render(props);
 
@@ -418,7 +420,7 @@ test("Profile Save blocks selecting OTHER without specifying it, for skills and 
       : { update: (payload) => { calls.push(payload); return { eq: () => ({ select: () => ({ single: async () => ({ error: null }) }) }) }; } },
     rpc: async () => ({ data: null, error: null }),
   };
-  const soloProfile = { ...profile, skills: [], services: [] };
+  const soloProfile = { ...profile, skills: ["Errands"], services: [] };
   const app = await component("src/app/profile/page.tsx", "ProfileEditor", { client });
   app.render({ profile: soloProfile }); await flush();
   let tree = app.render({ profile: soloProfile });
@@ -444,7 +446,7 @@ test("Profile Save blocks selecting OTHER without specifying it, for skills and 
   await submit();
   assert.equal(calls.length, 1, "both OTHER texts specified: the save proceeds");
   assert.deepEqual(JSON.parse(JSON.stringify(calls[0])), {
-    skills: ["Other"], services: ["Other"], skills_other_text: "Juggling", services_other_text: "Piano tuning",
+    skills: ["Errands", "Other"], services: ["Other"], skills_other_text: "Juggling", services_other_text: "Piano tuning",
   });
 });
 
@@ -602,7 +604,7 @@ test("Profile: existing profile values prepopulate the edit form", async () => {
 
 test("Profile: primary action is 'Update profile', shows 'Updating…' while saving, and the pending guard blocks a duplicate submit", async () => {
   const calls = [];
-  const soloProfile = { ...profile, skills: [], services: [] };
+  const soloProfile = { ...profile, skills: ["Errands"], services: [] };
   const client = {
     from: (table) => table === "profile_tags"
       ? { select: () => ({ eq: async () => ({ data: [], error: null }) }) }
@@ -731,13 +733,13 @@ async function openToConfirmStage(app) {
   return tree;
 }
 
-test("Profile Danger zone: a blocked account sees the Outstanding Gigs popup with counts, and View Gigs/Cancel never call delete", async () => {
+test("Delete account (Settings): a blocked account sees the Outstanding Gigs popup with counts, and View Gigs/Cancel never call delete", async () => {
   const calls = [];
   const client = eligibleClient({
     rpc: async () => ({ data: [{ eligible: false, active_gigs_count: 2, open_disputes_count: 1 }], error: null }),
   });
   const destinations = [];
-  const app = await component("src/app/profile/page.tsx", "ProfileEditor", {
+  const app = await component("src/components/DeleteAccount.tsx", "DeleteAccount", {
     client, globals: { fetch: async () => { calls.push("fetch"); return { ok: true, json: async () => ({ ok: true }) }; } },
     mocks: { "next/navigation": { useRouter: () => ({ replace: (url) => destinations.push(url), push: (url) => destinations.push(url) }) } },
   });
@@ -755,8 +757,8 @@ test("Profile Danger zone: a blocked account sees the Outstanding Gigs popup wit
   assert.deepEqual(calls, [], "never calls the delete endpoint while blocked");
 });
 
-test("Profile Danger zone: an eligible account proceeds through the Warning screen to Final Confirmation", async () => {
-  const app = await component("src/app/profile/page.tsx", "ProfileEditor", { client: eligibleClient() });
+test("Delete account (Settings): an eligible account proceeds through the Warning screen to Final Confirmation", async () => {
+  const app = await component("src/components/DeleteAccount.tsx", "DeleteAccount", { client: eligibleClient() });
   app.render({ profile }); await flush();
   let tree = app.render({ profile });
   assert.equal(nodes(tree, (node) => node.props.role === "dialog").length, 0, "no dialog before Delete account is clicked");
@@ -775,10 +777,10 @@ test("Profile Danger zone: an eligible account proceeds through the Warning scre
   assert.equal(confirmButton().props.disabled, false, "enabled once a password is entered");
 });
 
-test("Profile Danger zone: Cancel/Keep My Account closes the dialog without deleting anything", async () => {
+test("Delete account (Settings): Cancel/Keep My Account closes the dialog without deleting anything", async () => {
   const calls = [];
   const client = eligibleClient({ auth: { signInWithPassword: async () => { calls.push("reauth"); return { error: null }; } } });
-  const app = await component("src/app/profile/page.tsx", "ProfileEditor", {
+  const app = await component("src/components/DeleteAccount.tsx", "DeleteAccount", {
     client,
     globals: { fetch: async () => { calls.push("fetch"); return { ok: true, json: async () => ({ ok: true }) }; } },
   });
@@ -791,7 +793,7 @@ test("Profile Danger zone: Cancel/Keep My Account closes the dialog without dele
   assert.deepEqual(calls, [], "no request of any kind was made");
 });
 
-test("Profile Danger zone: successful deletion re-authenticates, signs out, clears ESG session state, and redirects home with the deleted-account flag", async () => {
+test("Delete account (Settings): successful deletion re-authenticates, signs out, clears ESG session state, and redirects home with the deleted-account flag", async () => {
   const client = eligibleClient({
     auth: {
       signInWithPassword: async (args) => ({ _args: args, error: null }),
@@ -802,7 +804,7 @@ test("Profile Danger zone: successful deletion re-authenticates, signs out, clea
   const cleared = [];
   let fetchCalls = 0;
   let requestedUrl, requestedMethod;
-  const app = await component("src/app/profile/page.tsx", "ProfileEditor", {
+  const app = await component("src/components/DeleteAccount.tsx", "DeleteAccount", {
     client,
     globals: { fetch: async (url, init) => { fetchCalls++; requestedUrl = url; requestedMethod = init?.method; return { ok: true, json: async () => ({ ok: true }) }; } },
     mocks: {
@@ -823,10 +825,10 @@ test("Profile Danger zone: successful deletion re-authenticates, signs out, clea
   assert.deepEqual(cleared, ["cleared"], "ESG-specific session state (general area, geocode cache) is cleared");
 });
 
-test("Profile Danger zone: a failed re-authentication never calls the delete endpoint", async () => {
+test("Delete account (Settings): a failed re-authentication never calls the delete endpoint", async () => {
   const calls = [];
   const client = eligibleClient({ auth: { signInWithPassword: async () => ({ error: { code: "invalid_credentials" } }) } });
-  const app = await component("src/app/profile/page.tsx", "ProfileEditor", {
+  const app = await component("src/components/DeleteAccount.tsx", "DeleteAccount", {
     client, globals: { fetch: async () => { calls.push("fetch"); return { ok: true, json: async () => ({ ok: true }) }; } },
   });
   app.auth.user = { ...user, email: "person@example.com" };
@@ -840,10 +842,10 @@ test("Profile Danger zone: a failed re-authentication never calls the delete end
   assert.equal(String(nodes(tree, (node) => node.props.role === "alert")[0].props.children), "We couldn't verify your account. Please check your details and try again.");
 });
 
-test("Profile Danger zone: backend failure shows the server's error, keeps the dialog open, and does not sign out or redirect", async () => {
+test("Delete account (Settings): backend failure shows the server's error, keeps the dialog open, and does not sign out or redirect", async () => {
   const client = eligibleClient({ auth: { signInWithPassword: async () => ({ error: null }), signOut: async () => { throw new Error("should not be called"); } } });
   const destinations = [];
-  const app = await component("src/app/profile/page.tsx", "ProfileEditor", {
+  const app = await component("src/components/DeleteAccount.tsx", "DeleteAccount", {
     client,
     globals: { fetch: async () => ({ ok: false, json: async () => ({ error: "Couldn't finish deleting your account. Please try again." }) }) },
     mocks: { "next/navigation": { useRouter: () => ({ replace: (url) => destinations.push(url) }) } },
@@ -860,9 +862,9 @@ test("Profile Danger zone: backend failure shows the server's error, keeps the d
   assert.deepEqual(destinations, [], "no redirect on failure");
 });
 
-test("Profile Danger zone: a network failure shows a friendly message, not the browser's raw error", async () => {
+test("Delete account (Settings): a network failure shows a friendly message, not the browser's raw error", async () => {
   const client = eligibleClient({ auth: { signInWithPassword: async () => ({ error: null }), signOut: async () => ({ error: null }) } });
-  const app = await component("src/app/profile/page.tsx", "ProfileEditor", {
+  const app = await component("src/components/DeleteAccount.tsx", "DeleteAccount", {
     client,
     globals: { fetch: async () => { throw new TypeError("Failed to fetch"); } },
     mocks: { "next/navigation": { useRouter: () => ({ replace() {} }) } },
@@ -877,10 +879,10 @@ test("Profile Danger zone: a network failure shows a friendly message, not the b
   assert.equal(nodes(tree, (node) => node.props.role === "alert" && node.props.children === "Couldn't delete your account. Check your connection and try again.").length, 1);
 });
 
-test("Profile Danger zone: shows a 'Deleting…' loading state, disables Keep My Account while in flight, and a duplicate click issues only one request", async () => {
+test("Delete account (Settings): shows a 'Deleting…' loading state, disables Keep My Account while in flight, and a duplicate click issues only one request", async () => {
   const client = eligibleClient({ auth: { signInWithPassword: async () => ({ error: null }), signOut: async () => ({ error: null }) } });
   let fetchCalls = 0;
-  const app = await component("src/app/profile/page.tsx", "ProfileEditor", {
+  const app = await component("src/components/DeleteAccount.tsx", "DeleteAccount", {
     client,
     globals: { fetch: async () => { fetchCalls++; return { ok: true, json: async () => ({ ok: true }) }; } },
     mocks: { "next/navigation": { useRouter: () => ({ replace() {} }) }, "@/lib/location": { clearGeneralAreaState: () => {} } },
@@ -6793,4 +6795,131 @@ test("Chat scrolls only its own conversation, never the whole page, when message
   const src = await import("node:fs").then((fs) => fs.readFileSync("src/components/ChatPanel.tsx", "utf8"));
   assert.doesNotMatch(src, /scrollIntoView/, "scrollIntoView would also scroll the page and hide the message box under the bottom bar");
   assert.match(src, /log\?\.scrollTo\?\.\(\{ top: log\.scrollHeight/, "the conversation box scrolls itself to the newest message");
+});
+
+// ===========================================================================
+// Defects 007-011: account deletion, email verification, registration, services
+// ===========================================================================
+test("DEF-007: Account Settings offers Delete Account (the action the test script looks for there)", async () => {
+  const source = await readFile(new URL("../src/app/settings/page.tsx", import.meta.url), "utf8");
+  assert.match(source, /import DeleteAccount from "@\/components\/DeleteAccount"/);
+  assert.match(source, /<DeleteAccount \/>/);
+  const component = await readFile(new URL("../src/components/DeleteAccount.tsx", import.meta.url), "utf8");
+  assert.match(component, /Delete account/);
+  assert.match(component, /\/api\/account\/delete/);
+});
+
+test("DEF-008: a verified link with no flow flag still continues registration for an unfinished account, never Sign-In", async () => {
+  for (const [onboarding_completed_at, flow, expected] of [
+    [null, "", "/auth/register"],                 // the flow flag was dropped from the link
+    [null, "&flow=register", "/auth/register"],
+    ["2026-01-01", "", "/onboarding?next=%2F"],   // a finished account signing in is unaffected
+  ]) {
+    const destinations = [];
+    const app = await component("src/app/auth/callback/page.tsx", "CallbackInner", {
+      client: { auth: {
+        exchangeCodeForSession: async () => ({ error: null }),
+        getSession: async () => ({ data: { session: { user } }, error: null }),
+      }, rpc: async (name) => name === "ensure_profile" ? { data: { id: user.id, onboarding_completed_at }, error: null } : { data: null, error: null } },
+      globals: { window: { location: { href: `http://localhost:3001/auth/callback?code=c-${onboarding_completed_at}${flow}` }, history: { replaceState() {} } } },
+      mocks: { "next/navigation": {
+        useSearchParams: () => new URLSearchParams(flow ? "flow=register" : ""),
+        useRouter: () => ({ replace: (url) => destinations.push(url) }),
+      } },
+    });
+    app.render(); await flush();
+    assert.deepEqual(destinations, [expected]);
+  }
+});
+
+test("DEF-008: an expired or other-browser verification link offers a fresh link first, not Sign-In", async () => {
+  const app = await component("src/app/auth/callback/page.tsx", "CallbackInner", {
+    client: { auth: { exchangeCodeForSession: async () => ({ error: { message: "bad" } }), getSession: async () => ({ data: { session: null }, error: null }) } },
+    globals: { window: { location: { href: "http://localhost:3001/auth/callback?flow=register&code=old-code" }, history: { replaceState() {} } } },
+    mocks: { "next/navigation": { useSearchParams: () => new URLSearchParams("flow=register"), useRouter: () => ({ replace() {} }) } },
+  });
+  app.render(); await flush();
+  const tree = app.render();
+  const links = nodes(tree, (node) => node.type === "a").map((node) => node.props.href);
+  assert.equal(links[0], "/auth/sign-up", "the first choice is a new verification link");
+});
+
+test("DEF-009: the old onboarding route repeats nothing: unfinished accounts go to the one registration flow, finished ones where they were heading", async () => {
+  for (const [onboarding_completed_at, expected] of [[null, "/auth/register"], ["2026-01-01", "/post"]]) {
+    const destinations = [];
+    const app = await component("src/app/onboarding/page.tsx", "OnboardingInner", {
+      mocks: { "next/navigation": { useRouter: () => ({ replace: (to) => destinations.push(to) }), useSearchParams: () => new URLSearchParams("next=%2Fpost") } },
+    });
+    app.auth.profile = { ...profile, onboarding_completed_at };
+    app.render(); await flush();
+    assert.deepEqual(destinations, [expected]);
+  }
+});
+
+test("DEF-009/010: registration has no old services list, creates the account with no old-list picks, then goes once to the categorized services screen", async () => {
+  const source = await readFile(new URL("../src/app/auth/register/page.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /CategoryList/, "the retired flat list is gone from registration");
+  const calls = [], destinations = [], store = new Map();
+  const client = {
+    from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) }) }),
+    auth: { updateUser: async () => ({ error: null }) },
+    storage: { from: () => ({ upload: async () => ({ error: null }), getPublicUrl: () => ({ data: { publicUrl: "https://x.test/p.jpg" } }) }) },
+    rpc: async (name, args) => { calls.push([name, args]); return { error: null }; },
+  };
+  const storage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, v), removeItem: (k) => store.delete(k) };
+  const mount = () => component("src/app/auth/register/page.tsx", "RegisterInner", {
+    client, storage, globals: { crypto: { randomUUID: () => "uuid" } },
+    mocks: { "next/navigation": { useRouter: () => ({ replace: (to) => destinations.push(to) }) } },
+  });
+  const heading = (tree) => nodes(tree, (n) => n.type === "h1").map(textOf)[0];
+  const typeInto = (tree, i, value) => nodes(tree, (n) => n.type === "input")[i].props.onChange({ target: { value } });
+
+  let app = await mount();
+  app.auth.profile = { ...profile, onboarding_completed_at: null };
+  app.render(); await flush();
+  let tree = app.render();
+  assert.equal(heading(tree), "Username");
+  typeInto(tree, 0, "Newmember1"); tree = app.render();
+  await button(tree, "Continue").props.onClick(); await flush(); tree = app.render();
+  assert.equal(heading(tree), "Password");
+
+  // Leaving and coming back resumes at Password, not Username.
+  app = await mount();
+  app.auth.profile = { ...profile, onboarding_completed_at: null };
+  app.render(); await flush(); tree = app.render();
+  assert.equal(heading(tree), "Password", "progress survives a remount instead of looping back to Username");
+  assert.equal(nodes(tree, (n) => n.type === "input")[0].props.value ?? "", "");
+});
+
+test("DEF-010: the categorized services screen scrolls (nothing clips or fixes its height) and is the only list shown after registration", async () => {
+  const selector = await readFile(new URL("../src/components/ServiceSelector.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(selector, /overflow-hidden[^"]*h-screen|h-screen[^"]*overflow-hidden|fixed inset-0 overflow-hidden/);
+  const page = await readFile(new URL("../src/app/services/page.tsx", import.meta.url), "utf8");
+  assert.match(page, /ServiceSelector/);
+  assert.doesNotMatch(page, /CategoryList/);
+});
+
+test("DEF-011: My Profile shows the saved categorized selections, and the retired flat lists only for members who still have entries in them", async () => {
+  const source = await readFile(new URL("../src/app/profile/page.tsx", import.meta.url), "utf8");
+  assert.match(source, /<SavedServices userId=\{profile\.id\} \/>/);
+  assert.match(source, /profile\.skills\.length > 0 \|\| profile\.services\.length > 0\) && <form/);
+  const publicPage = await readFile(new URL("../src/app/profile/[username]/page.tsx", import.meta.url), "utf8");
+  assert.match(publicPage, /profile\.skills\.length > 0 && offered\.length === 0/, "old Skills chips never sit beside the new offered services");
+});
+
+test("DEF-011: SavedServices lists exactly the saved OFFER and NEED selections, and says so when there are none", async () => {
+  const catalog = serviceCatalogLib.CATALOG, sub = catalog[0].services[0].subservices[0];
+  for (const [rows, expectNone] of [
+    [[{ selection_type: "OFFER", subservice_id: sub.id, service_id: catalog[0].services[0].id, is_custom: false, custom_text: null }], 1],
+    [[], 2],
+  ]) {
+    const app = await component("src/components/SavedServices.tsx", "SavedServices", {
+      client: { from: () => ({ select: () => ({ eq: async () => ({ data: rows, error: null }) }) }) },
+      mocks: { "@/lib/service-selection": serviceSelectionLib },
+    });
+    app.render({ userId: "u" }); await flush();
+    const text = textOf(app.render({ userId: "u" }));
+    assert.equal((text.match(/None chosen yet\./g) ?? []).length, expectNone);
+    if (rows.length) assert.ok(text.includes(sub.name), "shows the saved subservice");
+  }
 });

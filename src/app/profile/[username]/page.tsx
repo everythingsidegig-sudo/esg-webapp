@@ -139,7 +139,7 @@ function PublicProfileView({ username }: { username: string }) {
         </section>
       )}
 
-      {profile.skills.length > 0 && (
+      {profile.skills.length > 0 && offered.length === 0 && (
         <div>
           <h3 className="mb-1 text-sm font-medium text-neutral-500">Skills</h3>
           <div className="flex flex-wrap gap-2">

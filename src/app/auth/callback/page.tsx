@@ -38,9 +38,17 @@ function CallbackInner() {
       }
       const { data, error } = await supabase.auth.getSession();
       if (error || !data.session) throw new Error("No verified session was established. Please sign in with your verified account.");
+      // A brand-new account always continues registration at Username, even when the email
+      // provider or the redirect allow-list dropped "?flow=register" from the link: whoever has a
+      // verified session but no finished profile is mid-registration, never a Sign-In case.
+      let unfinished = false;
+      try {
+        const { data: ensured } = await supabase.rpc("ensure_profile");
+        unfinished = !!ensured && !ensured.onboarding_completed_at;
+      } catch { /* fall back to the flow flag */ }
       if (alive) {
         window.history.replaceState(null, "", `/auth/callback?next=${encodeURIComponent(next)}`);
-        router.replace(isRegisterFlow ? "/auth/register" : setupDestination(next));
+        router.replace(isRegisterFlow || unfinished ? "/auth/register" : setupDestination(next));
       }
     }
     void confirm().catch((error: Error) => {
@@ -52,7 +60,9 @@ function CallbackInner() {
     return () => { alive = false; };
   }, [supabase, router, next, isRegisterFlow]);
   return <div className="space-y-3 p-8 text-center">
-    {error ? <><p role="alert">{error}</p><Link className="touch-link text-brand-700" href={`/auth/sign-in?next=${encodeURIComponent(next)}`}>Sign In</Link>{" · "}<Link className="touch-link" href={`/auth/sign-up?next=${encodeURIComponent(next)}`}>Register / request confirmation</Link></> : <p>Confirming your account…</p>}
+    {error ? <><p role="alert">{error}</p>{isRegisterFlow
+      ? <><Link className="touch-link text-brand-700" href="/auth/sign-up">Request a new verification link</Link>{" · "}<Link className="touch-link" href="/auth/sign-in">Sign In</Link></>
+      : <><Link className="touch-link text-brand-700" href={`/auth/sign-in?next=${encodeURIComponent(next)}`}>Sign In</Link>{" · "}<Link className="touch-link" href={`/auth/sign-up?next=${encodeURIComponent(next)}`}>Register / request confirmation</Link></>}</> : <p>Confirming your account…</p>}
   </div>;
 }
 export default function AuthCallback() { return <Suspense fallback={<p>Loading verification…</p>}><CallbackInner /></Suspense>; }

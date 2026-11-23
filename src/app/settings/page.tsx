@@ -7,6 +7,7 @@ import { useAuth } from "@/lib/auth-context";
 import { createClient } from "@/lib/supabase/client";
 import { friendlyError } from "@/lib/journey";
 import Icon from "@/components/Icon";
+import DeleteAccount from "@/components/DeleteAccount";
 
 // ESG-SET-002 v1.0: Account Information. Identity/contact data only -- no
 // Gig stats, WOM/Lemon/Rotten Tomato, Money Made, or Skills & Services (My
@@ -242,6 +243,8 @@ function SettingsInner() {
           {passwordBusy ? "Updating…" : "Update Password"}
         </button>
       </form>
+
+      <DeleteAccount />
     </div>
   );
 }
