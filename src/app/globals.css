@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 :root {
-  --background: #faf9fc;
+  --background: #f7f5fa;
   --foreground: #171717;
   --esg-brand: #6d28d9;
   --esg-brand-dark: #5b21b6;
@@ -29,6 +29,8 @@
   --color-brand-700: #6d28d9;
   --color-brand-800: #5b21b6;
   --color-brand-900: #3f1a7a;
+  /* Secondary text was a faint grey; this keeps it clearly legible on white (about 7:1). */
+  --color-neutral-500: #52525b;
   --color-accent-50: #fff8eb;
   --color-accent-100: #ffeccc;
   --color-accent-400: #ffb02e;
@@ -41,10 +43,18 @@ h1, h2 {
   letter-spacing: -0.01em;
 }
 
+/* Never let a too-wide child widen the page: on a phone that shrinks the view and pushes the fixed bottom bar
+   partly off-screen. Inputs focused near the bottom also scroll clear of the bar. */
+html {
+  overflow-x: clip;
+  scroll-padding-bottom: 7rem;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  line-height: 1.5;
   overflow-x: hidden;
 }
 

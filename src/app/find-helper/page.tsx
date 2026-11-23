@@ -17,6 +17,7 @@ import { loadTagCatalog, profileTagsForCategory, withProfileTags } from "@/lib/t
 import { pathLabel, searchCatalog, type SearchHit } from "@/lib/service-selection";
 import { hasPromptedForLocation, haversineKm, loadJourneyLocation, markLocationPrompted } from "@/lib/location";
 import RadiusSlider from "@/components/RadiusSlider";
+import Icon from "@/components/Icon";
 
 const DEFAULT_RADIUS_KM = 10;
 
@@ -38,12 +39,12 @@ function HelperCard({ profile, category, distanceKm, gated = false, onGate, plai
     <Link
       href={helperProfileHref(profile.username, plainLink ? null : category) ?? "/find-helper"}
       onClick={(event) => { if (gated) { event.preventDefault(); onGate?.(profile.username); } }}
-      className="flex items-center gap-3 rounded-xl border border-neutral-200 bg-white p-4 shadow-sm hover:shadow-md"
+      className="flex items-center gap-3 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm hover:shadow-md"
     >
       {profile.photo_url ? (
         <img src={profile.photo_url} alt="" className="h-12 w-12 shrink-0 rounded-full object-cover" />
       ) : (
-        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-neutral-200 text-lg">👤</div>
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-neutral-200"><Icon name="profile" className="h-1/2 w-1/2 text-neutral-500" /></div>
       )}
       <div className="min-w-0 flex-1">
         <div className="font-medium">@{profile.username}</div>
@@ -234,7 +235,7 @@ export default function FindHelper() {
 
   return (
     <div className="space-y-5">
-      <h1 className="text-xl font-semibold">Find a Helper</h1>
+      <h1 className="text-2xl font-extrabold">Find a Helper</h1>
 
       <AreaPicker area={searcherLocation} onChange={setSearcherLocation} radiusKm={radiusKm} />
 
@@ -250,13 +251,13 @@ export default function FindHelper() {
       <div className="min-w-0 w-full space-y-2">
         <label htmlFor="find-helper-service" className="text-sm font-medium">Search by service</label>
         <input id="find-helper-service" type="search" placeholder="e.g. Mobile App Testing, dog walking, tile" value={serviceQuery}
-          onChange={(event) => setServiceQuery(event.target.value)} className="min-h-11 w-full rounded-lg border border-neutral-300 px-3 py-2" />
+          onChange={(event) => setServiceQuery(event.target.value)} className="min-h-11 w-full rounded-xl border border-neutral-300 px-3 py-2" />
         {serviceQuery.trim() && (serviceHits.length === 0
           ? <p className="text-sm text-neutral-500">No matching services.</p>
           : <ul aria-label="Matching services" className="space-y-1">
             {serviceHits.map((hit) => (
               <li key={hit.id}><button type="button" onClick={() => chooseService(hit)}
-                className="flex min-h-11 w-full items-center rounded-lg border border-neutral-200 bg-white px-3 py-2 text-left text-sm hover:bg-neutral-50">{pathLabel(hit)}</button></li>
+                className="flex min-h-11 w-full items-center rounded-xl border border-neutral-200 bg-white px-3 py-2 text-left text-sm hover:bg-neutral-50">{pathLabel(hit)}</button></li>
             ))}
           </ul>)}
       </div>
@@ -353,12 +354,12 @@ export default function FindHelper() {
         <OptionSheet title={SPECIALIZATION_PROMPTS[category] ?? `What kind of ${category.toLowerCase()}?`} onClose={() => setSheetOpen(false)}
           footer={<div className="flex items-center justify-between gap-3">
             <p className="text-sm text-neutral-500">{chosenTags.length} selected</p>
-            <button type="button" onClick={() => setSheetOpen(false)} className="rounded-lg bg-brand-600 px-6 py-2.5 font-medium text-white hover:bg-brand-700">Done</button>
+            <button type="button" onClick={() => setSheetOpen(false)} className="rounded-xl bg-brand-600 px-6 py-2.5 font-medium text-white hover:bg-brand-700">Done</button>
           </div>}>
           {categoryTags.map((tag) => {
             const selected = selectedTagIds.includes(tag.id);
             return <button key={tag.id} type="button" role="checkbox" aria-checked={selected} onClick={() => toggleTag(tag.id)}
-              className="flex min-h-12 w-full items-center justify-between gap-3 rounded-lg px-3 text-left text-sm text-neutral-900 hover:bg-neutral-50">
+              className="flex min-h-12 w-full items-center justify-between gap-3 rounded-xl px-3 text-left text-sm text-neutral-900 hover:bg-neutral-50">
               <span>{tag.name}</span>
               <span aria-hidden="true" className={`flex h-6 w-6 items-center justify-center rounded-md border text-sm ${selected ? "border-brand-600 bg-brand-600 text-white" : "border-neutral-300 text-transparent"}`}>✓</span>
             </button>;

@@ -63,7 +63,7 @@ function ServicesInner() {
   if (!loaded) return <p className="text-neutral-500">Loading your services…</p>;
   return (
     <div className="mx-auto max-w-lg space-y-4">
-      <h1 className="text-xl font-semibold">{onboarding ? "Choose your services" : "Your services"}</h1>
+      <h1 className="text-2xl font-extrabold">{onboarding ? "Choose your services" : "Your services"}</h1>
       <ServiceSelector initial={loaded.selections} revisions={loaded.revisions} mode={onboarding ? "onboarding" : "profile"} onSave={save}
         onFinish={() => (onboarding ? router.replace(next) : router.push("/profile"))} />
     </div>

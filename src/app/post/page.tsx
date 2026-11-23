@@ -19,6 +19,7 @@ import { PRICE_CHOICES, requestUsername, requestableCategories } from "@/lib/hel
 import { loadTagCatalog, MAX_GIG_TAGS } from "@/lib/tags";
 import { canRepost, repostDraft, repostParam } from "@/lib/repost";
 import type { Gig, PriceType, Tag } from "@/lib/database.types";
+import Icon from "@/components/Icon";
 
 interface CreationRequest {
   p_request_id: string; p_service_type: string; p_title: string; p_description: string;
@@ -183,7 +184,7 @@ function PostGigForm() {
     }, () => { setLocationNotice("We couldn't access your location. Enter your area manually."); setLocating(false); },
     { timeout: 10000, maximumAge: 60000 });
   }
-  const input = "w-full rounded-lg border border-neutral-300 px-3 py-2";
+  const input = "w-full rounded-xl border border-neutral-300 px-3 py-2";
 
   useEffect(() => {
     if (!helperId && !helperUsername) return;
@@ -314,8 +315,8 @@ function PostGigForm() {
   const categoryChoices = requestedHelper ? requestedHelper.categories : SERVICE_TYPES;
   if (lookup.state === "error") {
     return <div className="mx-auto max-w-lg space-y-4">
-      <h1 className="text-xl font-semibold">Post a Gig</h1>
-      <p role="alert" className="rounded-lg bg-red-50 px-3 py-2.5 text-sm text-red-700">{lookup.message}</p>
+      <h1 className="text-2xl font-extrabold">Post a Gig</h1>
+      <p role="alert" className="rounded-xl bg-red-50 px-3 py-2.5 text-sm text-red-700">{lookup.message}</p>
       <Link href="/find-helper" className="touch-link block text-sm font-medium text-brand-700">← Back to Find a Helper</Link>
       <Link href="/post" className="touch-link block text-sm font-medium text-brand-700">Post a public gig instead</Link>
     </div>;
@@ -323,23 +324,23 @@ function PostGigForm() {
   if (lookup.state === "loading") return <p className="text-neutral-500">Loading the helper…</p>;
   if (repost.state === "error") {
     return <div className="mx-auto max-w-lg space-y-4">
-      <h1 className="text-xl font-semibold">Repost a gig</h1>
-      <p role="alert" className="rounded-lg bg-red-50 px-3 py-2.5 text-sm text-red-700">{repost.message}</p>
+      <h1 className="text-2xl font-extrabold">Repost a gig</h1>
+      <p role="alert" className="rounded-xl bg-red-50 px-3 py-2.5 text-sm text-red-700">{repost.message}</p>
       <Link href="/my-gigs" className="touch-link block text-sm font-medium text-brand-700">← Back to My Gigs</Link>
       <Link href="/post" className="touch-link block text-sm font-medium text-brand-700">Post a new gig from scratch</Link>
     </div>;
   }
   if (repost.state === "loading") return <p className="text-neutral-500">Loading the gig…</p>;
   return <div className="mx-auto max-w-lg space-y-4">
-    <h1 className="text-xl font-semibold">{requestedHelper ? `Post a Gig for @${requestedHelper.username}` : "Post a Gig"}</h1>
+    <h1 className="text-2xl font-extrabold">{requestedHelper ? `Post a Gig for @${requestedHelper.username}` : "Post a Gig"}</h1>
     {requestedHelper && (
-      <div role="note" className="space-y-1 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2.5 text-sm text-brand-900">
+      <div role="note" className="space-y-1 rounded-xl border border-brand-200 bg-brand-50 px-3 py-2.5 text-sm text-brand-900">
         <p><strong>Private request.</strong> Only @{requestedHelper.username} will see it, and it isn&apos;t posted publicly or shown in Browse.</p>
         {!retained && <Link href="/post" className="touch-link font-medium underline">Post a public gig instead</Link>}
       </div>
     )}
     {repost.state === "ready" && (
-      <div role="note" className="space-y-1 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2.5 text-sm text-brand-900">
+      <div role="note" className="space-y-1 rounded-xl border border-brand-200 bg-brand-50 px-3 py-2.5 text-sm text-brand-900">
         <p><strong>Reposting &ldquo;{repost.title}&rdquo; as a new gig.</strong> The details are copied below. Choose a new date and check everything before you post. The original gig stays as it is.</p>
         {!requestedHelper && <p>The repost is a regular gig that every helper can see.</p>}
       </div>
@@ -397,8 +398,8 @@ function PostGigForm() {
       )}
       <label className="block">Expected Date/Time<input type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} className={input} /></label>
       {!locationExpanded ? (
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-neutral-300 bg-white px-3 py-2.5">
-          <p className="text-sm text-neutral-700">📍 {locationText}</p>
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-neutral-300 bg-white px-3 py-2.5">
+          <p className="text-sm text-neutral-700"><Icon name="pin" className="inline h-4 w-4 align-text-bottom" /> {locationText}</p>
           <button type="button" onClick={() => setLocationExpanded(true)}
             className="shrink-0 text-sm font-medium text-brand-700 hover:underline">
             Update location
@@ -420,7 +421,7 @@ function PostGigForm() {
             className={input} />
           {locationSearching && <p role="status" className="text-sm text-neutral-500">Searching…</p>}
           {locationChoices.length > 0 && (
-            <ul aria-label="Matching areas" className="divide-y divide-neutral-100 overflow-hidden rounded-lg border border-neutral-200 bg-white">
+            <ul aria-label="Matching areas" className="divide-y divide-neutral-100 overflow-hidden rounded-xl border border-neutral-200 bg-white">
               {locationChoices.map((match) => (
                 <li key={`${match.label}|${match.lat}|${match.lng}`}>
                   <button type="button" onClick={() => chooseLocationMatch(match)} className="min-h-11 w-full px-3 py-2 text-left text-sm hover:bg-neutral-50">{match.areaLabel}</button>
@@ -428,7 +429,7 @@ function PostGigForm() {
               ))}
             </ul>
           )}
-          <button type="button" onClick={useMyLocation} className="text-sm font-medium text-brand-700">{locating ? "Locating…" : "📍 Use my current location"}</button>
+          <button type="button" onClick={useMyLocation} className="text-sm font-medium text-brand-700">{locating ? "Locating…" : <><Icon name="pin" className="inline h-4 w-4 align-text-bottom" /> Use my current location</>}</button>
           {locationNotice && <p role="status" className="text-sm text-neutral-600">{locationNotice}</p>}
           {coordinates.lat != null && coordinates.lng != null && (
             <div className="space-y-2">
@@ -444,15 +445,15 @@ function PostGigForm() {
     </fieldset>
     {error && <p role="alert" className="text-red-600">{error}</p>}
     <div className="flex flex-wrap gap-3">
-      {!retained && <button onClick={() => void submit("draft")} disabled={submitting} className="flex-1 rounded-lg border py-2.5 disabled:opacity-60">Save as Draft</button>}
+      {!retained && <button onClick={() => void submit("draft")} disabled={submitting} className="flex-1 rounded-xl border py-2.5 disabled:opacity-60">Save as Draft</button>}
       {/* Find Help Profile Swiping v1.0: only for an ordinary public gig -- a private request to
           one named helper (/post?helper=<username>) already has its own addressed flow. */}
       {!retained && !requestedHelper && (
-        <button onClick={() => void submit("find_helpers")} disabled={submitting} className="flex-1 rounded-lg border border-brand-600 py-2.5 text-brand-700 disabled:opacity-60">
+        <button onClick={() => void submit("find_helpers")} disabled={submitting} className="flex-1 rounded-xl border border-brand-600 py-2.5 text-brand-700 disabled:opacity-60">
           {submitting ? "Saving…" : "Save & Find Helpers Nearby"}
         </button>
       )}
-      <button onClick={() => void submit("publish")} disabled={submitting} className="flex-1 rounded-lg bg-brand-600 py-2.5 text-white disabled:opacity-60">{submitting ? (requestedHelper ? "Sending…" : "Posting…") : retained ? "Retry previous request" : requestedHelper ? "Send request" : "Post Gig"}</button>
+      <button onClick={() => void submit("publish")} disabled={submitting} className="flex-1 rounded-xl bg-brand-600 py-2.5 text-white disabled:opacity-60">{submitting ? (requestedHelper ? "Sending…" : "Posting…") : retained ? "Retry previous request" : requestedHelper ? "Send request" : "Post Gig"}</button>
     </div>
   </div>;
 }

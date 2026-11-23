@@ -39,7 +39,7 @@ export default function ProfileSetup({ profile, onFinish }: { profile: Profile; 
   const pending = useRef(false);
   const catalog = [...new Set<string>([...SERVICE_TYPES, ...profile.skills, ...profile.services])];
   const mapCoords = approximateCoordinates(coords.lat, coords.lng);
-  const input = "w-full rounded-lg border border-neutral-300 px-3 py-2";
+  const input = "w-full rounded-xl border border-neutral-300 px-3 py-2";
   const toggle = (values: string[], value: string) => values.includes(value) ? values.filter((item) => item !== value) : [...values, value];
 
   useEffect(() => {
@@ -174,7 +174,7 @@ export default function ProfileSetup({ profile, onFinish }: { profile: Profile; 
     }
     finally { pending.current = false; setBusy(false); }
   }
-  return <div className="space-y-4 rounded-lg border border-neutral-200 bg-white p-4">
+  return <div className="space-y-4 rounded-xl border border-neutral-200 bg-white p-4">
     <p className="text-sm text-neutral-500">Step {step + 1} of 3: {['Basic profile', 'Private address / location', 'Skills & services'][step]}</p>
     <fieldset disabled={busy || locating} className="space-y-4">
       {step === 0 && <>
@@ -194,7 +194,7 @@ export default function ProfileSetup({ profile, onFinish }: { profile: Profile; 
         {searchingArea && <p role="status" className="text-sm text-neutral-500">Finding neighborhoods and addresses…</p>}
         {areaError && <p role="status" className="text-sm text-red-600">{areaError}</p>}
         {areaMatches.length > 0 && (
-          <ul aria-label="Matching neighborhoods and addresses" className="divide-y divide-neutral-100 overflow-hidden rounded-xl border border-neutral-200">
+          <ul aria-label="Matching neighborhoods and addresses" className="divide-y divide-neutral-100 overflow-hidden rounded-2xl border border-neutral-200">
             {areaMatches.map((match, index) => <li key={index}>
               <button type="button" onClick={() => chooseArea(match)} className="w-full px-4 py-3 text-left text-sm hover:bg-brand-50 focus:bg-brand-50">{match.label}</button>
             </li>)}
@@ -203,7 +203,7 @@ export default function ProfileSetup({ profile, onFinish }: { profile: Profile; 
         <p className="text-xs text-neutral-500">Select a match. Include your city for more accurate neighborhood results. Location data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer" className="underline">OpenStreetMap contributors</a>.</p>
         <p className="text-sm text-neutral-500">This location stays private. Public gigs use a separate general area; never enter a street address on a gig.</p>
         <button type="button" onClick={locate} className="text-brand-700">{locating ? "Locating…" : "Use my current location"}</button>
-        {mapCoords.lat != null && mapCoords.lng != null && <div className="overflow-hidden rounded-xl border border-neutral-200">
+        {mapCoords.lat != null && mapCoords.lng != null && <div className="overflow-hidden rounded-2xl border border-neutral-200">
           <iframe title="Map of selected neighborhood" className="h-56 w-full border-0" loading="lazy" referrerPolicy="no-referrer"
             src={`https://www.openstreetmap.org/export/embed.html?bbox=${encodeURIComponent([mapCoords.lng - 0.04, mapCoords.lat - 0.025, mapCoords.lng + 0.04, mapCoords.lat + 0.025].join(","))}&layer=mapnik&marker=${encodeURIComponent(`${mapCoords.lat},${mapCoords.lng}`)}`} />
           <p className="px-3 py-2 text-sm text-neutral-500">Selected area — approximate map location.</p>
@@ -234,15 +234,15 @@ export default function ProfileSetup({ profile, onFinish }: { profile: Profile; 
     {error && <p role="alert" className="text-red-600">{error}</p>}
     {message && <p role="status" className="text-brand-700">{message}</p>}
     <div className="flex gap-3">
-      {step > 0 && <button disabled={busy || locating} onClick={() => { setStep(step - 1); setError(null); }} className="rounded-lg border px-4 py-2">Back</button>}
-      <button disabled={busy || locating || (step === 1 && searchingArea)} onClick={step < 2 ? nextStep : save} className="rounded-lg bg-brand-600 px-4 py-2 text-white disabled:opacity-60">{busy ? "Saving…" : step < 2 ? "Continue" : "Save profile & continue"}</button>
+      {step > 0 && <button disabled={busy || locating} onClick={() => { setStep(step - 1); setError(null); }} className="rounded-xl border px-4 py-2">Back</button>}
+      <button disabled={busy || locating || (step === 1 && searchingArea)} onClick={step < 2 ? nextStep : save} className="rounded-xl bg-brand-600 px-4 py-2 text-white disabled:opacity-60">{busy ? "Saving…" : step < 2 ? "Continue" : "Save profile & continue"}</button>
     </div>
     {step === 2 && sheetSkills.length > 0 && (
       <OptionSheet title={sheetScope === ALL_SKILLS ? "Add specializations" : (SPECIALIZATION_PROMPTS[sheetSkills[0]] ?? `What kind of ${sheetSkills[0].toLowerCase()}?`)}
         onClose={() => setSheetScope(null)}
         footer={<div className="flex items-center justify-between gap-3">
           <p className="text-sm text-neutral-500">{chosenSpecializations.filter(({ skill }) => sheetSkills.includes(skill)).length} selected</p>
-          <button type="button" onClick={() => setSheetScope(null)} className="rounded-lg bg-brand-600 px-6 py-2.5 font-medium text-white hover:bg-brand-700">Done</button>
+          <button type="button" onClick={() => setSheetScope(null)} className="rounded-xl bg-brand-600 px-6 py-2.5 font-medium text-white hover:bg-brand-700">Done</button>
         </div>}>
         {sheetSkills.map((skill) => {
           const selectedIds = specializationTags[skill] ?? [];
@@ -253,7 +253,7 @@ export default function ProfileSetup({ profile, onFinish }: { profile: Profile; 
               const atLimit = !selected && selectedIds.length >= MAX_PROFILE_TAGS;
               return <button key={tag.id} type="button" role="checkbox" aria-checked={selected} disabled={atLimit}
                 onClick={() => toggleSpecialization(skill, tag.id)}
-                className="flex min-h-12 w-full items-center justify-between gap-3 rounded-lg px-3 text-left text-sm text-neutral-900 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-50">
+                className="flex min-h-12 w-full items-center justify-between gap-3 rounded-xl px-3 text-left text-sm text-neutral-900 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-50">
                 <span>{tag.name}</span>
                 <span aria-hidden="true" className={`flex h-6 w-6 items-center justify-center rounded-md border text-sm ${selected ? "border-brand-600 bg-brand-600 text-white" : "border-neutral-300 text-transparent"}`}>✓</span>
               </button>;

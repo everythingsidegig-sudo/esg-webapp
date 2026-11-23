@@ -17,7 +17,7 @@ export function CategoryList({ title, selected, setSelected, otherText, setOther
   title: string; selected: string[]; setSelected: (next: string[]) => void;
   otherText: string; setOtherText: (next: string) => void;
 }) {
-  const input = "w-full rounded-lg border border-neutral-300 px-3 py-2";
+  const input = "w-full rounded-xl border border-neutral-300 px-3 py-2";
   return (
     <fieldset className="space-y-2">
       {title && <legend className="mb-1 font-medium">{title}</legend>}

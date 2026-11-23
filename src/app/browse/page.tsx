@@ -217,22 +217,22 @@ function BrowseInner() {
   }, [lastRejected]);
 
   return (
-    <div className="space-y-5">
-      <h1 className="text-xl font-semibold">Gigs Nearby</h1>
+    <div className="space-y-3">
+      <h1 className="text-2xl font-extrabold">Gigs Nearby</h1>
 
       <AreaPicker area={area} onChange={setArea} radiusKm={radiusKm} />
 
       <div className="flex flex-wrap gap-3">
         <fieldset className="min-w-0 w-full">
-          <legend className="text-sm font-medium">Service category</legend>
-          <div className="mt-2 flex flex-wrap gap-2">
+          <legend className="sr-only">Service category</legend>
+          <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&>*]:shrink-0 [&>*]:whitespace-nowrap">
             {SERVICE_TYPES.map((s) => <SelectionChip key={s} selected={service === s} onClick={() => { setService(s); setSelectedTagIds([]); }}>{s}</SelectionChip>)}
           </div>
         </fieldset>
         {categoryTags.length > 0 && (
           <fieldset className="min-w-0 w-full">
-            <legend className="text-sm font-medium">Tags</legend>
-            <div className="mt-2 flex flex-wrap gap-2">
+            <legend className="sr-only">Tags</legend>
+            <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&>*]:shrink-0 [&>*]:whitespace-nowrap">
               {categoryTags.map((tag) => (
                 <SelectionChip key={tag.id} selected={selectedTagIds.includes(tag.id)}
                   onClick={() => setSelectedTagIds((current) => current.includes(tag.id) ? current.filter((id) => id !== tag.id) : [...current, tag.id])}>
@@ -275,12 +275,12 @@ function BrowseInner() {
       )}
 
       {toast && (
-        <div role="status" className={`fixed inset-x-4 bottom-4 z-50 mx-auto max-w-md rounded-lg px-4 py-3 text-center text-sm font-medium text-white shadow-lg ${toastIsError ? "bg-red-600" : "bg-neutral-900"}`}>
+        <div role="status" className={`fixed inset-x-4 bottom-4 z-50 mx-auto max-w-md rounded-xl px-4 py-3 text-center text-sm font-medium text-white shadow-lg ${toastIsError ? "bg-red-600" : "bg-neutral-900"}`}>
           {toast}
         </div>
       )}
       {lastRejected && !toast && (
-        <div role="status" className="fixed inset-x-4 bottom-4 z-50 mx-auto flex max-w-md items-center justify-between gap-3 rounded-lg bg-neutral-900 px-4 py-3 text-sm text-white shadow-lg">
+        <div role="status" className="fixed inset-x-4 bottom-4 z-50 mx-auto flex max-w-md items-center justify-between gap-3 rounded-xl bg-neutral-900 px-4 py-3 text-sm text-white shadow-lg">
           <span>Skipped.</span>
           <button type="button" onClick={undoReject} className="font-semibold text-brand-300 hover:underline">Undo</button>
         </div>

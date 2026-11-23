@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Icon from "@/components/Icon";
 
 // A person's avatar. When they have a photo it is tappable and opens full size (tap anywhere,
 // or press Escape, to close) -- the same pattern as the gig photo in FullGigView. Without a
@@ -21,7 +22,7 @@ export default function ProfilePhoto({ url, username, sizeClass, placeholderText
   }, [expanded]);
 
   if (!url) {
-    return <div className={`flex ${sizeClass} shrink-0 items-center justify-center rounded-full bg-neutral-200 ${placeholderTextClass}`}>👤</div>;
+    return <div className={`flex ${sizeClass} shrink-0 items-center justify-center rounded-full bg-neutral-200 ${placeholderTextClass}`}><Icon name="profile" className="h-1/2 w-1/2 text-neutral-500" /></div>;
   }
   return (
     <>
@@ -31,7 +32,7 @@ export default function ProfilePhoto({ url, username, sizeClass, placeholderText
       {expanded && (
         <div role="dialog" aria-label={`@${username}'s photo`} className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
           onClick={() => setExpanded(false)}>
-          <img src={url} alt={`@${username}`} className="max-h-full max-w-full rounded-lg object-contain" />
+          <img src={url} alt={`@${username}`} className="max-h-full max-w-full rounded-xl object-contain" />
         </div>
       )}
     </>

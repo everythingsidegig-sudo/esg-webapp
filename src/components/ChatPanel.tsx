@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { CURRENCY, formatMoney } from "@/lib/money";
 import { MAX_PRICE_ROUNDS, negotiationActionError, negotiationUnavailable, negotiationView, proposalAmountError, proposalStatus } from "@/lib/negotiation";
 import type { ChatMessage, PriceProposal } from "@/lib/database.types";
+import Icon from "@/components/Icon";
 
 // Messages within this gap from the same person read as one group (one time stamp, tight spacing).
 const GROUP_GAP_MS = 5 * 60 * 1000;
@@ -56,7 +57,7 @@ export default function ChatPanel({
   // The server has not been upgraded for price negotiation yet (migration 0021): hide the controls
   // instead of showing buttons that cannot work. The conversation itself is unaffected.
   const [unavailable, setUnavailable] = useState(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const logRef = useRef<HTMLDivElement>(null);
 
   // Opening the conversation marks the other party's messages as read (the only
   // column clients may update on chat_messages), which drives the Messages badge.
@@ -131,7 +132,10 @@ export default function ChatPanel({
   ].sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    // Scroll only the conversation box itself. Scrolling an element into view also scrolls the whole page, which on opening a gig
+    // threw the page to the bottom of the chat and left the message box under the bottom bar.
+    const log = logRef.current;
+    log?.scrollTo?.({ top: log.scrollHeight, behavior: "smooth" });
   }, [timeline.length]);
 
   async function send() {
@@ -200,10 +204,10 @@ export default function ChatPanel({
 
   return (
     <div className="flex h-[30rem] max-h-[80vh] flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-neutral-50 shadow-sm">
-      <div role="log" aria-label="Conversation" aria-live="polite" className="flex-1 overflow-y-auto px-4 py-4">
+      <div ref={logRef} role="log" aria-label="Conversation" aria-live="polite" className="flex-1 overflow-y-auto px-4 py-4">
         {timeline.length === 0 && (
           <div className="flex h-full flex-col items-center justify-center gap-1 text-center">
-            <span aria-hidden="true" className="text-3xl">💬</span>
+            <Icon name="chat" className="h-8 w-8 text-brand-600" />
             <p className="text-sm font-medium text-neutral-700">No messages yet</p>
             <p className="text-xs text-neutral-500">Say hello to get the conversation started.</p>
           </div>
@@ -298,16 +302,15 @@ export default function ChatPanel({
             </div>
           );
         })}
-        <div ref={bottomRef} />
       </div>
 
       {open && (
         <div className="border-t border-neutral-200 bg-white px-3 pt-3">
-          {priceError && <p role="alert" className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{priceError}</p>}
+          {priceError && <p role="alert" className="mb-2 rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700">{priceError}</p>}
           {!priceFormOpen && view.canPropose && (
             <button type="button" onClick={() => { setPriceFormOpen(true); setPriceError(null); }}
               className="flex min-h-11 w-full items-center justify-center gap-2 rounded-full border border-brand-600 px-4 text-sm font-semibold text-brand-700 transition hover:bg-brand-50">
-              <span aria-hidden="true">💶</span>
+              <Icon name="cash" className="inline h-4 w-4 align-text-bottom" />
               {view.pendingFromOther ? "Counter with another price" : "Propose a new price"}
               <span className="text-xs font-normal text-neutral-500">({view.remaining} of {MAX_PRICE_ROUNDS} left)</span>
             </button>
@@ -320,7 +323,7 @@ export default function ChatPanel({
               <input id="new-price" inputMode="decimal" autoComplete="off" value={priceDraft}
                 onChange={(e) => { setPriceDraft(e.target.value); setPriceError(null); }}
                 placeholder={String(agreedAmount)}
-                className="min-h-11 w-full rounded-xl border border-neutral-300 bg-neutral-50 px-4 text-[15px] outline-none transition focus:border-brand-500 focus:bg-white focus:ring-2 focus:ring-brand-100" />
+                className="min-h-11 w-full rounded-2xl border border-neutral-300 bg-neutral-50 px-4 text-[15px] outline-none transition focus:border-brand-500 focus:bg-white focus:ring-2 focus:ring-brand-100" />
               <div className="flex gap-2">
                 <button type="submit" disabled={!priceDraft.trim() || !!priceBusy} className={`${button} flex-1 bg-brand-600 text-white shadow-sm hover:bg-brand-700`}>
                   {priceBusy === "propose" ? "Sending…" : "Send proposal"}
@@ -367,7 +370,7 @@ export default function ChatPanel({
         </form>
       ) : (
         <div className="flex items-center justify-center gap-1.5 border-t border-neutral-200 bg-neutral-100 px-3 py-2.5 text-xs text-neutral-500">
-          <span aria-hidden="true">🔒</span> This conversation is read-only now.
+          <Icon name="lock" className="inline h-4 w-4 align-text-bottom" /> This conversation is read-only now.
         </div>
       )}
     </div>

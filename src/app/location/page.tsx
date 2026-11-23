@@ -11,6 +11,7 @@ import { approximateCoordinates, safeNext, setupDestination } from "@/lib/journe
 import { LOCATION_KEY, loadJourneyLocation, reverseGeocodeGeneralArea } from "@/lib/location";
 import { useAuth } from "@/lib/auth-context";
 import { createClient } from "@/lib/supabase/client";
+import Icon from "@/components/Icon";
 
 function LocationEntryInner({ next }: { next: string | null }) {
   const router = useRouter();
@@ -220,7 +221,7 @@ function LocationEntryInner({ next }: { next: string | null }) {
         disabled={locating}
         className="touch-control w-full bg-brand-700 px-4 font-semibold text-white shadow-sm transition hover:bg-brand-800 disabled:cursor-wait disabled:opacity-60"
       >
-        {locating ? "Finding your location…" : "📍 Use My Location"}
+        {locating ? "Finding your location…" : <><Icon name="pin" className="mr-1 inline h-5 w-5 align-text-bottom" />Use My Location</>}
       </button>
 
       <div className="my-6 flex items-center gap-3 text-xs font-medium uppercase tracking-wider text-neutral-400">
@@ -249,7 +250,7 @@ function LocationEntryInner({ next }: { next: string | null }) {
       />
       {(lookingUpZip || searching) && <p role="status" className="mt-3 text-sm text-neutral-500">{lookingUpZip ? "Finding postcode…" : "Searching…"}</p>}
       {choices.length > 0 && (
-        <ul aria-label="Matching areas" className="mt-3 divide-y divide-neutral-100 overflow-hidden rounded-xl border border-neutral-200 bg-white">
+        <ul aria-label="Matching areas" className="mt-3 divide-y divide-neutral-100 overflow-hidden rounded-2xl border border-neutral-200 bg-white">
           {choices.map((match) => (
             <li key={`${match.label}|${match.lat}|${match.lng}`}>
               <button type="button" onClick={() => chooseMatch(match)} className="min-h-11 w-full px-3 py-2 text-left text-sm hover:bg-neutral-50">{match.areaLabel}</button>
@@ -260,7 +261,7 @@ function LocationEntryInner({ next }: { next: string | null }) {
       {coords && (
         <div className="mt-4 space-y-2">
           <MapPicker lat={coords.lat} lng={coords.lng} onPick={(point) => { void pinMoved(point); }} />
-          <p role="status" className="rounded-lg bg-white px-3 py-2 text-sm text-neutral-600">{zipArea ?? locationText} — approximate area</p>
+          <p role="status" className="rounded-xl bg-white px-3 py-2 text-sm text-neutral-600">{zipArea ?? locationText} — approximate area</p>
         </div>
       )}
       <p className="mt-2 text-xs leading-5 text-neutral-400">
@@ -269,7 +270,7 @@ function LocationEntryInner({ next }: { next: string | null }) {
 
       <p className="mt-4 text-xs leading-5 text-neutral-500">Use a general area, not your street address. Current-location coordinates are rounded before use.</p>
 
-      {error && <p role="alert" className="mt-4 rounded-xl bg-red-50 px-3 py-2.5 text-sm text-red-700">{error}</p>}
+      {error && <p role="alert" className="mt-4 rounded-2xl bg-red-50 px-3 py-2.5 text-sm text-red-700">{error}</p>}
 
       <button
         onClick={continueJourney}

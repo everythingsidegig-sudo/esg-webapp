@@ -1,5 +1,5 @@
-// Landing / Home "How it works": the same three steps for people who post and people who help.
-// Illustrations are inline SVG so they render crisply at any size and follow the brand palette.
+// Landing / Home "How it Works": the same three steps for people who post and people who help, as a
+// vertical list (illustration in a light-purple rounded square, numbered bold title, dark-gray description).
 const stroke = { fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
 function ClipboardIcon() {
@@ -46,18 +46,16 @@ const STEPS = [
 
 export default function HowItWorks() {
   return (
-    <section aria-label="How it works" className="rounded-2xl bg-white p-5 shadow-sm">
-      <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-500">How it works</h2>
-      <ol className="mt-4 grid grid-cols-[1fr_auto_1fr_auto_1fr] items-start gap-x-1 text-center">
+    <section aria-label="How it works" className="rounded-3xl border border-neutral-200 bg-white p-5 shadow-sm">
+      <h2 className="text-xl font-extrabold text-neutral-900">How it Works</h2>
+      <ol className="mt-4 space-y-4">
         {STEPS.map((step, index) => (
-          <li key={step.title} className="contents">
-            <div className="flex flex-col items-center gap-1.5">
-              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-100 text-sm font-bold text-brand-800">{index + 1}</span>
-              {step.icon}
-              <h3 className="text-[0.95rem] font-bold leading-tight">{step.title}</h3>
-              <p className="text-xs leading-snug text-neutral-500">{step.text}</p>
+          <li key={step.title} className="flex items-center gap-4">
+            <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-brand-100">{step.icon}</span>
+            <div>
+              <h3 className="text-base font-bold text-neutral-900">{index + 1}. {step.title}</h3>
+              <p className="text-neutral-700">{step.text}</p>
             </div>
-            {index < STEPS.length - 1 && <span aria-hidden="true" className="mt-12 text-xl font-bold text-brand-600">→</span>}
           </li>
         ))}
       </ol>

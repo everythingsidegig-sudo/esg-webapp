@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/lib/auth-context";
+import Icon from "@/components/Icon";
 
 // Header entry to the Messages inbox. Unread = messages from the other party
 // that haven't been opened yet (RLS already limits rows to the user's own gigs).
@@ -41,11 +42,11 @@ export default function MessagesLink() {
       href="/messages"
       aria-label={unread > 0 ? `Messages, ${unread} unread` : "Messages"}
       aria-current={pathname === "/messages" ? "page" : undefined}
-      className="relative flex h-11 w-11 items-center justify-center rounded-full text-xl hover:bg-neutral-100"
+      className="relative flex h-11 w-11 items-center justify-center rounded-full text-neutral-800 hover:bg-neutral-100"
     >
-      <span aria-hidden="true">💬</span>
+      <Icon name="chat" className="h-6 w-6" />
       {unread > 0 && (
-        <span aria-hidden="true" className="absolute right-0.5 top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-xs text-white">
+        <span aria-hidden="true" className="absolute -right-0.5 -top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-xs font-bold text-white ring-2 ring-white">
           {unread > 9 ? "9+" : unread}
         </span>
       )}

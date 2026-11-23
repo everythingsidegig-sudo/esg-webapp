@@ -79,7 +79,7 @@ function SignUpInner() {
   if (sent) {
     return (
       <div className="mx-auto max-w-md space-y-3 text-center">
-        <h1 className="text-xl font-semibold">Check Your Email</h1>
+        <h1 className="text-2xl font-extrabold">Check Your Email</h1>
         <p className="text-sm text-neutral-600">Verification link sent to {email.trim()}.</p>
         <p className="text-sm text-neutral-600">Click the link to verify your email, then continue registration at Username.</p>
         <button disabled={submitting} onClick={() => void resend()} className="block w-full text-brand-700">
@@ -93,7 +93,7 @@ function SignUpInner() {
 
   return (
     <form onSubmit={handleSubmit} className="mx-auto max-w-md space-y-4">
-      <h1 className="text-xl font-semibold">Create Account</h1>
+      <h1 className="text-2xl font-extrabold">Create Account</h1>
       <div>
         <label htmlFor="signup-email" className="mb-1 block text-sm font-medium">Email Address</label>
         <input
@@ -103,7 +103,7 @@ function SignUpInner() {
           required
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          className="w-full rounded-lg border border-neutral-300 px-3 py-2"
+          className="w-full rounded-xl border border-neutral-300 px-3 py-2"
         />
       </div>
 
@@ -121,7 +121,7 @@ function SignUpInner() {
       <button
         type="submit"
         disabled={submitting}
-        className="w-full rounded-lg bg-brand-600 py-2.5 font-medium text-white hover:bg-brand-700 disabled:opacity-60"
+        className="w-full rounded-xl bg-brand-600 py-2.5 font-medium text-white hover:bg-brand-700 disabled:opacity-60"
       >
         {submitting ? "Sending…" : "Send Verification Link"}
       </button>

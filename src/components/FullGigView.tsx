@@ -9,6 +9,7 @@ import { priceLabel } from "@/lib/helper-request";
 import { gigTagNames } from "@/lib/tags";
 import { resolveSwipe } from "@/lib/swipe";
 import type { GigWithTags, PublicProfile } from "@/lib/database.types";
+import Icon from "@/components/Icon";
 
 type PosterInfo = { profile: PublicProfile | null; womPercentage: number | null; gigsPosted: number | null };
 
@@ -101,21 +102,21 @@ export default function FullGigView({
             <span className="text-xs font-medium uppercase tracking-wide text-brand-700">{gig.service_type}</span>
             <h2 className="text-xl font-semibold">{gig.title}</h2>
           </div>
-          <button type="button" onClick={onClose} aria-label="Back to list" className="shrink-0 rounded-lg border border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50">
+          <button type="button" onClick={onClose} aria-label="Back to list" className="shrink-0 rounded-xl border border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50">
             Back
           </button>
         </div>
 
         {gig.photo_url ? (
           <button type="button" onClick={() => setPhotoExpanded(true)} className="block w-full">
-            <img src={gig.photo_url} alt="" className="max-h-64 w-full rounded-lg object-cover" />
+            <img src={gig.photo_url} alt="" className="max-h-64 w-full rounded-xl object-cover" />
           </button>
         ) : (
-          <div className="flex h-32 items-center justify-center rounded-lg bg-neutral-100 text-sm text-neutral-400">No photo</div>
+          <div className="flex h-32 items-center justify-center rounded-xl bg-neutral-100 text-sm text-neutral-400">No photo</div>
         )}
         {photoExpanded && gig.photo_url && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4" onClick={() => setPhotoExpanded(false)}>
-            <img src={gig.photo_url} alt="" className="max-h-full max-w-full rounded-lg object-contain" />
+            <img src={gig.photo_url} alt="" className="max-h-full max-w-full rounded-xl object-contain" />
           </div>
         )}
 
@@ -125,9 +126,9 @@ export default function FullGigView({
         </section>
 
         <section aria-label="Compensation" className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
-          <span>💵 {formatMoney(gig.amount)} · {priceLabel(gig.price_type)}</span>
-          <span>📍 {gig.location_text}</span>
-          <span>🗓️ {gig.scheduled_at ? new Date(gig.scheduled_at).toLocaleString() : "Flexible"} · Duration: Not available</span>
+          <span><Icon name="cash" className="inline h-4 w-4 align-text-bottom" /> {formatMoney(gig.amount)} · {priceLabel(gig.price_type)}</span>
+          <span><Icon name="pin" className="inline h-4 w-4 align-text-bottom" /> {gig.location_text}</span>
+          <span><Icon name="calendar" className="inline h-4 w-4 align-text-bottom" /> {gig.scheduled_at ? new Date(gig.scheduled_at).toLocaleString() : "Flexible"} · Duration: Not available</span>
         </section>
 
         {tags.length > 0 && (
@@ -137,7 +138,7 @@ export default function FullGigView({
           </section>
         )}
 
-        <section aria-label="Posted by" className="rounded-lg bg-neutral-50 p-3 text-sm">
+        <section aria-label="Posted by" className="rounded-xl bg-neutral-50 p-3 text-sm">
           <h3 className="font-medium text-neutral-700">Posted by</h3>
           {!poster ? (
             <p className="text-neutral-500">Loading…</p>
@@ -153,8 +154,8 @@ export default function FullGigView({
         </section>
 
         <div className="flex gap-2 pt-1">
-          <button type="button" disabled={disabled} onClick={onReject} className="flex-1 rounded-lg border border-neutral-300 bg-white py-2.5 font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-60">Reject</button>
-          <button type="button" disabled={disabled} onClick={onAccept} className="flex-1 rounded-lg bg-brand-600 py-2.5 font-medium text-white disabled:opacity-60">Accept</button>
+          <button type="button" disabled={disabled} onClick={onReject} className="flex-1 rounded-xl border border-neutral-300 bg-white py-2.5 font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-60">Reject</button>
+          <button type="button" disabled={disabled} onClick={onAccept} className="flex-1 rounded-xl bg-brand-600 py-2.5 font-medium text-white disabled:opacity-60">Accept</button>
         </div>
       </div>
     </div>

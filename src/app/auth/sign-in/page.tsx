@@ -80,10 +80,10 @@ function SignInInner() {
 
   return (
     <form onSubmit={handleSubmit} className="mx-auto max-w-md space-y-4">
-      <h1 className="text-xl font-semibold">Sign In</h1>
+      <h1 className="text-2xl font-extrabold">Sign In</h1>
 
       {helperName && (
-        <p role="status" className="rounded-lg bg-brand-50 px-3 py-2 text-sm text-brand-900">
+        <p role="status" className="rounded-xl bg-brand-50 px-3 py-2 text-sm text-brand-900">
           Sign in to view @{helperName}&apos;s profile.{" "}
           <Link href={findHelperHref(helperCategory)} className="touch-link font-medium underline">Continue browsing</Link>
         </p>
@@ -100,7 +100,7 @@ function SignInInner() {
           required
           value={identifier}
           onChange={(e) => setIdentifier(e.target.value)}
-          className="w-full rounded-lg border border-neutral-300 px-3 py-2"
+          className="w-full rounded-xl border border-neutral-300 px-3 py-2"
         />
       </div>
 
@@ -117,7 +117,7 @@ function SignInInner() {
             required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="w-full rounded-lg border border-neutral-300 px-3 py-2 pr-16"
+            className="w-full rounded-xl border border-neutral-300 px-3 py-2 pr-16"
           />
           <button
             type="button"
@@ -135,7 +135,7 @@ function SignInInner() {
       <button
         type="submit"
         disabled={submitting}
-        className="w-full rounded-lg bg-brand-600 py-2.5 font-medium text-white hover:bg-brand-700 disabled:opacity-60"
+        className="w-full rounded-xl bg-brand-600 py-2.5 font-medium text-white hover:bg-brand-700 disabled:opacity-60"
       >
         {submitting ? "Signing in…" : "Sign In"}
       </button>

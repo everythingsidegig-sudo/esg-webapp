@@ -77,7 +77,7 @@ function PublicProfileView({ username }: { username: string }) {
   if (!authLoading && !user) {
     return (
       <div className="mx-auto max-w-md space-y-3">
-        <h1 className="text-xl font-semibold">Sign in to view @{username}</h1>
+        <h1 className="text-2xl font-extrabold">Sign in to view @{username}</h1>
         <HelperSignInPrompt username={username} destination={helperProfileHref(username, category) ?? "/find-helper"}
           browseHref={findHelperHref(category, SERVICE_TYPES)} />
       </div>
@@ -101,7 +101,7 @@ function PublicProfileView({ username }: { username: string }) {
         {user && profile.id !== user.id && fromFinder && (
           <Link href={postRequestHref(profile.username, requestableCategories(profile.skills, SERVICE_TYPES).includes(category ?? "") ? category : null)}
             aria-label={`Post a Gig for @${profile.username}`} title="Send this helper a private request"
-            className="flex min-h-11 shrink-0 items-center rounded-lg bg-brand-600 px-4 text-sm font-semibold text-white shadow-sm hover:bg-brand-700">
+            className="flex min-h-11 shrink-0 items-center rounded-xl bg-brand-600 px-4 text-sm font-semibold text-white shadow-sm hover:bg-brand-700">
             Post a Gig
           </Link>
         )}
@@ -115,11 +115,11 @@ function PublicProfileView({ username }: { username: string }) {
       {blockError && <p role="alert" className="text-sm text-red-600">{blockError}</p>}
 
       <div className="grid grid-cols-2 gap-3 text-center">
-        <div className="rounded-lg border border-neutral-200 bg-white p-3">
+        <div className="rounded-xl border border-neutral-200 bg-white p-3">
           <div className="text-lg font-semibold">{womPercentage != null ? `${womPercentage}%` : "—"}</div>
           <div className="text-xs text-neutral-500">WOM% ({profile.wom_count})</div>
         </div>
-        <div className="rounded-lg border border-neutral-200 bg-white p-3">
+        <div className="rounded-xl border border-neutral-200 bg-white p-3">
           <div className="text-lg font-semibold">{gigsWorked ?? "—"}</div>
           <div className="text-xs text-neutral-500">Gigs Worked</div>
         </div>
@@ -130,7 +130,7 @@ function PublicProfileView({ username }: { username: string }) {
           <h3 className="text-sm font-medium text-neutral-500">Lemon comments</h3>
           <ul className="space-y-2">
             {lemonComments.map((item, index) => (
-              <li key={`${item.created_at}-${index}`} className="rounded-lg border border-neutral-200 bg-white p-3">
+              <li key={`${item.created_at}-${index}`} className="rounded-xl border border-neutral-200 bg-white p-3">
                 <p className="whitespace-pre-wrap break-words text-sm text-neutral-800">{item.comment}</p>
                 <p className="mt-1 text-xs text-neutral-400">{new Date(item.created_at).toLocaleDateString()}</p>
               </li>
@@ -139,7 +139,7 @@ function PublicProfileView({ username }: { username: string }) {
         </section>
       )}
 
-      {profile.skills.length > 0 && (
+      {profile.skills.length > 0 && offered.length === 0 && (
         <div>
           <h3 className="mb-1 text-sm font-medium text-neutral-500">Skills</h3>
           <div className="flex flex-wrap gap-2">
